@@ -1,0 +1,8 @@
+{
+  "name": "biometric-system-software",
+  "private": true,
+  "description": "Biometric attendance — run `npm start` for local dev (see start.js)",
+  "scripts": {
+    "start": "node start.js"
+  }
+}
