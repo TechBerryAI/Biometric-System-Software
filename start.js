@@ -1,6 +1,6 @@
 /**
  * Local dev startup: backend venv + pip, Alembic migrations, frontend npm install, uvicorn + Vite.
- * Requires PostgreSQL (and Redis if you use START_CELERY=1) — configure backend/.env first.
+ * Requires PostgreSQL (and Redis if you use START_CELERY=1) � configure backend/.env first.
  *
  * Usage: node start.js
  * Env:   PYTHON=path\to\python.exe  START_CELERY=1
@@ -44,12 +44,29 @@ function run(cmd, args, opts = {}) {
   return r;
 }
 
+/** Run npm reliably on Windows without spawn EINVAL / shell deprecation warnings. */
+function runNpm(args, opts = {}) {
+  if (isWin) {
+    return run("cmd.exe", ["/d", "/s", "/c", "npm", ...args], {
+      ...opts,
+      shell: false,
+    });
+  }
+  return run("npm", args, { ...opts, shell: false });
+}
+
+function hasViteBinary() {
+  const viteCmd = path.join(FRONTEND, "node_modules", ".bin", "vite.cmd");
+  const viteBin = path.join(FRONTEND, "node_modules", ".bin", "vite");
+  return fs.existsSync(viteCmd) || fs.existsSync(viteBin);
+}
+
 function ensureBackendEnv() {
   const envPath = path.join(BACKEND, ".env");
   const example = path.join(BACKEND, ".env.example");
   if (!fs.existsSync(envPath) && fs.existsSync(example)) {
     fs.copyFileSync(example, envPath);
-    log("Created backend/.env from .env.example — edit DATABASE_URL (password) before continuing.");
+    log("Created backend/.env from .env.example � edit DATABASE_URL (password) before continuing.");
   }
 }
 
@@ -76,7 +93,7 @@ async function ensureVenv() {
     log("Backend virtualenv already exists");
     return;
   }
-  log("Creating backend virtualenv…");
+  log("Creating backend virtualenv...");
   const { cmd, argsPrefix } = resolvePythonLauncher();
   const args = [...argsPrefix, "-m", "venv", ".venv"];
   const r = spawn(cmd, args, { cwd: BACKEND, stdio: "inherit", shell: isWin });
@@ -91,9 +108,7 @@ function waitForExit(proc) {
   });
 }
 
-/**
- * Shell env DATABASE_URL can override backend/.env; drop so pydantic reads the file.
- */
+/** Shell env DATABASE_URL can override backend/.env; drop so pydantic reads the file. */
 function envForBackendChild(extra = {}) {
   const e = { ...process.env, PYTHONPATH: BACKEND, ...extra };
   delete e.DATABASE_URL;
@@ -102,7 +117,7 @@ function envForBackendChild(extra = {}) {
 }
 
 async function pipInstall() {
-  log("Installing Python dependencies…");
+  log("Installing Python dependencies...");
   const py = fs.existsSync(VENV_PY) ? VENV_PY : "python";
   const r = spawn(py, ["-m", "pip", "install", "-r", "requirements.txt"], {
     cwd: BACKEND,
@@ -114,7 +129,7 @@ async function pipInstall() {
 }
 
 async function alembicUpgrade() {
-  log("Running database migrations…");
+  log("Running database migrations...");
   const py = VENV_PY;
   const r = spawn(py, ["-m", "alembic", "upgrade", "head"], {
     cwd: BACKEND,
@@ -125,29 +140,30 @@ async function alembicUpgrade() {
   const code = await waitForExit(r);
   if (code !== 0) {
     warn(
-      "Alembic failed — check PostgreSQL is running, database exists, and DATABASE_URL in backend/.env is correct."
+      "Alembic failed � check PostgreSQL is running, database exists, and DATABASE_URL in backend/.env is correct."
     );
     throw new Error(`alembic upgrade failed with exit ${code}`);
   }
 }
 
 async function npmInstallFrontend() {
-  if (fs.existsSync(path.join(FRONTEND, "node_modules"))) {
-    log("Frontend node_modules present; skipping npm install");
+  const hasNodeModules = fs.existsSync(path.join(FRONTEND, "node_modules"));
+  if (hasNodeModules && hasViteBinary()) {
+    log("Frontend dependencies present; skipping npm install");
     return;
   }
-  log("Installing frontend dependencies (npm install)…");
-  const r = spawn("npm", ["install"], {
-    cwd: FRONTEND,
-    stdio: "inherit",
-    shell: isWin,
-  });
+  if (hasNodeModules && !hasViteBinary()) {
+    warn("node_modules exists but vite binary is missing � reinstalling frontend dependencies");
+  } else {
+    log("Installing frontend dependencies (npm install)...");
+  }
+  const r = runNpm(["install"], { cwd: FRONTEND });
   const code = await waitForExit(r);
   if (code !== 0) throw new Error(`npm install failed with exit ${code}`);
 }
 
 function shutdown() {
-  log("Shutting down…");
+  log("Shutting down...");
   for (const c of children) {
     try {
       if (!c.killed && c.pid) {
@@ -165,7 +181,7 @@ function shutdown() {
 }
 
 async function main() {
-  log("Biometric attendance — dev startup (local PostgreSQL)");
+  log("Biometric attendance � dev startup (local PostgreSQL)");
   process.chdir(ROOT);
 
   if (!fs.existsSync(BACKEND) || !fs.existsSync(FRONTEND)) {
@@ -179,7 +195,7 @@ async function main() {
     const raw = fs.readFileSync(envPath, "utf8");
     if (/YOUR_PASSWORD|CHANGE_ME/i.test(raw)) {
       warn(
-        "backend/.env still contains YOUR_PASSWORD or CHANGE_ME — set DATABASE_URL to your real PostgreSQL password."
+        "backend/.env still contains YOUR_PASSWORD or CHANGE_ME � set DATABASE_URL to your real PostgreSQL password."
       );
     }
   }
@@ -192,7 +208,7 @@ async function main() {
   const apiUrl = process.env.VITE_API_URL || "http://localhost:8000";
   const feEnv = { ...process.env, VITE_API_URL: apiUrl };
 
-  log("Starting FastAPI (uvicorn) on http://0.0.0.0:8000 …");
+  log("Starting FastAPI (uvicorn) on http://0.0.0.0:8000 ...");
   run(VENV_PY, ["-m", "uvicorn", "app.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"], {
     cwd: BACKEND,
     shell: false,
@@ -200,7 +216,7 @@ async function main() {
   });
 
   if (process.env.START_CELERY === "1") {
-    log("Starting Celery worker + beat (device polling; needs Redis on REDIS_URL)…");
+    log("Starting Celery worker + beat (device polling; needs Redis on REDIS_URL)...");
     run(VENV_PY, ["-m", "celery", "-A", "app.workers.celery_app", "worker", "-l", "info"], {
       cwd: BACKEND,
       shell: false,
@@ -217,17 +233,18 @@ async function main() {
 
   await sleep(1500);
 
-  log(`Starting Vite on http://localhost:5173 (API ${apiUrl})…`);
-  // Windows: npm is a .cmd shim; spawn without shell: true often raises EINVAL.
-  run("npm", ["run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"], {
+  log(`Starting Vite on http://localhost:5173 (API ${apiUrl})...`);
+  runNpm(["run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"], {
     cwd: FRONTEND,
-    shell: isWin,
     env: feEnv,
   });
 
-  log("App starting — Ctrl+C stops all processes");
+  log("App starting � Ctrl+C stops all processes");
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+
+  // Keep parent process alive while child services are running.
+  await new Promise(() => {});
 }
 
 main().catch((err) => {
