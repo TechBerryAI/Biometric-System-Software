@@ -1,6 +1,6 @@
 /**
  * Local dev startup: backend venv + pip, Alembic migrations, frontend npm install, uvicorn + Vite.
- * Requires PostgreSQL (and Redis if you use START_CELERY=1) — configure backend/.env first.
+ * Requires PostgreSQL (and Redis if you use START_CELERY=1) ï¿½ configure backend/.env first.
  *
  * Usage: node start.js
  * Env:   PYTHON=path\to\python.exe  START_CELERY=1
@@ -66,7 +66,7 @@ function ensureBackendEnv() {
   const example = path.join(BACKEND, ".env.example");
   if (!fs.existsSync(envPath) && fs.existsSync(example)) {
     fs.copyFileSync(example, envPath);
-    log("Created backend/.env from .env.example — edit DATABASE_URL (password) before continuing.");
+    log("Created backend/.env from .env.example ï¿½ edit DATABASE_URL (password) before continuing.");
   }
 }
 
@@ -140,7 +140,7 @@ async function alembicUpgrade() {
   const code = await waitForExit(r);
   if (code !== 0) {
     warn(
-      "Alembic failed — check PostgreSQL is running, database exists, and DATABASE_URL in backend/.env is correct."
+      "Alembic failed ï¿½ check PostgreSQL is running, database exists, and DATABASE_URL in backend/.env is correct."
     );
     throw new Error(`alembic upgrade failed with exit ${code}`);
   }
@@ -153,7 +153,7 @@ async function npmInstallFrontend() {
     return;
   }
   if (hasNodeModules && !hasViteBinary()) {
-    warn("node_modules exists but vite binary is missing — reinstalling frontend dependencies");
+    warn("node_modules exists but vite binary is missing ï¿½ reinstalling frontend dependencies");
   } else {
     log("Installing frontend dependencies (npm install)...");
   }
@@ -181,7 +181,7 @@ function shutdown() {
 }
 
 async function main() {
-  log("Biometric attendance — dev startup (local PostgreSQL)");
+  log("Biometric attendance ï¿½ dev startup (local PostgreSQL)");
   process.chdir(ROOT);
 
   if (!fs.existsSync(BACKEND) || !fs.existsSync(FRONTEND)) {
@@ -195,7 +195,7 @@ async function main() {
     const raw = fs.readFileSync(envPath, "utf8");
     if (/YOUR_PASSWORD|CHANGE_ME/i.test(raw)) {
       warn(
-        "backend/.env still contains YOUR_PASSWORD or CHANGE_ME — set DATABASE_URL to your real PostgreSQL password."
+        "backend/.env still contains YOUR_PASSWORD or CHANGE_ME ï¿½ set DATABASE_URL to your real PostgreSQL password."
       );
     }
   }
@@ -239,7 +239,7 @@ async function main() {
     env: feEnv,
   });
 
-  log("App starting — Ctrl+C stops all processes");
+  log("App starting ï¿½ Ctrl+C stops all processes");
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 

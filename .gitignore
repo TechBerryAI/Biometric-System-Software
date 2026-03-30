@@ -203,6 +203,7 @@ cython_debug/
 
 # Node (frontend)
 node_modules/
+frontend/dist/
 
 # Marimo
 marimo/_static/
