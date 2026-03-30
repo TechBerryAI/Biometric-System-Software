@@ -35,7 +35,7 @@ class AttendanceSessionRead(BaseModel):
 class DailySummaryRow(BaseModel):
     summary_date: date
     employee_id: int
-    device_user_id: int
+    device_user_id: str
     employee_name: str
     first_check_in: datetime | None
     last_check_out: datetime | None

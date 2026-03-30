@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from datetime import time
 
 from pydantic import Field, PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -36,6 +37,7 @@ class Settings(BaseSettings):
 
     timezone: str = Field(default="UTC", alias="TIMEZONE")
     device_poll_interval_seconds: int = Field(default=120, alias="DEVICE_POLL_INTERVAL_SECONDS")
+    default_shift_start: time = Field(default=time(9, 30), alias="DEFAULT_SHIFT_START")
 
 
 @lru_cache

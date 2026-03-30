@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Read-only copy from the ZKTeco terminal into PostgreSQL:
-  1) Users → employees table (ON CONFLICT DO NOTHING)
+  1) Users → employees table (upsert / refresh device fields)
   2) Attendance → attendance_logs + session pairing for today/yesterday
 
 Requires backend/.env ZK_DEVICE_IP, ZK_DEVICE_PORT, etc.

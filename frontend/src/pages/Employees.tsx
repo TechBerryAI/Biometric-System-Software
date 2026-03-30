@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { fetchEmployees } from "@/services/api";
 import type { Employee } from "@/types";
 
 export function Employees() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +61,11 @@ export function Employees() {
           </thead>
           <tbody className="divide-y divide-ink-800/10">
             {rows.map((e) => (
-              <tr key={e.id} className="hover:bg-mist/40">
+              <tr
+                key={e.id}
+                className="cursor-pointer hover:bg-mist/40"
+                onClick={() => navigate(`/employees/${e.id}`)}
+              >
                 <td className="px-6 py-3 text-ink-600">{e.id}</td>
                 <td className="px-6 py-3 font-medium text-ink-950">{e.name}</td>
                 <td className="px-6 py-3">
