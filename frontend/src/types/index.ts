@@ -1,6 +1,6 @@
 export interface Employee {
   id: number;
-  device_user_id: number;
+  device_user_id: string;
   name: string;
   department: string | null;
   shift_start: string | null;
@@ -32,7 +32,7 @@ export interface AttendanceSession {
 export interface DailySummaryRow {
   summary_date: string;
   employee_id: number;
-  device_user_id: number;
+  device_user_id: string;
   employee_name: string;
   first_check_in: string | null;
   last_check_out: string | null;

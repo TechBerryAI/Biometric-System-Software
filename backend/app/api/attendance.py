@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -24,6 +24,15 @@ def _day_bounds_utc(d: date, tz_name: str) -> tuple[datetime, datetime]:
     start_local = datetime.combine(d, time.min, tzinfo=tz)
     end_local = start_local + timedelta(days=1)
     return start_local.astimezone(ZoneInfo("UTC")), end_local.astimezone(ZoneInfo("UTC"))
+
+
+def _is_in_punch(punch_type: str) -> bool | None:
+    p = punch_type.strip().lower()
+    if p in ("0", "in", "check_in", "i"):
+        return True
+    if p in ("1", "out", "check_out", "o"):
+        return False
+    return None
 
 
 @router.get("/logs", response_model=list[AttendanceLogRead])
@@ -80,9 +89,25 @@ def daily_summary(
     start_utc, end_utc = _day_bounds_utc(summary_date, tz_name)
 
     employees = list(db.execute(select(Employee)).scalars().all())
+    logs = list(
+        db.execute(
+            select(AttendanceLog)
+            .where(
+                AttendanceLog.timestamp >= start_utc,
+                AttendanceLog.timestamp < end_utc,
+            )
+            .order_by(AttendanceLog.timestamp)
+        ).scalars()
+    )
+    by_code: dict[str, list[AttendanceLog]] = {}
+    for lg in logs:
+        by_code.setdefault(lg.employee_code, []).append(lg)
+
     rows: list[DailySummaryRow] = []
+    tz = ZoneInfo(tz_name)
 
     for emp in employees:
+        emp_logs = by_code.get(str(emp.device_user_id), [])
         sess = db.execute(
             select(AttendanceSession)
             .where(
@@ -93,7 +118,24 @@ def daily_summary(
             .order_by(AttendanceSession.check_in)
         ).scalars().all()
 
-        if not sess:
+        # Prefer raw logs for visibility (shows anyone who punched),
+        # even if session pairing is incomplete for the day.
+        first_in: datetime | None = None
+        last_out: datetime | None = None
+        if emp_logs:
+            # earliest known IN punch, fallback to earliest punch if type unknown
+            ins = [x.timestamp for x in emp_logs if _is_in_punch(x.punch_type) is True]
+            first_in = min(ins) if ins else emp_logs[0].timestamp
+            outs = [x.timestamp for x in emp_logs if _is_in_punch(x.punch_type) is False]
+            if outs:
+                last_out = max(outs)
+            elif len(emp_logs) > 1:
+                # Some devices send only punch=0; use day's last punch as effective checkout.
+                last_out = emp_logs[-1].timestamp
+            else:
+                last_out = None
+
+        if not emp_logs and not sess:
             rows.append(
                 DailySummaryRow(
                     summary_date=summary_date,
@@ -109,18 +151,19 @@ def daily_summary(
             )
             continue
 
-        first_in = min(s.check_in for s in sess)
-        outs = [s.check_out for s in sess if s.check_out is not None]
-        last_out = max(outs) if outs else None
-        total = db.execute(
-            select(func.coalesce(func.sum(AttendanceSession.work_duration), 0)).where(
-                AttendanceSession.employee_id == emp.id,
-                AttendanceSession.check_in >= start_utc,
-                AttendanceSession.check_in < end_utc,
-            )
-        ).scalar_one()
-        total_min = int(total) if total else None
-        late_any = any((s.late_minutes or 0) > 0 for s in sess)
+        total_min: int | None = None
+        if first_in is not None and last_out is not None and last_out > first_in:
+            total_min = int((last_out - first_in).total_seconds() // 60)
+        if first_in is not None and emp.shift_start is not None:
+            local_in = first_in.astimezone(tz)
+            shift_dt = datetime.combine(local_in.date(), emp.shift_start, tzinfo=tz)
+            late_any = local_in > shift_dt
+        elif first_in is not None:
+            local_in = first_in.astimezone(tz)
+            shift_dt = datetime.combine(local_in.date(), settings.default_shift_start, tzinfo=tz)
+            late_any = local_in > shift_dt
+        else:
+            late_any = any((s.late_minutes or 0) > 0 for s in sess)
 
         rows.append(
             DailySummaryRow(
@@ -132,7 +175,7 @@ def daily_summary(
                 last_check_out=last_out,
                 total_work_minutes=total_min,
                 late_arrival=late_any,
-                sessions_count=len(sess),
+                sessions_count=len(emp_logs),
             )
         )
 
