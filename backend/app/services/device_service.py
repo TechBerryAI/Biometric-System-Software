@@ -21,14 +21,14 @@ class DeviceUser:
 
     uid: int
     name: str
-    user_id: str | None
+    user_id: str
 
 
 @dataclass(frozen=True, slots=True)
 class DeviceAttendanceRecord:
     """One raw attendance row from the device."""
 
-    user_id: int
+    user_id: str
     timestamp: datetime
     punch: int
     status: int
@@ -74,8 +74,10 @@ class DeviceService:
             uid = int(getattr(u, "uid", 0) or 0)
             name = str(getattr(u, "name", "") or "").strip() or f"User {uid}"
             user_id = getattr(u, "user_id", None)
-            user_id_str = str(user_id).strip() if user_id is not None else None
-            out.append(DeviceUser(uid=uid, name=name, user_id=user_id_str))
+            # user.user_id is the real attendance identity (often alphanumeric).
+            user_id_str = str(user_id).strip() if user_id is not None else ""
+            device_identity = user_id_str or str(uid)
+            out.append(DeviceUser(uid=uid, name=name, user_id=device_identity))
         return out
 
     def fetch_attendance(self) -> list[DeviceAttendanceRecord]:
@@ -97,7 +99,10 @@ class DeviceService:
         out: list[DeviceAttendanceRecord] = []
         for row in raw:
             try:
-                user_id = int(getattr(row, "user_id", 0))
+                user_id_raw = getattr(row, "user_id", None)
+                user_id = str(user_id_raw).strip() if user_id_raw is not None else ""
+                if not user_id:
+                    continue
                 ts = getattr(row, "timestamp", None)
                 if ts is None:
                     continue

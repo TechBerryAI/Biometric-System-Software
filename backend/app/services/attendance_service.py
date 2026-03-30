@@ -61,10 +61,24 @@ def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -
     """
     inserted = 0
     for u in users:
+        # Transition helper: old builds stored uid as numeric string.
+        old_uid_identity = str(u.uid)
+        if u.user_id != old_uid_identity:
+            legacy = db.execute(
+                select(Employee).where(Employee.device_user_id == old_uid_identity)
+            ).scalar_one_or_none()
+            existing_new = db.execute(
+                select(Employee).where(Employee.device_user_id == u.user_id)
+            ).scalar_one_or_none()
+            if legacy is not None and existing_new is None:
+                legacy.device_user_id = u.user_id
+                legacy.name = u.name
+                db.flush()
+
         stmt = (
             pg_insert(Employee)
             .values(
-                device_user_id=u.uid,
+                device_user_id=u.user_id,
                 name=u.name,
                 department=None,
                 shift_start=None,
@@ -89,7 +103,7 @@ def insert_attendance_logs_idempotent(
     """Insert raw logs; duplicates ignored via unique (employee_code, timestamp)."""
     rows = 0
     for r in records:
-        employee_code = str(r.user_id)
+        employee_code = r.user_id
         punch_type = str(r.punch)
         stmt = (
             pg_insert(AttendanceLog)

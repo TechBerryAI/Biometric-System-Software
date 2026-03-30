@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class EmployeeBase(BaseModel):
-    device_user_id: int = Field(..., description="Device user id from biometric terminal (authoritative)")
+    device_user_id: str = Field(..., description="Device user id from biometric terminal (authoritative)")
     name: str
     department: str | None = None
     shift_start: time | None = None

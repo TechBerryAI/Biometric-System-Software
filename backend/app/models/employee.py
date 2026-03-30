@@ -14,7 +14,8 @@ class Employee(Base):
     __tablename__ = "employees"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    device_user_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
+    # Device identity from ZKTeco user.user_id (can be alphanumeric like TBC209)
+    device_user_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     department: Mapped[str | None] = mapped_column(String(255), nullable=True)
     shift_start: Mapped[time | None] = mapped_column(Time, nullable=True)
