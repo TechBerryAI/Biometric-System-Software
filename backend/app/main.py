@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.attendance import router as attendance_router
 from app.api.employee import router as employee_router
+from app.api.sync import router as sync_router
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -43,6 +44,7 @@ app.add_middleware(
 
 app.include_router(employee_router)
 app.include_router(attendance_router)
+app.include_router(sync_router)
 
 
 @app.get("/health")

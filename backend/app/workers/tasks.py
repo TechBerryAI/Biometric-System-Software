@@ -16,9 +16,14 @@ def sync_attendance_from_device(self) -> dict[str, int]:
     """Fetch attendance from terminal (read-only), insert logs, rebuild sessions."""
     db = SessionLocal()
     try:
-        fetched, inserted = run_device_sync(db)
-        logger.info("Attendance sync: fetched=%s new_rows=%s", fetched, inserted)
-        return {"fetched": fetched, "inserted": inserted}
+        fetched, inserted, backfilled = run_device_sync(db)
+        logger.info(
+            "Attendance sync: fetched=%s new_rows=%s placeholder_employees=%s",
+            fetched,
+            inserted,
+            backfilled,
+        )
+        return {"fetched": fetched, "inserted": inserted, "placeholder_employees": backfilled}
     except Exception as exc:  # noqa: BLE001
         logger.exception("Attendance sync failed: %s", exc)
         raise self.retry(exc=exc, countdown=60) from exc

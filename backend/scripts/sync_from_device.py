@@ -32,9 +32,10 @@ def main() -> None:
         print(f"  Users on device: {u_total}; new rows inserted into DB: {u_inserted}")
 
         print("Step 2/2: Fetching attendance from device (get_attendance)…")
-        a_fetched, a_inserted = run_device_sync(db)
+        a_fetched, a_inserted, placeholders = run_device_sync(db)
         print(f"  Attendance rows from device: {a_fetched}; new log rows inserted: {a_inserted}")
-        print("Done. Sessions are rebuilt for today and yesterday (local timezone).")
+        print(f"  Placeholder employees from orphan punch codes: {placeholders}")
+        print("Done. Sessions rebuilt for SESSION_REBUILD_LOOKBACK_DAYS (local timezone).")
     finally:
         db.close()
 

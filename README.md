@@ -130,6 +130,13 @@ npm run dev
 | GET    | `/attendance/sessions`       | Paired sessions (`from`, `to`, `employee_id`)    |
 | GET    | `/attendance/daily-summary`  | Per-employee day rollup (`summary_date`)         |
 | GET    | `/attendance/{employee_id}`  | Sessions for one employee                        |
+| POST   | `/sync/device`               | Pull users + attendance from terminal (read-only), orphan punch→employee backfill, rebuild sessions for `SESSION_REBUILD_LOOKBACK_DAYS` |
+
+### Sync timeouts and missing rows
+
+- The browser must wait for **`POST /sync/device`** to finish (large buffers can take minutes). The attendance UI uses a **10-minute** HTTP timeout for that call.
+- Ensure **`ZK_DEVICE_TIMEOUT_SECONDS`** in `backend/.env` is high enough for your LAN device (try **120**).
+- Anyone who punches but was never in **`get_users()`** still appears after sync: orphan **`employee_code`** values get a placeholder **`employees`** row so the daily summary lists them (shows as **User {code}** until you edit the profile).
 
 ## Safety rules
 

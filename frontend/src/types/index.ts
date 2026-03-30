@@ -1,3 +1,12 @@
+/** POST /employees body — upserts metadata by device_user_id. */
+export interface EmployeeCreatePayload {
+  device_user_id: string;
+  name: string;
+  department: string | null;
+  shift_start: string | null;
+  shift_end: string | null;
+}
+
 export interface Employee {
   id: number;
   device_user_id: string;

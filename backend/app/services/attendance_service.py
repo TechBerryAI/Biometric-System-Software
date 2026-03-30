@@ -8,7 +8,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Sequence
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, delete, exists, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -140,6 +140,47 @@ def insert_attendance_logs_idempotent(
     return rows
 
 
+def backfill_employees_from_orphan_logs(db: Session) -> int:
+    """
+    Create Employee rows for any attendance_logs.employee_code that has no matching employee yet.
+
+    Punches are keyed by device user id in logs; if the HR user list was never synced or the id
+    only appears in historical attendance, those people were omitted from daily summaries. This
+    links orphan codes so every puncher appears in the app (placeholder name until metadata sync).
+    """
+    correlated = exists(
+        select(1).where(Employee.device_user_id == AttendanceLog.employee_code)
+    )
+    stmt = (
+        select(AttendanceLog.employee_code)
+        .distinct()
+        .where(~correlated)
+        .where(AttendanceLog.employee_code != "")
+        .where(AttendanceLog.employee_code.isnot(None))
+    )
+    codes = [str(c).strip() for c in db.execute(stmt).scalars().all() if c is not None and str(c).strip()]
+    if not codes:
+        return 0
+    inserted = 0
+    for code in codes:
+        res = db.execute(
+            pg_insert(Employee)
+            .values(
+                device_user_id=code,
+                name=f"User {code}",
+                department=None,
+                shift_start=None,
+                shift_end=None,
+            )
+            .on_conflict_do_nothing(index_elements=[Employee.device_user_id])
+        )
+        rc = res.rowcount
+        if rc is not None and rc > 0:
+            inserted += 1
+    db.commit()
+    return inserted
+
+
 def _pair_logs_for_day(
     logs: list[AttendanceLog],
     _tz: ZoneInfo,
@@ -265,16 +306,25 @@ def run_device_sync(
     db: Session,
     device: DeviceService | None = None,
     settings: Settings | None = None,
-) -> tuple[int, int]:
-    """Fetch attendance from device, insert logs, rebuild sessions for today (local)."""
+) -> tuple[int, int, int]:
+    """
+    Fetch attendance from device, insert logs, backfill missing employees for any punch codes,
+    rebuild sessions for a trailing window of local days.
+
+    Returns (device_row_count, newly_inserted_log_rows, placeholder_employees_created).
+    """
     settings = settings or get_settings()
     device = device or DeviceService(settings=settings)
     records = device.fetch_attendance()
     n = insert_attendance_logs_idempotent(db, records, settings.zk_device_id)
+    placeholders = backfill_employees_from_orphan_logs(db)
+
     today = datetime.now(ZoneInfo(settings.timezone)).date()
-    rebuild_sessions_for_local_date(db, today, settings=settings)
-    rebuild_sessions_for_local_date(db, today - timedelta(days=1), settings=settings)
-    return len(records), n
+    lookback = settings.session_rebuild_lookback_days
+    for i in range(lookback):
+        rebuild_sessions_for_local_date(db, today - timedelta(days=i), settings=settings)
+
+    return len(records), n, placeholders
 
 
 def run_user_sync(
