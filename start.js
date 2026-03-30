@@ -1,12 +1,14 @@
 /**
  * Local dev startup: backend venv + pip, Alembic migrations, frontend npm install, uvicorn + Vite.
- * Requires PostgreSQL (and Redis if you use START_CELERY=1) � configure backend/.env first.
+ * Requires PostgreSQL (and Redis if you use START_CELERY=1). Configure backend/.env first.
  *
  * Usage: node start.js
- * Env:   PYTHON=path\to\python.exe  START_CELERY=1
+ * Env:   PYTHON=path\to\python.exe   START_CELERY=1   SKIP_OPEN_BROWSER=1
+ *        FRONTEND_PORT=5173   VITE_API_URL=http://localhost:8000
  */
 
 const { spawn, execSync } = require("child_process");
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
@@ -66,7 +68,7 @@ function ensureBackendEnv() {
   const example = path.join(BACKEND, ".env.example");
   if (!fs.existsSync(envPath) && fs.existsSync(example)) {
     fs.copyFileSync(example, envPath);
-    log("Created backend/.env from .env.example � edit DATABASE_URL (password) before continuing.");
+    log("Created backend/.env from .env.example ? edit DATABASE_URL (password) before continuing.");
   }
 }
 
@@ -116,6 +118,78 @@ function envForBackendChild(extra = {}) {
   return e;
 }
 
+/** True if HTTP GET returns 2xx/3xx (server accepting connections). */
+function httpOk(urlString, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    try {
+      const u = new URL(urlString);
+      const req = http.request(
+        {
+          hostname: u.hostname,
+          port: u.port || 80,
+          path: u.pathname + u.search,
+          method: "GET",
+          timeout: timeoutMs,
+          headers: { Connection: "close", Accept: "*/*" },
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode >= 200 && res.statusCode < 400);
+        }
+      );
+      req.on("error", () => resolve(false));
+      req.on("timeout", () => {
+        req.destroy();
+        resolve(false);
+      });
+      req.end();
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function waitForHttp(url, label, { maxWaitMs = 120000, intervalMs = 400 } = {}) {
+  const start = Date.now();
+  let attempt = 0;
+  while (Date.now() - start < maxWaitMs) {
+    attempt += 1;
+    if (await httpOk(url, 3500)) {
+      log(`${label} ready (${url})`);
+      return;
+    }
+    if (attempt === 1) log(`Waiting for ${label} at ${url} ...`);
+    await sleep(intervalMs);
+  }
+  throw new Error(`${label} did not respond in time (${url}). Check logs above for errors.`);
+}
+
+function openBrowser(url) {
+  if (process.env.SKIP_OPEN_BROWSER === "1") {
+    log("SKIP_OPEN_BROWSER=1 ? not opening a browser tab.");
+    return;
+  }
+  log(`Opening browser: ${url}`);
+  try {
+    if (isWin) {
+      const p = spawn("cmd.exe", ["/d", "/c", "start", "", url], {
+        detached: true,
+        stdio: "ignore",
+        shell: false,
+      });
+      p.unref();
+    } else if (process.platform === "darwin") {
+      const p = spawn("open", [url], { detached: true, stdio: "ignore" });
+      p.unref();
+    } else {
+      const p = spawn("xdg-open", [url], { detached: true, stdio: "ignore" });
+      p.unref();
+    }
+  } catch (e) {
+    warn(`Could not open browser (${e.message}). Open manually: ${url}`);
+  }
+}
+
 async function pipInstall() {
   log("Installing Python dependencies...");
   const py = fs.existsSync(VENV_PY) ? VENV_PY : "python";
@@ -140,7 +214,7 @@ async function alembicUpgrade() {
   const code = await waitForExit(r);
   if (code !== 0) {
     warn(
-      "Alembic failed � check PostgreSQL is running, database exists, and DATABASE_URL in backend/.env is correct."
+      "Alembic failed ? check PostgreSQL is running, database exists, and DATABASE_URL in backend/.env is correct."
     );
     throw new Error(`alembic upgrade failed with exit ${code}`);
   }
@@ -153,7 +227,7 @@ async function npmInstallFrontend() {
     return;
   }
   if (hasNodeModules && !hasViteBinary()) {
-    warn("node_modules exists but vite binary is missing � reinstalling frontend dependencies");
+    warn("node_modules exists but vite binary is missing ? reinstalling frontend dependencies");
   } else {
     log("Installing frontend dependencies (npm install)...");
   }
@@ -181,7 +255,7 @@ function shutdown() {
 }
 
 async function main() {
-  log("Biometric attendance � dev startup (local PostgreSQL)");
+  log("Biometric attendance ? dev startup (local PostgreSQL)");
   process.chdir(ROOT);
 
   if (!fs.existsSync(BACKEND) || !fs.existsSync(FRONTEND)) {
@@ -195,7 +269,7 @@ async function main() {
     const raw = fs.readFileSync(envPath, "utf8");
     if (/YOUR_PASSWORD|CHANGE_ME/i.test(raw)) {
       warn(
-        "backend/.env still contains YOUR_PASSWORD or CHANGE_ME � set DATABASE_URL to your real PostgreSQL password."
+        "backend/.env still contains YOUR_PASSWORD or CHANGE_ME ? set DATABASE_URL to your real PostgreSQL password."
       );
     }
   }
@@ -206,6 +280,9 @@ async function main() {
   await npmInstallFrontend();
 
   const apiUrl = process.env.VITE_API_URL || "http://localhost:8000";
+  const apiHealth = apiUrl.replace(/\/$/, "") + "/health";
+  const fePort = process.env.FRONTEND_PORT || "5173";
+  const feOrigin = `http://localhost:${fePort}`;
   const feEnv = { ...process.env, VITE_API_URL: apiUrl };
 
   log("Starting FastAPI (uvicorn) on http://0.0.0.0:8000 ...");
@@ -214,6 +291,8 @@ async function main() {
     shell: false,
     env: envForBackendChild(),
   });
+
+  await waitForHttp(apiHealth, "API", { maxWaitMs: 120000, intervalMs: 500 });
 
   if (process.env.START_CELERY === "1") {
     log("Starting Celery worker + beat (device polling; needs Redis on REDIS_URL)...");
@@ -231,19 +310,20 @@ async function main() {
     log("Tip: set START_CELERY=1 to run worker+beat (requires Redis)");
   }
 
-  await sleep(1500);
-
-  log(`Starting Vite on http://localhost:5173 (API ${apiUrl})...`);
-  runNpm(["run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"], {
+  log(`Starting Vite on ${feOrigin} (API ${apiUrl})...`);
+  runNpm(["run", "dev", "--", "--host", "0.0.0.0", "--port", fePort], {
     cwd: FRONTEND,
     env: feEnv,
   });
 
-  log("App starting � Ctrl+C stops all processes");
+  await waitForHttp(feOrigin + "/", "Frontend", { maxWaitMs: 120000, intervalMs: 500 });
+
+  log("Startup complete ? Ctrl+C stops all processes");
+  openBrowser(feOrigin + "/");
+
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  // Keep parent process alive while child services are running.
   await new Promise(() => {});
 }
 
