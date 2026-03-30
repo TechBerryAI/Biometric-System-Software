@@ -59,7 +59,7 @@ def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -
     Upsert device users into employees with ON CONFLICT DO NOTHING on device_user_id.
     Returns number of rows attempted (not necessarily inserted).
     """
-    inserted = 0
+    affected = 0
     for u in users:
         # Transition helper: old builds stored uid as numeric string.
         old_uid_identity = str(u.uid)
@@ -73,26 +73,43 @@ def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -
             if legacy is not None and existing_new is None:
                 legacy.device_user_id = u.user_id
                 legacy.name = u.name
+                legacy.device_uid = u.uid
+                legacy.device_privilege = u.privilege
+                legacy.device_group_id = u.group_id
+                legacy.device_card = u.card
                 db.flush()
 
         stmt = (
             pg_insert(Employee)
             .values(
                 device_user_id=u.user_id,
+                device_uid=u.uid,
+                device_privilege=u.privilege,
+                device_group_id=u.group_id,
+                device_card=u.card,
                 name=u.name,
                 department=None,
                 shift_start=None,
                 shift_end=None,
             )
-            .on_conflict_do_nothing(index_elements=[Employee.device_user_id])
+            .on_conflict_do_update(
+                index_elements=[Employee.device_user_id],
+                set_={
+                    "name": u.name,
+                    "device_uid": u.uid,
+                    "device_privilege": u.privilege,
+                    "device_group_id": u.group_id,
+                    "device_card": u.card,
+                },
+            )
         )
         result = db.execute(stmt)
         rc = result.rowcount
-        # psycopg may return -1 for "unknown" on INSERT ... ON CONFLICT DO NOTHING
+        # psycopg may return -1 for "unknown" on upsert rowcount
         if rc is not None and rc > 0:
-            inserted += rc
+            affected += rc
     db.commit()
-    return inserted
+    return affected
 
 
 def insert_attendance_logs_idempotent(

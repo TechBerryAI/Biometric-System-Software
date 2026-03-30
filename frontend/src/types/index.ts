@@ -1,11 +1,33 @@
 export interface Employee {
   id: number;
   device_user_id: string;
+  device_uid?: number | null;
+  device_privilege?: number | null;
+  device_group_id?: string | null;
+  device_card?: string | null;
   name: string;
   department: string | null;
   shift_start: string | null;
   shift_end: string | null;
   created_at: string;
+}
+
+export interface EmployeeDetail extends Employee {
+  total_logs: number;
+  first_punch_at: string | null;
+  last_punch_at: string | null;
+  total_attendance_days: number;
+  total_complete_days: number;
+}
+
+export interface EmployeeDailyAttendance {
+  summary_date: string;
+  first_check_in: string | null;
+  last_check_out: string | null;
+  total_work_minutes: number | null;
+  late_arrival: boolean;
+  absent: boolean;
+  punch_count: number;
 }
 
 export interface AttendanceLog {
