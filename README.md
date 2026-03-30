@@ -48,6 +48,8 @@ Connects this software to your existing biometric installation: **read-only** in
    alembic upgrade head
    ```
 
+   Migrations are a **single revision** (`0003`) that creates the full current schema. If you had an older clone whose DB was stamped at revision `0001` or `0002` only, run `alembic stamp 0003` once (after confirming your tables match the current app) or recreate the database and run `alembic upgrade head` again.
+
 ## Quick start (full stack)
 
 From the **repository root** (creates venv if needed, installs deps, runs migrations, starts API + Vite):
@@ -100,11 +102,10 @@ cd backend
 .venv\Scripts\python.exe scripts\sync_from_device.py
 ```
 
-Or run steps separately:
+Users-only sync (no attendance pull):
 
 ```bash
 python scripts/sync_users.py
-python scripts/poll_device.py
 ```
 
 Ensure `ZK_DEVICE_IP` and `ZK_DEVICE_PORT` in `backend/.env` match the machine (same LAN as your PC). Run periodically or use Celery + Redis for automatic polling.

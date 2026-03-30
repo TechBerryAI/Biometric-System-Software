@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { Attendance } from "./pages/Attendance";
 import { Dashboard } from "./pages/Dashboard";
+import { EmployeeProfile } from "./pages/EmployeeProfile";
 import { Employees } from "./pages/Employees";
 
 export default function App() {
@@ -10,6 +11,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/employees" element={<Employees />} />
+        <Route path="/employees/:employeeId" element={<EmployeeProfile />} />
         <Route path="/attendance" element={<Attendance />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

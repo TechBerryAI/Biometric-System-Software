@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchDailySummary, fetchEmployees } from "@/services/api";
 import type { DailySummaryRow, Employee } from "@/types";
+import { downloadAttendanceSummaryPdf } from "@/utils/pdfReports";
 
 function todayISO(): string {
   const d = new Date();
@@ -16,6 +17,54 @@ function fmtDateTime(v: string | null): string {
 }
 
 type AttendanceRow = DailySummaryRow & { is_absent: boolean };
+type ExportPeriod = "day" | "week" | "month";
+
+function addDays(date: Date, days: number): Date {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function formatISO(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function getRange(baseDateISO: string, period: ExportPeriod): { from: string; to: string; label: string } {
+  const d = new Date(`${baseDateISO}T00:00:00`);
+  if (period === "day") {
+    return { from: baseDateISO, to: baseDateISO, label: `Day ${baseDateISO}` };
+  }
+  if (period === "week") {
+    // Trailing 7-day window ending on selected date (past-only).
+    const start = addDays(d, -6);
+    return {
+      from: formatISO(start),
+      to: baseDateISO,
+      label: `Last 7 days (${formatISO(start)} to ${baseDateISO})`,
+    };
+  }
+  // Trailing 30-day window ending on selected date (past-only).
+  const start = addDays(d, -29);
+  return {
+    from: formatISO(start),
+    to: baseDateISO,
+    label: `Last 30 days (${formatISO(start)} to ${baseDateISO})`,
+  };
+}
+
+function dateList(fromISO: string, toISO: string): string[] {
+  const out: string[] = [];
+  let cur = new Date(`${fromISO}T00:00:00`);
+  const end = new Date(`${toISO}T00:00:00`);
+  while (cur <= end) {
+    out.push(formatISO(cur));
+    cur = addDays(cur, 1);
+  }
+  return out;
+}
 
 export function Attendance() {
   const [date, setDate] = useState(todayISO);
@@ -23,6 +72,8 @@ export function Attendance() {
   const [rows, setRows] = useState<AttendanceRow[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(false);
+  const [exportPeriod, setExportPeriod] = useState<ExportPeriod>("day");
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -73,6 +124,29 @@ export function Attendance() {
   const lateCount = filtered.filter((r) => !r.is_absent && r.late_arrival).length;
   const absentCount = filtered.filter((r) => r.is_absent).length;
 
+  const exportReport = useCallback(async () => {
+    setExporting(true);
+    try {
+      const range = getRange(date, exportPeriod);
+      const dates = dateList(range.from, range.to);
+      const allRows: Array<DailySummaryRow & { summary_date: string }> = [];
+      for (const day of dates) {
+        const summary = await fetchDailySummary(day);
+        for (const row of summary) {
+          allRows.push({ ...row, summary_date: day });
+        }
+      }
+      downloadAttendanceSummaryPdf({
+        periodLabel: range.label,
+        rows: allRows,
+      });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to export PDF report");
+    } finally {
+      setExporting(false);
+    }
+  }, [date, exportPeriod]);
+
   return (
     <div className="space-y-6">
       <div>
@@ -82,36 +156,67 @@ export function Attendance() {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-ink-800/10 bg-white p-4 shadow-sm">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-ink-800">Date</span>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="rounded-lg border border-ink-800/20 px-3 py-2 text-ink-950"
-          />
-        </label>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-ink-800/10 bg-white p-4 shadow-sm">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-ink-800">Date</span>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="rounded-lg border border-ink-800/20 px-3 py-2 text-ink-950"
+            />
+          </label>
 
-        <label className="flex min-w-[14rem] flex-col gap-1 text-sm">
-          <span className="font-medium text-ink-800">Search employee</span>
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Name or device ID"
-            className="rounded-lg border border-ink-800/20 px-3 py-2 text-ink-950"
-          />
-        </label>
+          <label className="flex min-w-[14rem] flex-col gap-1 text-sm">
+            <span className="font-medium text-ink-800">Search employee</span>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Name or device ID"
+              className="rounded-lg border border-ink-800/20 px-3 py-2 text-ink-950"
+            />
+          </label>
 
-        <button
-          type="button"
-          onClick={() => void load()}
-          disabled={loading}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-        >
-          {loading ? "Loading..." : "Refresh"}
-        </button>
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {loading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-3 rounded-2xl border-2 border-accent/35 bg-gradient-to-br from-teal-50/90 to-white p-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="min-w-0 flex-1 sm:flex-initial">
+            <p className="font-display text-sm font-bold text-ink-950">Export PDF report</p>
+            <p className="mt-0.5 text-xs text-ink-600">
+              All employees for the selected day, week, or month. Opens as a printable PDF.
+            </p>
+          </div>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-ink-800">Period</span>
+            <select
+              value={exportPeriod}
+              onChange={(e) => setExportPeriod(e.target.value as ExportPeriod)}
+              className="min-w-[10rem] rounded-lg border border-ink-800/25 bg-white px-3 py-2.5 text-ink-950 shadow-sm"
+            >
+              <option value="day">Single day (uses date above)</option>
+              <option value="week">Last 7 days (ending on date above)</option>
+              <option value="month">Last 30 days (ending on date above)</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => void exportReport()}
+            disabled={exporting}
+            className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-accent px-6 py-3 text-sm font-bold uppercase tracking-wide text-white shadow-lg ring-2 ring-teal-600/50 ring-offset-2 hover:bg-teal-600 disabled:opacity-55"
+          >
+            {exporting ? "Preparing PDF…" : "Download PDF"}
+          </button>
+        </div>
       </div>
 
       {error ? (
@@ -143,13 +248,12 @@ export function Attendance() {
               <th className="px-4 py-2">In time</th>
               <th className="px-4 py-2">Out time</th>
               <th className="px-4 py-2">Work (min)</th>
-              <th className="px-4 py-2">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-ink-800/10">
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-ink-600">
+                <td colSpan={6} className="px-4 py-8 text-center text-ink-600">
                   No employees found for this filter
                 </td>
               </tr>
@@ -162,21 +266,6 @@ export function Attendance() {
                   <td className="px-4 py-2 whitespace-nowrap">{fmtDateTime(r.first_check_in)}</td>
                   <td className="px-4 py-2 whitespace-nowrap">{fmtDateTime(r.last_check_out)}</td>
                   <td className="px-4 py-2">{r.total_work_minutes ?? "-"}</td>
-                  <td className="px-4 py-2">
-                    {r.is_absent ? (
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                        Absent
-                      </span>
-                    ) : r.late_arrival ? (
-                      <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-warn">
-                        Late
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-accent">
-                        On time
-                      </span>
-                    )}
-                  </td>
                 </tr>
               ))
             )}
