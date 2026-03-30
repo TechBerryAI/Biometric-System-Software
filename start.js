@@ -1,22 +1,18 @@
 /**
- * One-shot dev startup: Docker Postgres/Redis (optional), backend venv + deps + migrations,
- * frontend npm install, then uvicorn + Vite (and optional Celery for device polling).
+ * Local dev startup: backend venv + pip, Alembic migrations, frontend npm install, uvicorn + Vite.
+ * Requires PostgreSQL (and Redis if you use START_CELERY=1) — configure backend/.env first.
  *
  * Usage: node start.js
- * Env:   PYTHON=path\to\python.exe  START_CELERY=1  SKIP_DOCKER=1  START_JS_NO_ENV_SYNC=1
- *
- * Docker Compose must live at ./docker-compose.yml (repo root). Host DB/Redis ports are
- * 5433 and 6380 so a local PostgreSQL on 5432 does not collide.
+ * Env:   PYTHON=path\to\python.exe  START_CELERY=1
  */
 
-const { spawn, execFileSync, execSync } = require("child_process");
+const { spawn, execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.resolve(__dirname);
 const BACKEND = path.join(ROOT, "backend");
 const FRONTEND = path.join(ROOT, "frontend");
-const COMPOSE_FILE = path.join(ROOT, "docker-compose.yml");
 const VENV_PY = path.join(
   BACKEND,
   ".venv",
@@ -48,114 +44,12 @@ function run(cmd, args, opts = {}) {
   return r;
 }
 
-function dockerComposeAvailable() {
-  try {
-    execFileSync("docker", ["compose", "version"], { stdio: "ignore" });
-    return "docker";
-  } catch {
-    try {
-      execFileSync("docker-compose", ["version"], { stdio: "ignore" });
-      return "docker-compose";
-    } catch {
-      return null;
-    }
-  }
-}
-
-/** True if the Docker engine is accepting commands (Desktop running on Windows). */
-function dockerEngineRunning() {
-  try {
-    execFileSync("docker", ["info"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Run compose with an absolute -f path so it works regardless of cwd quirks on Windows.
- */
-function dockerComposeRun(cli, composeArgs) {
-  if (!fs.existsSync(COMPOSE_FILE)) {
-    throw new Error(`Missing ${COMPOSE_FILE}`);
-  }
-  const f = COMPOSE_FILE;
-  if (cli === "docker") {
-    execFileSync("docker", ["compose", "-f", f, ...composeArgs], {
-      cwd: ROOT,
-      stdio: "inherit",
-    });
-  } else {
-    execFileSync("docker-compose", ["-f", f, ...composeArgs], {
-      cwd: ROOT,
-      stdio: "inherit",
-    });
-  }
-}
-
-async function waitForPostgres(cli) {
-  const f = COMPOSE_FILE;
-  for (let i = 0; i < 45; i++) {
-    try {
-      if (cli === "docker") {
-        execFileSync(
-          "docker",
-          ["compose", "-f", f, "exec", "-T", "postgres", "pg_isready", "-U", "biometric", "-d", "biometric"],
-          { cwd: ROOT, stdio: "ignore" }
-        );
-      } else {
-        execFileSync(
-          "docker-compose",
-          ["-f", f, "exec", "-T", "postgres", "pg_isready", "-U", "biometric", "-d", "biometric"],
-          { cwd: ROOT, stdio: "ignore" }
-        );
-      }
-      return true;
-    } catch {
-      await sleep(1000);
-    }
-  }
-  return false;
-}
-
-/**
- * Point backend/.env at Docker-published ports (5433 / 6380).
- * Run whenever not using SKIP_DOCKER — even if Docker failed to start — so we never hit
- * localhost:5432 (wrong local Postgres) by mistake.
- */
-function syncBackendEnvForDockerHostPorts() {
-  const envPath = path.join(BACKEND, ".env");
-  if (!fs.existsSync(envPath)) return;
-  const dbUrl = "postgresql+psycopg://biometric:biometric@localhost:5433/biometric";
-  const redisUrl = "redis://localhost:6380/0";
-  let c = fs.readFileSync(envPath, "utf8");
-  let changed = false;
-
-  const dbLineOk =
-    /^DATABASE_URL=.*:5433\b/m.test(c) ||
-    /^DATABASE_URL=.*:5433\//m.test(c);
-  const redisLineOk = /^REDIS_URL=.*6380\b/m.test(c);
-
-  if (!dbLineOk) {
-    c = c.replace(/^DATABASE_URL=.*$/m, `DATABASE_URL=${dbUrl}`);
-    changed = true;
-  }
-  if (!redisLineOk) {
-    c = c.replace(/^REDIS_URL=.*$/m, `REDIS_URL=${redisUrl}`);
-    changed = true;
-  }
-  if (changed) {
-    fs.writeFileSync(envPath, c, "utf8");
-    log("Set backend/.env DATABASE_URL/REDIS_URL to host ports Postgres 5433, Redis 6380 (docker-compose.yml)");
-  }
-}
-
 function ensureBackendEnv() {
   const envPath = path.join(BACKEND, ".env");
   const example = path.join(BACKEND, ".env.example");
   if (!fs.existsSync(envPath) && fs.existsSync(example)) {
     fs.copyFileSync(example, envPath);
-    log("Created backend/.env from .env.example");
+    log("Created backend/.env from .env.example — edit DATABASE_URL (password) before continuing.");
   }
 }
 
@@ -198,8 +92,7 @@ function waitForExit(proc) {
 }
 
 /**
- * Inherited shell env often has DATABASE_URL=...@localhost:5432, which overrides backend/.env.
- * Drop these so pydantic loads DATABASE_URL / REDIS_URL from backend/.env only.
+ * Shell env DATABASE_URL can override backend/.env; drop so pydantic reads the file.
  */
 function envForBackendChild(extra = {}) {
   const e = { ...process.env, PYTHONPATH: BACKEND, ...extra };
@@ -232,7 +125,7 @@ async function alembicUpgrade() {
   const code = await waitForExit(r);
   if (code !== 0) {
     warn(
-      "Alembic failed — ensure Postgres is reachable (docker compose up -d postgres redis from repo root)"
+      "Alembic failed — check PostgreSQL is running, database exists, and DATABASE_URL in backend/.env is correct."
     );
     throw new Error(`alembic upgrade failed with exit ${code}`);
   }
@@ -269,53 +162,23 @@ function shutdown() {
 }
 
 async function main() {
-  log("Biometric attendance — dev startup");
+  log("Biometric attendance — dev startup (local PostgreSQL)");
   process.chdir(ROOT);
 
   if (!fs.existsSync(BACKEND) || !fs.existsSync(FRONTEND)) {
     throw new Error("Expected backend/ and frontend/ next to start.js");
   }
 
-  let dockerStarted = false;
-  const cli = dockerComposeAvailable();
-
-  if (process.env.SKIP_DOCKER !== "1" && cli) {
-    if (!fs.existsSync(COMPOSE_FILE)) {
-      warn(`No ${COMPOSE_FILE} — cannot start Postgres/Redis via Docker. Add docker-compose.yml or set SKIP_DOCKER=1`);
-    } else if (!dockerEngineRunning()) {
-      warn(
-        "Docker CLI is installed but the Docker engine is not running (Docker Desktop not started on Windows). " +
-          "Start Docker Desktop, wait until it is idle, then run this script again."
-      );
-    } else {
-      try {
-        log("Starting Postgres & Redis (docker compose)…");
-        dockerComposeRun(cli, ["up", "-d", "postgres", "redis"]);
-        const ok = await waitForPostgres(cli);
-        if (!ok) warn("Postgres did not become ready in time; migrations may fail.");
-        else {
-          log("Postgres is ready");
-          dockerStarted = true;
-        }
-      } catch (e) {
-        const msg = String(e && e.message ? e.message : e);
-        warn(`Docker compose failed: ${msg}`);
-        if (/pipe\\dockerDesktopLinuxEngine|dockerDesktopLinuxEngine|cannot find the file specified/i.test(msg)) {
-          warn(
-            "This usually means Docker Desktop is not running. Start Docker Desktop and retry."
-          );
-        }
-      }
-    }
-  } else if (process.env.SKIP_DOCKER === "1") {
-    log("SKIP_DOCKER=1 — using backend/.env as-is (no port rewrite)");
-  } else {
-    warn("Docker not found — install Docker Desktop or start Postgres/Redis yourself");
-  }
-
   ensureBackendEnv();
-  if (process.env.SKIP_DOCKER !== "1" && process.env.START_JS_NO_ENV_SYNC !== "1") {
-    syncBackendEnvForDockerHostPorts();
+
+  const envPath = path.join(BACKEND, ".env");
+  if (fs.existsSync(envPath)) {
+    const raw = fs.readFileSync(envPath, "utf8");
+    if (/YOUR_PASSWORD|CHANGE_ME/i.test(raw)) {
+      warn(
+        "backend/.env still contains YOUR_PASSWORD or CHANGE_ME — set DATABASE_URL to your real PostgreSQL password."
+      );
+    }
   }
 
   await ensureVenv();
@@ -334,7 +197,7 @@ async function main() {
   });
 
   if (process.env.START_CELERY === "1") {
-    log("Starting Celery worker + beat (device polling)…");
+    log("Starting Celery worker + beat (device polling; needs Redis on REDIS_URL)…");
     run(VENV_PY, ["-m", "celery", "-A", "app.workers.celery_app", "worker", "-l", "info"], {
       cwd: BACKEND,
       shell: false,
@@ -346,7 +209,7 @@ async function main() {
       env: envForBackendChild(),
     });
   } else {
-    log("Tip: set START_CELERY=1 to run worker+beat for biometric polling");
+    log("Tip: set START_CELERY=1 to run worker+beat (requires Redis)");
   }
 
   await sleep(1500);
