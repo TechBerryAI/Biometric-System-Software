@@ -88,7 +88,7 @@ def daily_summary(
         summary_date = datetime.now(ZoneInfo(tz_name)).date()
     start_utc, end_utc = _day_bounds_utc(summary_date, tz_name)
 
-    employees = list(db.execute(select(Employee)).scalars().all())
+    employees = list(db.execute(select(Employee).order_by(Employee.id)).scalars().all())
     logs = list(
         db.execute(
             select(AttendanceLog)

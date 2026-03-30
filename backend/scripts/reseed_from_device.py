@@ -38,8 +38,8 @@ def main() -> None:
         print(f"  Users on device: {users_total}; inserted: {users_inserted}")
 
         print("Syncing attendance from device ...")
-        logs_fetched, logs_inserted = run_device_sync(db)
-        print(f"  Attendance fetched: {logs_fetched}; inserted: {logs_inserted}")
+        logs_fetched, logs_inserted, placeholders = run_device_sync(db)
+        print(f"  Attendance fetched: {logs_fetched}; inserted: {logs_inserted}; placeholders: {placeholders}")
         print("Done.")
     finally:
         db.close()

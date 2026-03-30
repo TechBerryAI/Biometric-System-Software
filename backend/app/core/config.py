@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     timezone: str = Field(default="UTC", alias="TIMEZONE")
     device_poll_interval_seconds: int = Field(default=120, alias="DEVICE_POLL_INTERVAL_SECONDS")
     default_shift_start: time = Field(default=time(9, 30), alias="DEFAULT_SHIFT_START")
+    # After each device pull, rebuild sessions for this many trailing local calendar days (1–62).
+    session_rebuild_lookback_days: int = Field(
+        default=14, ge=1, le=62, alias="SESSION_REBUILD_LOOKBACK_DAYS"
+    )
 
 
 @lru_cache
