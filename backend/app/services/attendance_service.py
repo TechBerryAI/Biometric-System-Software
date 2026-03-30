@@ -73,7 +73,10 @@ def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -
             .on_conflict_do_nothing(index_elements=[Employee.device_user_id])
         )
         result = db.execute(stmt)
-        inserted += result.rowcount or 0
+        rc = result.rowcount
+        # psycopg may return -1 for "unknown" on INSERT ... ON CONFLICT DO NOTHING
+        if rc is not None and rc > 0:
+            inserted += rc
     db.commit()
     return inserted
 
@@ -99,7 +102,9 @@ def insert_attendance_logs_idempotent(
             .on_conflict_do_nothing(constraint="uq_log_employee_ts")
         )
         res = db.execute(stmt)
-        rows += res.rowcount or 0
+        rc = res.rowcount
+        if rc is not None and rc > 0:
+            rows += rc
     db.commit()
     return rows
 

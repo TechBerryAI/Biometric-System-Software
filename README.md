@@ -93,13 +93,21 @@ celery -A app.workers.celery_app worker -l info
 celery -A app.workers.celery_app beat -l info
 ```
 
-**Scripts** (same logic as scheduled tasks):
+**Copy everything from the terminal (read-only on device)** — users + attendance + session rebuild:
 
 ```bash
 cd backend
+.venv\Scripts\python.exe scripts\sync_from_device.py
+```
+
+Or run steps separately:
+
+```bash
 python scripts/sync_users.py
 python scripts/poll_device.py
 ```
+
+Ensure `ZK_DEVICE_IP` and `ZK_DEVICE_PORT` in `backend/.env` match the machine (same LAN as your PC). Run periodically or use Celery + Redis for automatic polling.
 
 **Frontend**
 

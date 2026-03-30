@@ -137,8 +137,11 @@ async function npmInstallFrontend() {
     return;
   }
   log("Installing frontend dependencies (npm install)…");
-  const npmCmd = isWin ? "npm.cmd" : "npm";
-  const r = spawn(npmCmd, ["install"], { cwd: FRONTEND, stdio: "inherit", shell: false });
+  const r = spawn("npm", ["install"], {
+    cwd: FRONTEND,
+    stdio: "inherit",
+    shell: isWin,
+  });
   const code = await waitForExit(r);
   if (code !== 0) throw new Error(`npm install failed with exit ${code}`);
 }
@@ -215,10 +218,10 @@ async function main() {
   await sleep(1500);
 
   log(`Starting Vite on http://localhost:5173 (API ${apiUrl})…`);
-  const npmCmd = isWin ? "npm.cmd" : "npm";
-  run(npmCmd, ["run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"], {
+  // Windows: npm is a .cmd shim; spawn without shell: true often raises EINVAL.
+  run("npm", ["run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"], {
     cwd: FRONTEND,
-    shell: false,
+    shell: isWin,
     env: feEnv,
   });
 
