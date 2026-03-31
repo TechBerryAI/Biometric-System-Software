@@ -119,7 +119,6 @@ export function Attendance() {
   }, [rows, query]);
 
   const presentCount = filtered.filter((r) => !r.is_absent).length;
-  const lateCount = filtered.filter((r) => !r.is_absent && r.late_arrival).length;
   const absentCount = filtered.filter((r) => r.is_absent).length;
 
   const exportReport = useCallback(async () => {
@@ -219,7 +218,7 @@ export function Attendance() {
         {[
           { label: "In view", value: filtered.length || employees.length },
           { label: "Present", value: presentCount },
-          { label: "Late", value: lateCount },
+          { label: "Absent", value: absentCount },
         ].map((k, i) => (
           <motion.div
             key={k.label}
@@ -251,7 +250,7 @@ export function Attendance() {
                 <th className="px-5 py-3.5">Employee</th>
                 <th className="px-5 py-3.5 whitespace-nowrap">In</th>
                 <th className="px-5 py-3.5 whitespace-nowrap">Out</th>
-                <th className="px-5 py-3.5">Work</th>
+                <th className="px-5 py-3.5">Total work</th>
               </tr>
             </thead>
             <tbody>
@@ -277,9 +276,7 @@ export function Attendance() {
                     </td>
                     <td className="px-5 py-3.5 whitespace-nowrap text-ink-muted">{fmtDateTime(r.first_check_in)}</td>
                     <td className="px-5 py-3.5 whitespace-nowrap text-ink-muted">{fmtDateTime(r.last_check_out)}</td>
-                    <td className="px-5 py-3.5 tabular-nums text-ink-muted">
-                      {fmtWorkHm(r.total_work_minutes)}
-                    </td>
+                    <td className="px-5 py-3.5 tabular-nums text-ink-muted">{fmtWorkHm(r.total_work_minutes)}</td>
                   </tr>
                 ))
               )}
