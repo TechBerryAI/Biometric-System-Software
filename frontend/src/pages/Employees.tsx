@@ -31,13 +31,15 @@ export function Employees() {
   const filtered = useMemo(() => {
     if (!rows) return [];
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (e) =>
-        e.name.toLowerCase().includes(q) ||
-        String(e.device_user_id).toLowerCase().includes(q) ||
-        (e.department?.toLowerCase().includes(q) ?? false)
-    );
+    const list = !q
+      ? rows
+      : rows.filter(
+          (e) =>
+            e.name.toLowerCase().includes(q) ||
+            String(e.device_user_id).toLowerCase().includes(q) ||
+            (e.department?.toLowerCase().includes(q) ?? false)
+        );
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
   }, [rows, query]);
 
   if (error) {
