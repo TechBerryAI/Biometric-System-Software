@@ -5,26 +5,32 @@ import {
   ClipboardList,
   FileBarChart2,
   LayoutDashboard,
+  ShieldCheck,
   ScanFace,
   Settings,
   Users,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import { useAuth } from "@/auth/AuthContext";
+import type { Permission } from "@/auth/permissions";
 import { cn } from "@/lib/cn";
 import { useUiStore } from "@/stores/ui-store";
 import { Button } from "@/components/ui/button";
 
 const items = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/employees", label: "Employees", icon: Users },
-  { to: "/attendance", label: "Attendance", icon: ClipboardList },
-  { to: "/reports", label: "Reports", icon: FileBarChart2 },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: "reports:read" as Permission },
+  { to: "/employees", label: "Employees", icon: Users, permission: "employee:edit" as Permission },
+  { to: "/attendance", label: "Attendance", icon: ClipboardList, permission: "reports:read" as Permission },
+  { to: "/reports", label: "Reports", icon: FileBarChart2, permission: "reports:read" as Permission },
+  { to: "/operations", label: "Operations", icon: ShieldCheck, permission: "metrics:read" as Permission },
+  { to: "/settings", label: "Settings", icon: Settings, permission: "metrics:read" as Permission },
 ] as const;
 
 export function Sidebar() {
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
   const toggle = useUiStore((s) => s.toggleSidebar);
+  const { can } = useAuth();
+  const visibleItems = items.filter((item) => can(item.permission));
 
   return (
     <motion.aside
@@ -75,7 +81,7 @@ export function Sidebar() {
       ) : null}
 
       <nav className="flex flex-1 flex-col gap-0.5 p-2">
-        {items.map(({ to, label, icon: Icon, end }) => (
+        {visibleItems.map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}

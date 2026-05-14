@@ -43,10 +43,12 @@ export function AttendanceTrendChart({
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden border-line/60 bg-surface-card/95">
         <CardHeader>
           <CardTitle>Attendance trend</CardTitle>
-          <CardDescription>Present, late, and absent headcount by day (local timezone).</CardDescription>
+          <CardDescription>
+            Daily present and absent counts in local time.
+          </CardDescription>
         </CardHeader>
         <CardContent className="pb-2">
           <div className="h-[280px] w-full min-w-0">
@@ -80,14 +82,6 @@ export function AttendanceTrendChart({
                   strokeWidth={2}
                   dot={{ r: 2.5, fill: "#4F46E5", strokeWidth: 0 }}
                   activeDot={{ r: 4 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="late"
-                  name="Late"
-                  stroke="#CA8A04"
-                  strokeWidth={2}
-                  dot={{ r: 2.5, fill: "#CA8A04", strokeWidth: 0 }}
                 />
                 <Line
                   type="monotone"

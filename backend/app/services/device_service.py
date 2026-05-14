@@ -1,4 +1,4 @@
-"""Read-only ZKTeco / ESSL device access via pyzk (shadow mode)."""
+"""ZKTeco / ESSL device access via pyzk."""
 
 from __future__ import annotations
 
@@ -39,8 +39,7 @@ class DeviceAttendanceRecord:
 
 class DeviceService:
     """
-    TCP connection to the terminal. Only get_users() and get_attendance() are used.
-    Never clears logs or modifies device users.
+    TCP connection to the terminal for users and attendance.
     """
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -101,6 +100,21 @@ class DeviceService:
             )
         return out
 
+    def check_connection(self) -> tuple[bool, str]:
+        """Check if device is reachable and pyzk handshake succeeds."""
+        zk = self._make_zk()
+        try:
+            conn = zk.connect()
+            try:
+                return True, "connected"
+            finally:
+                try:
+                    conn.disconnect()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("disconnect after health check: %s", exc)
+        except (ZKError, OSError, TimeoutError) as exc:
+            return False, str(exc)
+
     def fetch_attendance(self) -> list[DeviceAttendanceRecord]:
         """Return attendance rows from device; empty list on failure."""
         zk = self._make_zk()
@@ -145,6 +159,61 @@ class DeviceService:
                 logger.debug("Skipping malformed attendance row: %s (%s)", row, exc)
                 continue
         return out
+
+    def upsert_user(
+        self,
+        *,
+        user_id: str,
+        name: str,
+        uid: int | None = None,
+        privilege: int | None = None,
+        group_id: str | None = None,
+        card: str | None = None,
+    ) -> None:
+        """
+        Create/update a user on the biometric device.
+
+        Notes:
+        - This updates user metadata only (not biometric templates).
+        - If ``uid`` is omitted, we try to reuse existing uid for same user_id.
+        """
+        user_id = user_id.strip()
+        if not user_id:
+            raise ValueError("user_id is required for device upsert.")
+        safe_name = name.strip() or user_id
+
+        zk = self._make_zk()
+        try:
+            conn = zk.connect()
+            try:
+                target_uid = uid
+                if target_uid is None:
+                    for existing in conn.get_users():
+                        existing_user_id = str(getattr(existing, "user_id", "") or "").strip()
+                        if existing_user_id == user_id:
+                            existing_uid_raw = getattr(existing, "uid", None)
+                            if existing_uid_raw is not None:
+                                target_uid = int(existing_uid_raw)
+                                break
+                if target_uid is None:
+                    target_uid = 0
+
+                kwargs: dict[str, object] = {
+                    "uid": target_uid,
+                    "name": safe_name,
+                    "privilege": int(privilege or 0),
+                    "user_id": user_id,
+                    "group_id": group_id or "",
+                    "card": int(card) if card and str(card).isdigit() else 0,
+                }
+                conn.set_user(**kwargs)
+            finally:
+                try:
+                    conn.disconnect()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("disconnect after upsert_user: %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"Device user upsert failed for '{user_id}': {exc}") from exc
 
 
 def get_device_service(settings: Settings | None = None) -> DeviceService:

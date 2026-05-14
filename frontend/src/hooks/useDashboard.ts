@@ -26,7 +26,6 @@ export function useDashboard() {
     void load();
   }, [load]);
 
-  const lateCount = summary.filter((r) => r.late_arrival && r.first_check_in != null).length;
   const presentToday = summary.filter((r) => r.first_check_in != null).length;
   const absentToday = summary.filter((r) => r.first_check_in == null).length;
 
@@ -36,7 +35,6 @@ export function useDashboard() {
     loading,
     error,
     reload: load,
-    lateCount,
     presentToday,
     absentToday,
     totalEmployees: employees.length,

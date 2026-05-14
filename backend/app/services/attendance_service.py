@@ -6,15 +6,17 @@ import logging
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from typing import Sequence
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, delete, exists, select
+from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.models.attendance_log import AttendanceLog
 from app.models.attendance_session import AttendanceSession
+from app.models.device_user_mapping import DeviceUserMapping
 from app.models.employee import Employee
 from app.services.device_service import DeviceAttendanceRecord, DeviceService, DeviceUser
 
@@ -22,26 +24,6 @@ logger = logging.getLogger(__name__)
 
 def _local_date(dt: datetime, tz: ZoneInfo) -> date:
     return dt.astimezone(tz).date()
-
-
-def _minutes_late(check_in: datetime, shift_start: time | None, tz: ZoneInfo) -> int | None:
-    if shift_start is None:
-        return None
-    local = check_in.astimezone(tz)
-    expected = datetime.combine(local.date(), shift_start, tzinfo=tz)
-    delta = local - expected
-    secs = int(delta.total_seconds())
-    return max(0, secs // 60) if secs > 0 else 0
-
-
-def _minutes_early(check_out: datetime, shift_end: time | None, tz: ZoneInfo) -> int | None:
-    if shift_end is None:
-        return None
-    local = check_out.astimezone(tz)
-    expected = datetime.combine(local.date(), shift_end, tzinfo=tz)
-    delta = expected - local
-    secs = int(delta.total_seconds())
-    return max(0, secs // 60) if secs > 0 else 0
 
 
 def _classify_punch(punch_type: str) -> bool | None:
@@ -54,12 +36,79 @@ def _classify_punch(punch_type: str) -> bool | None:
     return None
 
 
+def _ensure_active_mapping(
+    db: Session,
+    *,
+    employee_uuid: str,
+    device_id: str,
+    device_user_id: str,
+    effective_at: datetime,
+) -> int:
+    existing_for_identity = db.execute(
+        select(DeviceUserMapping).where(
+            DeviceUserMapping.device_id == device_id,
+            DeviceUserMapping.device_user_id == device_user_id,
+            DeviceUserMapping.active.is_(True),
+        )
+    ).scalars().all()
+    for mapping in existing_for_identity:
+        if mapping.employee_uuid != employee_uuid:
+            mapping.active = False
+            mapping.valid_to = effective_at
+
+    active_for_employee = db.execute(
+        select(DeviceUserMapping).where(
+            DeviceUserMapping.employee_uuid == employee_uuid,
+            DeviceUserMapping.device_id == device_id,
+            DeviceUserMapping.active.is_(True),
+        )
+    ).scalars().all()
+    for mapping in active_for_employee:
+        if mapping.device_user_id == device_user_id:
+            return mapping.id
+        mapping.active = False
+        mapping.valid_to = effective_at
+
+    new_mapping = DeviceUserMapping(
+        employee_uuid=employee_uuid,
+        device_id=device_id,
+        device_user_id=device_user_id,
+        valid_from=effective_at,
+        active=True,
+    )
+    db.add(new_mapping)
+    db.flush()
+    return new_mapping.id
+
+
+def _resolve_mapping_for_punch(
+    db: Session,
+    *,
+    device_id: str,
+    device_user_id: str,
+    at_time: datetime,
+) -> DeviceUserMapping | None:
+    return db.execute(
+        select(DeviceUserMapping)
+        .where(
+            DeviceUserMapping.device_id == device_id,
+            DeviceUserMapping.device_user_id == device_user_id,
+            DeviceUserMapping.valid_from <= at_time,
+            or_(DeviceUserMapping.valid_to.is_(None), DeviceUserMapping.valid_to > at_time),
+        )
+        .order_by(DeviceUserMapping.valid_from.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -> int:
     """
     Upsert device users into employees with ON CONFLICT DO NOTHING on device_user_id.
     Returns number of rows attempted (not necessarily inserted).
     """
     affected = 0
+    now = datetime.now(ZoneInfo("UTC"))
+    settings = get_settings()
     for u in users:
         # Transition helper: old builds stored uid as numeric string.
         old_uid_identity = str(u.uid)
@@ -77,11 +126,14 @@ def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -
                 legacy.device_privilege = u.privilege
                 legacy.device_group_id = u.group_id
                 legacy.device_card = u.card
+                if not legacy.employee_uuid:
+                    legacy.employee_uuid = str(uuid4())
                 db.flush()
 
         stmt = (
             pg_insert(Employee)
             .values(
+                employee_uuid=str(uuid4()),
                 device_user_id=u.user_id,
                 device_uid=u.uid,
                 device_privilege=u.privilege,
@@ -108,6 +160,19 @@ def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -
         # psycopg may return -1 for "unknown" on upsert rowcount
         if rc is not None and rc > 0:
             affected += rc
+        emp = db.execute(select(Employee).where(Employee.device_user_id == u.user_id)).scalar_one_or_none()
+        if emp is None:
+            continue
+        if not emp.employee_uuid:
+            emp.employee_uuid = str(uuid4())
+            db.flush()
+        _ensure_active_mapping(
+            db,
+            employee_uuid=emp.employee_uuid,
+            device_id=settings.zk_device_id,
+            device_user_id=u.user_id,
+            effective_at=now,
+        )
     db.commit()
     return affected
 
@@ -117,20 +182,28 @@ def insert_attendance_logs_idempotent(
     records: Sequence[DeviceAttendanceRecord],
     device_id: str,
 ) -> int:
-    """Insert raw logs; duplicates ignored via unique (employee_code, timestamp)."""
+    """Insert raw logs; duplicates ignored via unique (device_id, employee_code, timestamp)."""
     rows = 0
     for r in records:
         employee_code = r.user_id
         punch_type = str(r.punch)
+        mapping = _resolve_mapping_for_punch(
+            db,
+            device_id=device_id,
+            device_user_id=employee_code,
+            at_time=r.timestamp,
+        )
         stmt = (
             pg_insert(AttendanceLog)
             .values(
                 employee_code=employee_code,
                 timestamp=r.timestamp,
                 device_id=device_id,
+                employee_uuid=mapping.employee_uuid if mapping else None,
+                device_mapping_id=mapping.id if mapping else None,
                 punch_type=punch_type,
             )
-            .on_conflict_do_nothing(constraint="uq_log_employee_ts")
+            .on_conflict_do_nothing(constraint="uq_log_device_employee_ts")
         )
         res = db.execute(stmt)
         rc = res.rowcount
@@ -148,9 +221,7 @@ def backfill_employees_from_orphan_logs(db: Session) -> int:
     only appears in historical attendance, those people were omitted from daily summaries. This
     links orphan codes so every puncher appears in the app (placeholder name until metadata sync).
     """
-    correlated = exists(
-        select(1).where(Employee.device_user_id == AttendanceLog.employee_code)
-    )
+    correlated = exists(select(1).where(Employee.device_user_id == AttendanceLog.employee_code))
     stmt = (
         select(AttendanceLog.employee_code)
         .distinct()
@@ -162,10 +233,13 @@ def backfill_employees_from_orphan_logs(db: Session) -> int:
     if not codes:
         return 0
     inserted = 0
+    settings = get_settings()
+    now = datetime.now(ZoneInfo("UTC"))
     for code in codes:
         res = db.execute(
             pg_insert(Employee)
             .values(
+                employee_uuid=str(uuid4()),
                 device_user_id=code,
                 name=f"User {code}",
                 department=None,
@@ -177,6 +251,18 @@ def backfill_employees_from_orphan_logs(db: Session) -> int:
         rc = res.rowcount
         if rc is not None and rc > 0:
             inserted += 1
+    employees = db.execute(select(Employee).where(Employee.device_user_id.in_(codes))).scalars().all()
+    for emp in employees:
+        if not emp.employee_uuid:
+            emp.employee_uuid = str(uuid4())
+            db.flush()
+        _ensure_active_mapping(
+            db,
+            employee_uuid=emp.employee_uuid,
+            device_id=settings.zk_device_id,
+            device_user_id=emp.device_user_id,
+            effective_at=now,
+        )
     db.commit()
     return inserted
 
@@ -260,18 +346,26 @@ def rebuild_sessions_for_local_date(db: Session, target: date, settings: Setting
         )
     ).scalars().all()
 
-    by_employee_day: dict[tuple[str, date], list[AttendanceLog]] = defaultdict(list)
+    by_employee_day: dict[tuple[int, date], list[AttendanceLog]] = defaultdict(list)
+    employees = db.execute(select(Employee)).scalars().all()
+    code_to_employee: dict[str, Employee] = {str(e.device_user_id): e for e in employees}
+    uuid_to_employee: dict[str, Employee] = {e.employee_uuid: e for e in employees if e.employee_uuid}
     for lg in log_rows:
         d = _local_date(lg.timestamp, tz)
         if d == target:
-            by_employee_day[(lg.employee_code, d)].append(lg)
-
-    employees = db.execute(select(Employee)).scalars().all()
-    code_to_employee: dict[str, Employee] = {str(e.device_user_id): e for e in employees}
+            emp: Employee | None = None
+            if lg.employee_uuid:
+                emp = uuid_to_employee.get(lg.employee_uuid)
+            if emp is None:
+                emp = code_to_employee.get(lg.employee_code)
+            if emp is None:
+                continue
+            by_employee_day[(emp.id, d)].append(lg)
 
     created = 0
-    for (code, _day), day_logs in by_employee_day.items():
-        emp = code_to_employee.get(code)
+    employee_by_id: dict[int, Employee] = {e.id: e for e in employees}
+    for (employee_id, _day), day_logs in by_employee_day.items():
+        emp = employee_by_id.get(employee_id)
         if emp is None:
             continue
         pairs = _pair_logs_for_day(day_logs, tz)
@@ -282,17 +376,12 @@ def rebuild_sessions_for_local_date(db: Session, target: date, settings: Setting
             if check_out and check_out > check_in:
                 work_min = int((check_out - check_in).total_seconds() // 60)
 
-            late = _minutes_late(check_in, emp.shift_start, tz)
-            early = _minutes_early(check_out, emp.shift_end, tz) if check_out else None
-
             db.add(
                 AttendanceSession(
                     employee_id=emp.id,
                     check_in=check_in,
                     check_out=check_out,
                     work_duration=work_min,
-                    late_minutes=late,
-                    early_minutes=early,
                     status=status,
                 )
             )
@@ -323,6 +412,18 @@ def run_device_sync(
     lookback = settings.session_rebuild_lookback_days
     for i in range(lookback):
         rebuild_sessions_for_local_date(db, today - timedelta(days=i), settings=settings)
+
+    # Keep AI summaries/reporting aligned with fresh attendance syncs.
+    try:
+        from app.ai.cache.redis_cache import AIResponseCache
+
+        cache = AIResponseCache(settings)
+        cache.delete_prefix("ai:management:")
+        cache.delete_prefix("ai:report:")
+        cache.delete_prefix("ai:copilot:")
+        cache.delete_prefix("ai:anomaly:")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("AI cache invalidation skipped: %s", exc)
 
     return len(records), n, placeholders
 

@@ -1,8 +1,9 @@
-"""Employee ORM model (device_user_id is the authoritative device identity)."""
+"""Employee ORM model with immutable internal identity."""
 
 from __future__ import annotations
 
 from datetime import datetime, time
+from uuid import uuid4
 
 from sqlalchemy import DateTime, Integer, String, Time, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -14,7 +15,15 @@ class Employee(Base):
     __tablename__ = "employees"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # Device identity from ZKTeco user.user_id (can be alphanumeric like TBC209)
+    # Immutable internal identity used for all historical linkage.
+    employee_uuid: Mapped[str] = mapped_column(
+        String(36),
+        unique=True,
+        nullable=False,
+        index=True,
+        default=lambda: str(uuid4()),
+    )
+    # Current primary device identity (compatibility field, can change over time).
     device_user_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     device_uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
     device_privilege: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -31,3 +40,4 @@ class Employee(Base):
     )
 
     sessions = relationship("AttendanceSession", back_populates="employee")
+    device_user_mappings = relationship("DeviceUserMapping", back_populates="employee")

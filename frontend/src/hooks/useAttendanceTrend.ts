@@ -6,8 +6,14 @@ export type TrendPoint = {
   date: string;
   label: string;
   present: number;
-  late: number;
   absent: number;
+  /** Rows returned for that day (matches current roster size). */
+  headcount: number;
+  /** % of roster with at least one punch. */
+  attendanceRatePercent: number;
+  /** Average in→out minutes for present rows with both punches. */
+  avgWorkMinutes: number | null;
+  sumWorkMinutes: number;
 };
 
 export function useAttendanceTrend(days = 14) {
@@ -18,15 +24,23 @@ export function useAttendanceTrend(days = 14) {
       const summaries = await Promise.all(dates.map((d) => fetchDailySummary(d)));
       return dates.map((date, i) => {
         const rows = summaries[i] ?? [];
+        const headcount = rows.length;
         const present = rows.filter((r) => r.first_check_in != null).length;
-        const late = rows.filter((r) => r.late_arrival && r.first_check_in != null).length;
         const absent = rows.filter((r) => r.first_check_in == null).length;
+        const withSpan = rows.filter(
+          (r) => r.first_check_in != null && r.total_work_minutes != null
+        );
+        const sumWorkMinutes = withSpan.reduce((s, r) => s + (r.total_work_minutes ?? 0), 0);
+        const avgWorkMinutes = withSpan.length > 0 ? sumWorkMinutes / withSpan.length : null;
         return {
           date,
           label: date.slice(5).replace("-", "/"),
           present,
-          late,
           absent,
+          headcount,
+          attendanceRatePercent: headcount > 0 ? (present / headcount) * 100 : 0,
+          avgWorkMinutes,
+          sumWorkMinutes,
         };
       });
     },

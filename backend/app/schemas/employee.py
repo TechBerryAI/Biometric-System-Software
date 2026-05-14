@@ -20,6 +20,7 @@ class EmployeeCreate(EmployeeBase):
 
 
 class EmployeeUpdate(BaseModel):
+    device_user_id: str | None = None
     name: str | None = None
     department: str | None = None
     shift_start: time | None = None
@@ -30,6 +31,7 @@ class EmployeeRead(EmployeeBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    employee_uuid: str
     device_uid: int | None = None
     device_privilege: int | None = None
     device_group_id: str | None = None
@@ -50,6 +52,5 @@ class EmployeeDailyAttendanceRead(BaseModel):
     first_check_in: datetime | None
     last_check_out: datetime | None
     total_work_minutes: int | None
-    late_arrival: bool
     absent: bool
     punch_count: int

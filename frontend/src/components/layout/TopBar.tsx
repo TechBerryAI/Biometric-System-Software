@@ -1,6 +1,7 @@
 import { Bell, Search } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/auth/AuthContext";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -22,6 +23,7 @@ function initials(name: string): string {
 
 export function TopBar({ className }: { className?: string }) {
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
   const [q, setQ] = useState("");
 
   const onSearchKeyDown = useCallback(
@@ -33,6 +35,11 @@ export function TopBar({ className }: { className?: string }) {
     },
     [navigate, q]
   );
+
+  const onLogout = useCallback(async () => {
+    await logout();
+    navigate("/login", { replace: true });
+  }, [logout, navigate]);
 
   return (
     <header
@@ -65,11 +72,11 @@ export function TopBar({ className }: { className?: string }) {
               className="flex items-center gap-2 rounded-xl py-1 pl-1 pr-2 transition-colors hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
             >
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-soft text-xs font-semibold text-violet">
-                {initials("Admin User")}
+                {initials(user?.email ?? "User")}
               </span>
               <span className="hidden text-left text-sm lg:block">
-                <span className="block font-medium text-ink">Admin</span>
-                <span className="block text-xs text-ink-muted">Operator</span>
+                <span className="block font-medium text-ink">{user?.email ?? "Unknown user"}</span>
+                <span className="block text-xs text-ink-muted">{user?.role ?? "No role"}</span>
               </span>
             </button>
           </DropdownMenuTrigger>
@@ -78,6 +85,9 @@ export function TopBar({ className }: { className?: string }) {
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => navigate("/settings")}>Settings</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => navigate("/reports")}>Reports</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => navigate("/operations")}>Operations</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onLogout}>Sign out</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

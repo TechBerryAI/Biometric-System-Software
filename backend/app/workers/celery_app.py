@@ -30,6 +30,18 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.sync_attendance_from_device",
         "schedule": timedelta(seconds=settings.device_poll_interval_seconds),
     },
+    "process-device-commands": {
+        "task": "app.workers.tasks.process_device_commands",
+        "schedule": timedelta(seconds=15),
+    },
+    "reconcile-devices": {
+        "task": "app.workers.tasks.reconcile_devices",
+        "schedule": timedelta(seconds=settings.reconciliation_interval_seconds),
+    },
+    "recover-stale-commands": {
+        "task": "app.workers.tasks.recover_stale_commands",
+        "schedule": timedelta(seconds=60),
+    },
 }
 
 import app.workers.tasks  # noqa: E402, F401 — register task definitions
