@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Plus, Search } from "lucide-react";
+import { PenSquare, Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AddEmployeeModal } from "@/components/employees/AddEmployeeModal";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchEmployees } from "@/services/api";
 import { cn } from "@/lib/cn";
+import type { Employee } from "@/types";
 
 export function Employees() {
   const navigate = useNavigate();
@@ -18,6 +19,7 @@ export function Employees() {
   const initialQ = searchParams.get("q") ?? "";
   const [query, setQuery] = useState(initialQ);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
 
   useEffect(() => {
     setQuery(searchParams.get("q") ?? "");
@@ -72,7 +74,10 @@ export function Employees() {
         </div>
         <Button
           type="button"
-          onClick={() => setModalOpen(true)}
+          onClick={() => {
+            setEditingEmployee(null);
+            setModalOpen(true);
+          }}
           className="shrink-0 shadow-sm shadow-primary/20"
         >
           <Plus className="h-4 w-4" strokeWidth={2} />
@@ -93,7 +98,7 @@ export function Employees() {
         {isFetching ? <span className="text-xs text-ink-muted">Refreshing…</span> : null}
       </div>
 
-      <AddEmployeeModal open={modalOpen} onOpenChange={setModalOpen} />
+      <AddEmployeeModal open={modalOpen} onOpenChange={setModalOpen} employee={editingEmployee} />
 
       {isLoading ? (
         <div className="space-y-3">
@@ -116,12 +121,13 @@ export function Employees() {
                   <th className="px-6 py-3.5">Device user id</th>
                   <th className="px-6 py-3.5">Department</th>
                   <th className="px-6 py-3.5">Shift</th>
+                  <th className="px-6 py-3.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-16 text-center">
+                    <td colSpan={5} className="px-6 py-16 text-center">
                       <p className="text-sm font-medium text-ink">No matches</p>
                       <p className="mt-1 text-sm text-ink-muted">Try another search or add an employee.</p>
                     </td>
@@ -153,6 +159,22 @@ export function Employees() {
                       <td className="px-6 py-4 text-ink-muted">{e.department ?? "—"}</td>
                       <td className="px-6 py-4 text-xs text-ink-muted">
                         {e.shift_start && e.shift_end ? `${e.shift_start} – ${e.shift_end}` : "—"}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="h-8"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setEditingEmployee(e);
+                            setModalOpen(true);
+                          }}
+                        >
+                          <PenSquare className="h-3.5 w-3.5" />
+                          Edit
+                        </Button>
                       </td>
                     </tr>
                   ))

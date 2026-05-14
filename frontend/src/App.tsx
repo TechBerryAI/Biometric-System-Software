@@ -1,24 +1,87 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { RequireAuth } from "@/auth/RequireAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Attendance } from "@/pages/Attendance";
 import { Dashboard } from "@/pages/Dashboard";
 import { EmployeeProfile } from "@/pages/EmployeeProfile";
 import { Employees } from "@/pages/Employees";
+import { Login } from "@/pages/Login";
+import { Operations } from "@/pages/Operations";
 import { Reports } from "@/pages/Reports";
 import { Settings } from "@/pages/Settings";
 
 export default function App() {
   return (
-    <AppLayout>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/employees" element={<Employees />} />
-        <Route path="/employees/:employeeId" element={<EmployeeProfile />} />
-        <Route path="/attendance" element={<Attendance />} />
-        <Route path="/reports" element={<Reports />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </AppLayout>
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route
+        path="*"
+        element={
+          <RequireAuth>
+            <AppLayout>
+              <Routes>
+                <Route
+                  path="/"
+                  element={
+                    <RequireAuth permission="reports:read">
+                      <Dashboard />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/employees"
+                  element={
+                    <RequireAuth permission="employee:edit">
+                      <Employees />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/employees/:employeeId"
+                  element={
+                    <RequireAuth permission="employee:edit">
+                      <EmployeeProfile />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/attendance"
+                  element={
+                    <RequireAuth permission="reports:read">
+                      <Attendance />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/reports"
+                  element={
+                    <RequireAuth permission="reports:read">
+                      <Reports />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/operations"
+                  element={
+                    <RequireAuth permission="metrics:read">
+                      <Operations />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/settings"
+                  element={
+                    <RequireAuth permission="metrics:read">
+                      <Settings />
+                    </RequireAuth>
+                  }
+                />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </AppLayout>
+          </RequireAuth>
+        }
+      />
+    </Routes>
   );
 }

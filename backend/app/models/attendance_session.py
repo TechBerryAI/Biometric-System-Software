@@ -25,8 +25,6 @@ class AttendanceSession(Base):
     work_duration: Mapped[int | None] = mapped_column(
         Integer, nullable=True, doc="Working minutes between check-in and check-out"
     )
-    late_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    early_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="complete")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

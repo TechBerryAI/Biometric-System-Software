@@ -61,13 +61,13 @@ export function ActivityFeed({
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.05 }}>
-      <Card>
+      <Card className="border-line/60 bg-surface-card/95">
         <CardHeader>
           <CardTitle>Recent activity</CardTitle>
-          <CardDescription>Newest raw punches — read-only from your biometric path.</CardDescription>
+          <CardDescription>Latest punch events, kept compact for quick scan.</CardDescription>
         </CardHeader>
-        <CardContent>
-          <ul className="space-y-2">
+        <CardContent className="pt-2">
+          <ul className="scrollbar-thin max-h-[360px] space-y-2 overflow-y-auto pr-1">
             {logs.map((log, idx) => (
               <motion.li
                 key={log.id}
@@ -75,7 +75,7 @@ export function ActivityFeed({
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.25, delay: idx * 0.03 }}
                 className={cn(
-                  "group flex items-center justify-between gap-3 rounded-xl border border-line/50 bg-surface/40 px-4 py-3",
+                  "group flex items-center justify-between gap-3 rounded-xl border border-line/50 bg-surface/35 px-4 py-3",
                   "transition-all duration-200 hover:border-line hover:bg-surface-card hover:shadow-sm"
                 )}
               >

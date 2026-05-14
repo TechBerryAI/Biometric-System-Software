@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,14 +12,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { upsertEmployee } from "@/services/api";
+import { updateEmployee, upsertEmployee } from "@/services/api";
+import type { Employee } from "@/types";
 
 type Props = {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  employee?: Employee | null;
 };
 
-export function AddEmployeeModal({ open, onOpenChange }: Props) {
+export function AddEmployeeModal({ open, onOpenChange, employee }: Props) {
   const qc = useQueryClient();
   const [deviceUserId, setDeviceUserId] = useState("");
   const [name, setName] = useState("");
@@ -27,25 +29,45 @@ export function AddEmployeeModal({ open, onOpenChange }: Props) {
   const [shiftStart, setShiftStart] = useState("");
   const [shiftEnd, setShiftEnd] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const isEditMode = Boolean(employee);
+
+  useEffect(() => {
+    if (!open) return;
+    if (employee) {
+      setDeviceUserId(employee.device_user_id);
+      setName(employee.name);
+      setDepartment(employee.department ?? "");
+      setShiftStart(employee.shift_start ?? "");
+      setShiftEnd(employee.shift_end ?? "");
+      setFormError(null);
+      return;
+    }
+    setDeviceUserId("");
+    setName("");
+    setDepartment("");
+    setShiftStart("");
+    setShiftEnd("");
+    setFormError(null);
+  }, [open, employee]);
 
   const mutation = useMutation({
-    mutationFn: () =>
-      upsertEmployee({
+    mutationFn: () => {
+      const normalized = {
         device_user_id: deviceUserId.trim(),
         name: name.trim(),
         department: department.trim() || null,
         shift_start: shiftStart.trim() || null,
         shift_end: shiftEnd.trim() || null,
-      }),
+      };
+      if (isEditMode && employee) {
+        return updateEmployee(employee.id, normalized);
+      }
+      return upsertEmployee(normalized);
+    },
     onSuccess: () => {
       setFormError(null);
       void qc.invalidateQueries({ queryKey: ["employees"] });
       onOpenChange(false);
-      setDeviceUserId("");
-      setName("");
-      setDepartment("");
-      setShiftStart("");
-      setShiftEnd("");
     },
     onError: (e: unknown) => {
       setFormError(e instanceof Error ? e.message : "Could not save employee");
@@ -71,10 +93,20 @@ export function AddEmployeeModal({ open, onOpenChange }: Props) {
     >
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add or update employee</DialogTitle>
+          <DialogTitle>{isEditMode ? "Edit employee" : "Add employee"}</DialogTitle>
           <DialogDescription>
-            Upserts metadata by <span className="font-mono text-xs">device_user_id</span>. Does not push to the
-            terminal.
+            {isEditMode ? (
+              <>
+                Update employee metadata linked to{" "}
+                <span className="font-mono text-xs">device_user_id</span>.
+              </>
+            ) : (
+              <>
+                Create a new employee metadata record by{" "}
+                <span className="font-mono text-xs">device_user_id</span>.
+              </>
+            )}{" "}
+            This does not push data to the terminal.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-4">
@@ -123,10 +155,10 @@ export function AddEmployeeModal({ open, onOpenChange }: Props) {
             {mutation.isPending ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Saving
+                {isEditMode ? "Saving changes" : "Creating"}
               </>
             ) : (
-              "Save"
+              (isEditMode ? "Save changes" : "Create employee")
             )}
           </Button>
         </DialogFooter>

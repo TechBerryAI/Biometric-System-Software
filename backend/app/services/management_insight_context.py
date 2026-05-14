@@ -1,0 +1,104 @@
+"""Aggregate attendance context for management narratives (no individual names sent to models)."""
+
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.config import Settings
+from app.models.employee import Employee
+from app.schemas.attendance import DailySummaryRow
+from app.services.daily_summary_service import compute_daily_summary
+
+
+def _trailing_dates(settings: Settings, count: int) -> list[date]:
+    tz = ZoneInfo(settings.timezone)
+    today = datetime.now(tz).date()
+    return [today - timedelta(days=count - 1 - i) for i in range(count)]
+
+
+def _department_rollup_today(
+    summary_rows: list[DailySummaryRow],
+    employees: list[Employee],
+) -> list[dict[str, float | int | str | None]]:
+    by_id = {e.id: e for e in employees}
+
+    def dept_of(employee_id: int) -> str:
+        e = by_id.get(employee_id)
+        return (e.department or "").strip() or "Unassigned"
+
+    reg: dict[str, int] = {}
+    for e in employees:
+        d = (e.department or "").strip() or "Unassigned"
+        reg[d] = reg.get(d, 0) + 1
+
+    stats: dict[str, dict[str, int | float]] = {}
+    for r in summary_rows:
+        d = dept_of(r.employee_id)
+        if d not in stats:
+            stats[d] = {"present": 0, "work_sum": 0, "work_n": 0}
+        s = stats[d]
+        if r.first_check_in is not None:
+            s["present"] += 1  # type: ignore[operator]
+            if r.total_work_minutes is not None:
+                s["work_sum"] += r.total_work_minutes  # type: ignore[operator]
+                s["work_n"] += 1  # type: ignore[operator]
+
+    depts = sorted(set(reg.keys()) | set(stats.keys()))
+    out: list[dict[str, float | int | str | None]] = []
+    for department in depts:
+        s = stats.get(department, {"present": 0, "work_sum": 0, "work_n": 0})
+        work_n = int(s["work_n"])
+        out.append(
+            {
+                "department": department,
+                "registered": reg.get(department, 0),
+                "present": int(s["present"]),
+                "avg_work_minutes": float(s["work_sum"]) / work_n if work_n > 0 else None,
+            }
+        )
+    return out
+
+
+def build_management_insight_context(db: Session, settings: Settings, trend_days: int = 14) -> dict:
+    """Structured aggregates only — safe to send to an external LLM."""
+    dates = _trailing_dates(settings, trend_days)
+    trend: list[dict[str, float | int | str | None]] = []
+    today_rows: list[DailySummaryRow] | None = None
+
+    for d in dates:
+        rows = compute_daily_summary(db, d, settings)
+        if d == dates[-1]:
+            today_rows = rows
+        headcount = len(rows)
+        present = sum(1 for r in rows if r.first_check_in is not None)
+        absent = headcount - present
+        with_span = [r for r in rows if r.first_check_in is not None and r.total_work_minutes is not None]
+        sum_work = sum(r.total_work_minutes or 0 for r in with_span)
+        avg_work = sum_work / len(with_span) if with_span else None
+        trend.append(
+            {
+                "date": d.isoformat(),
+                "present": present,
+                "absent": absent,
+                "headcount": headcount,
+                "attendance_rate_percent": (present / headcount * 100) if headcount else 0.0,
+                "avg_work_minutes": avg_work,
+                "sum_work_minutes": sum_work,
+            }
+        )
+
+    employees = list(db.execute(select(Employee).order_by(Employee.id)).scalars().all())
+    if today_rows is None:
+        today_rows = compute_daily_summary(db, dates[-1], settings)
+
+    return {
+        "timezone": settings.timezone,
+        "roster_size": len(employees),
+        "trend_days": trend_days,
+        "daily_trend": trend,
+        "department_today": _department_rollup_today(today_rows, employees),
+    }

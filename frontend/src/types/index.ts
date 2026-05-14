@@ -34,7 +34,6 @@ export interface EmployeeDailyAttendance {
   first_check_in: string | null;
   last_check_out: string | null;
   total_work_minutes: number | null;
-  late_arrival: boolean;
   absent: boolean;
   punch_count: number;
 }
@@ -54,9 +53,6 @@ export interface AttendanceSession {
   check_in: string;
   check_out: string | null;
   work_duration: number | null;
-  late_minutes: number | null;
-  early_minutes: number | null;
-  status: string;
   created_at: string;
 }
 
@@ -68,6 +64,5 @@ export interface DailySummaryRow {
   first_check_in: string | null;
   last_check_out: string | null;
   total_work_minutes: number | null;
-  late_arrival: boolean;
   sessions_count: number;
 }

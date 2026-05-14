@@ -58,9 +58,9 @@ export function Settings() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-ink-muted leading-relaxed">
-              Default shift start used for late detection is configured with{" "}
+              Default shift anchors used for attendance window context are configured with{" "}
               <code className="rounded-md bg-surface px-1 font-mono text-xs">default_shift_start</code> in backend
-              settings. Set explicit windows when adding employees from the directory.
+              settings. Set employee-specific windows when adding people from the directory.
             </p>
             <div className="flex flex-wrap gap-2">
               <Badge variant="outline">Grace rules</Badge>

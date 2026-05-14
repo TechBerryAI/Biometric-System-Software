@@ -1,16 +1,25 @@
+import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Clock, UserCheck, UserX, Users } from "lucide-react";
+import { Percent, UserCheck, UserX, Users } from "lucide-react";
+import { useMemo } from "react";
 import { ActivityFeed } from "@/components/dashboard/ActivityFeed";
 import { AttendanceTrendChart } from "@/components/dashboard/AttendanceTrendChart";
+import { DepartmentTodayBreakdown } from "@/components/dashboard/DepartmentTodayBreakdown";
+import { ManagementInsightsCard } from "@/components/dashboard/ManagementInsightsCard";
+import { WorkHoursTrendChart } from "@/components/dashboard/WorkHoursTrendChart";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
 import { useAttendanceTrend } from "@/hooks/useAttendanceTrend";
 import { useDashboard } from "@/hooks/useDashboard";
 import { useRecentLogs } from "@/hooks/useRecentLogs";
-import { cn } from "@/lib/cn";
-import type { DailySummaryRow } from "@/types";
+import {
+  buildManagementInsights,
+  computeTodayWorkStats,
+  departmentTodayRollup,
+  formatDecimalHours,
+} from "@/lib/dashboardAnalytics";
+import { fetchManagementInsights } from "@/services/api";
 
 function KpiCard({
   title,
@@ -31,7 +40,7 @@ function KpiCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, delay }}
     >
-      <Card className="group overflow-hidden transition-shadow duration-300 hover:shadow-card-hover">
+      <Card className="group overflow-hidden border-line/50 bg-surface-card/95 transition-shadow duration-300 hover:shadow-card-hover">
         <CardContent className="p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -49,47 +58,20 @@ function KpiCard({
   );
 }
 
-function TodayTable({ rows }: { rows: DailySummaryRow[] }) {
+function CompactMetric({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-line/70 bg-surface-card shadow-card">
-      <div className="scrollbar-thin overflow-x-auto">
-        <table className="w-full min-w-[640px] text-left text-sm">
-          <thead className="sticky top-0 z-[1] bg-surface/95 backdrop-blur-sm">
-            <tr className="text-xs font-medium uppercase tracking-wider text-ink-muted shadow-[inset_0_-1px_0_#E2E8F0]">
-              <th className="px-6 py-3.5">Name</th>
-              <th className="px-6 py-3.5">Device ID</th>
-              <th className="px-6 py-3.5">Punches</th>
-              <th className="px-6 py-3.5">Work (min)</th>
-              <th className="px-6 py-3.5">Late</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, idx) => (
-              <tr
-                key={row.employee_id}
-                className={cn(
-                  "border-b border-line/40 transition-colors duration-150 hover:bg-surface/80",
-                  idx % 2 === 1 && "bg-surface/[0.35]"
-                )}
-              >
-                <td className="px-6 py-3.5 font-medium text-ink">{row.employee_name}</td>
-                <td className="px-6 py-3.5 font-mono text-xs text-ink-muted">{row.device_user_id}</td>
-                <td className="px-6 py-3.5 tabular-nums text-ink-muted">{row.sessions_count}</td>
-                <td className="px-6 py-3.5 tabular-nums text-ink-muted">
-                  {row.total_work_minutes != null ? row.total_work_minutes : "—"}
-                </td>
-                <td className="px-6 py-3.5">
-                  {row.late_arrival ? (
-                    <Badge variant="late">Late</Badge>
-                  ) : (
-                    <span className="text-ink-muted">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div className="rounded-xl border border-line/60 bg-surface/50 px-4 py-3">
+      <p className="text-xs font-medium uppercase tracking-wide text-ink-muted">{label}</p>
+      <p className="mt-1 text-xl font-semibold text-ink">{value}</p>
+      <p className="mt-1 text-xs text-ink-muted">{hint}</p>
     </div>
   );
 }
@@ -97,21 +79,86 @@ function TodayTable({ rows }: { rows: DailySummaryRow[] }) {
 export function Dashboard() {
   const dash = useDashboard();
   const trend = useAttendanceTrend(14);
-  const activity = useRecentLogs(12);
+  const activity = useRecentLogs(8);
+
+  const grokInsights = useQuery({
+    queryKey: ["management-insights", 14],
+    queryFn: () => fetchManagementInsights(14),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+    enabled: !dash.loading && !dash.error,
+  });
+
+  const todayWork = useMemo(
+    () =>
+      computeTodayWorkStats(
+        dash.summary,
+        dash.totalEmployees,
+        dash.presentToday
+      ),
+    [dash.summary, dash.totalEmployees, dash.presentToday]
+  );
+
+  const departmentRows = useMemo(
+    () => departmentTodayRollup(dash.summary, dash.employees),
+    [dash.summary, dash.employees]
+  );
+
+  const ruleInsightBullets = useMemo(
+    () =>
+      buildManagementInsights(
+        trend.data ?? [],
+        todayWork,
+        dash.presentToday,
+        dash.totalEmployees
+      ),
+    [trend.data, todayWork, dash.presentToday, dash.totalEmployees]
+  );
+
+  const insightBullets = useMemo(() => {
+    const d = grokInsights.data;
+    if (d?.available && d.source === "grok" && d.bullets.length > 0) {
+      return d.bullets;
+    }
+    return ruleInsightBullets;
+  }, [grokInsights.data, ruleInsightBullets]);
+
+  const insightSource: "grok" | "rules" | "cache" | "error" | "unconfigured" = useMemo(() => {
+    const d = grokInsights.data;
+    if (d?.available && (d.source === "grok" || d.source === "cache") && d.bullets.length > 0) return d.source;
+    if (d?.source === "error" || d?.source === "unconfigured") return d.source;
+    return "rules";
+  }, [grokInsights.data]);
+
+  const insightCached = Boolean(grokInsights.data?.cached || grokInsights.data?.source === "cache");
+  const insightErrorCode = grokInsights.data?.error_code ?? null;
 
   if (dash.loading) {
     return (
       <div className="space-y-8">
         <div>
           <Skeleton className="h-9 w-48" />
-          <Skeleton className="mt-3 h-4 w-72" />
+          <Skeleton className="mt-3 h-4 max-w-xl" />
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-32 w-full" />
           ))}
         </div>
-        <Skeleton className="h-[320px] w-full" />
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={`m-${i}`} className="h-32 w-full" />
+          ))}
+        </div>
+        <div className="grid gap-6 lg:grid-cols-5">
+          <Skeleton className="h-[320px] w-full lg:col-span-3" />
+          <Skeleton className="h-[320px] w-full lg:col-span-2" />
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Skeleton className="h-[340px] w-full" />
+          <Skeleton className="h-[340px] w-full" />
+        </div>
+        <Skeleton className="h-40 w-full" />
       </div>
     );
   }
@@ -130,12 +177,14 @@ export function Dashboard() {
   }
 
   return (
-    <div className="space-y-10">
-      <header>
+    <div className="space-y-8">
+      <header className="rounded-2xl border border-line/60 bg-gradient-to-r from-surface-card to-primary-soft/30 px-6 py-6 shadow-card">
         <h1 className="font-display text-display-xl text-ink">Dashboard</h1>
-        <p className="mt-2 max-w-2xl text-sm text-ink-muted leading-relaxed">
-          Today&apos;s operational snapshot from processed sessions and live punch trails — calm, precise, and ready
-          for review.
+        <p className="mt-2 max-w-3xl text-sm text-ink-muted leading-relaxed">
+          Headcount, attendance, and work hours in one view — built for quick management review and week-over-week context.
+        </p>
+        <p className="mt-3 text-xs font-medium uppercase tracking-wide text-ink-subtle">
+          Today: {dash.presentToday}/{dash.totalEmployees} present
         </p>
       </header>
 
@@ -155,10 +204,10 @@ export function Dashboard() {
           delay={0.05}
         />
         <KpiCard
-          title="Late arrivals"
-          value={dash.lateCount}
-          hint="After shift start (local)"
-          icon={Clock}
+          title="Attendance rate"
+          value={todayWork.attendanceRate != null ? `${todayWork.attendanceRate.toFixed(0)}%` : "—"}
+          hint="Share of roster with a punch"
+          icon={Percent}
           delay={0.1}
         />
         <KpiCard
@@ -170,6 +219,55 @@ export function Dashboard() {
         />
       </section>
 
+      <section>
+        <Card className="border-line/60 bg-surface-card/95">
+          <CardContent className="space-y-4 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-ink">Operational snapshot</p>
+              <p className="text-xs text-ink-muted">Simple daily health indicators</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <CompactMetric
+                label="Attendance rate"
+                value={todayWork.attendanceRate != null ? `${todayWork.attendanceRate.toFixed(0)}%` : "—"}
+                hint="Share of roster with a punch"
+              />
+              <CompactMetric
+                label="Avg hours"
+                value={
+                  todayWork.avgWorkMinutesAmongPresent != null
+                    ? `${formatDecimalHours(todayWork.avgWorkMinutesAmongPresent)} h`
+                    : "—"
+                }
+                hint="Among staff with checkout"
+              />
+              <CompactMetric
+                label="Person-hours"
+                value={
+                  todayWork.totalWorkMinutes > 0
+                    ? `${formatDecimalHours(todayWork.totalWorkMinutes)} h`
+                    : "—"
+                }
+                hint="Total tracked work span"
+              />
+              <CompactMetric
+                label="Absent today"
+                value={`${dash.absentToday}`}
+                hint="No punches recorded"
+              />
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <ManagementInsightsCard
+        bullets={insightBullets}
+        source={insightSource}
+        cached={insightCached}
+        loading={grokInsights.isLoading}
+        errorCode={insightErrorCode}
+      />
+
       <section className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">
           <AttendanceTrendChart data={trend.data} loading={trend.isLoading} />
@@ -179,24 +277,11 @@ export function Dashboard() {
         </div>
       </section>
 
-      <section className="space-y-4">
-        <div>
-          <h2 className="font-display text-display-lg text-ink">Today by employee</h2>
-          <p className="mt-1 text-sm text-ink-muted">Full roster with punch-derived metrics.</p>
-        </div>
-        {dash.summary.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center py-16 text-center">
-              <p className="text-sm font-medium text-ink">No summary rows yet</p>
-              <p className="mt-1 max-w-md text-sm text-ink-muted">
-                Sync your device or verify that attendance exists for today in your timezone.
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <TodayTable rows={dash.summary} />
-        )}
+      <section className="grid gap-6 lg:grid-cols-1">
+        <WorkHoursTrendChart data={trend.data} loading={trend.isLoading} />
       </section>
+
+      <DepartmentTodayBreakdown rows={departmentRows} />
     </div>
   );
 }

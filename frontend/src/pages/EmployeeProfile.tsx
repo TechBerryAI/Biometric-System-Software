@@ -3,7 +3,6 @@ import { motion } from "framer-motion";
 import { ArrowLeft, Download } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { EmployeeAvatar } from "@/components/employees/EmployeeAvatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -105,9 +104,8 @@ export function EmployeeProfile() {
 
   const stats = useMemo(() => {
     const present = rows.filter((r) => !r.absent).length;
-    const late = rows.filter((r) => !r.absent && r.late_arrival).length;
     const absent = rows.filter((r) => r.absent).length;
-    return { present, late, absent };
+    return { present, absent };
   }, [rows]);
 
   const exportReport = useCallback(() => {
@@ -287,10 +285,9 @@ export function EmployeeProfile() {
             </CardContent>
           </Card>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2">
             {[
               { label: "Present days", value: stats.present },
-              { label: "Late days", value: stats.late },
               { label: "Absent days", value: stats.absent },
             ].map((s) => (
               <Card key={s.label}>
@@ -317,14 +314,13 @@ export function EmployeeProfile() {
                     <th className="px-5 py-3.5">In</th>
                     <th className="px-5 py-3.5">Out</th>
                     <th className="px-5 py-3.5">Work</th>
-                    <th className="px-5 py-3.5">Status</th>
                     <th className="px-5 py-3.5">Punches</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-5 py-14 text-center text-ink-muted">
+                      <td colSpan={5} className="px-5 py-14 text-center text-ink-muted">
                         No rows in this range.
                       </td>
                     </tr>
@@ -346,15 +342,6 @@ export function EmployeeProfile() {
                         </td>
                         <td className="px-5 py-3.5 tabular-nums text-ink-muted">
                           {fmtMinutes(r.total_work_minutes)}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          {r.absent ? (
-                            <Badge variant="absent">Absent</Badge>
-                          ) : r.late_arrival ? (
-                            <Badge variant="late">Late</Badge>
-                          ) : (
-                            <Badge variant="present">OK</Badge>
-                          )}
                         </td>
                         <td className="px-5 py-3.5 tabular-nums text-ink-muted">{r.punch_count}</td>
                       </tr>
