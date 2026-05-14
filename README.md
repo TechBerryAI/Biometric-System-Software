@@ -1,82 +1,100 @@
-# Biometric attendance system
+# Biometric Workforce Intelligence Platform
 
-Connects this software to your existing biometric installation: **read-only** integration with ZKTeco / ESSL terminals (shadow mode), PostgreSQL storage, session processing, and a React dashboard.
+Enterprise-grade workforce attendance and operations platform with:
 
-## Layout
+- immutable workforce identity and device mapping lineage
+- replay-safe queued device writes with mandatory verification readback
+- reconciliation and drift recovery workflows
+- firmware certification and runtime risk containment
+- governance controls (maintenance, emergency freeze, quarantine)
+- React operations center and RBAC-protected APIs
 
-```
+## Documentation
+
+All detailed docs are now in `docs/`.
+
+- Start here: `docs/README.md`
+- Architecture: `docs/architecture-overview.md`
+- Backend internals: `docs/backend-architecture.md`
+- Frontend architecture: `docs/frontend-architecture.md`
+- Reliability/operations: `docs/operations-and-reliability.md`
+- Deployment: `docs/deployment-and-environments.md`
+- Runbooks: `docs/runbooks.md`
+- API map: `docs/api-overview.md`
+
+## Repository Layout
+
+```text
 .
-├── backend/          # FastAPI, SQLAlchemy, Alembic, Celery, pyzk
-├── frontend/         # Vite + React + TypeScript + Tailwind
-├── start.js          # Local dev: venv, migrations, API + Vite
+├── backend/       # FastAPI, SQLAlchemy, Alembic, Celery, pyzk integration
+├── frontend/      # React + Vite + TypeScript + Tailwind
+├── docs/          # Architecture, deployment, runbooks, API docs
+├── start.js       # Local full-stack bootstrap
 └── README.md
 ```
 
 ## Prerequisites
 
-- **Python 3.11+**
-- **Node.js 20+** (for the frontend)
-- **PostgreSQL 14+** (local install, e.g. Windows + pgAdmin)
-- **Redis** (optional — only if you run Celery for device polling)
+- Python 3.11+
+- Node.js 20+
+- PostgreSQL 14+
+- Redis (required for Celery worker/beat queues)
 
-## Database setup (PostgreSQL)
+## Quick Start (Recommended)
 
-1. **Install PostgreSQL** and start the service (default port **5432**).
-
-2. **Create an empty database** (e.g. in pgAdmin: right-click *Databases* → Create → name `biometric_db`).  
-   Or run the sample script as superuser `postgres`:
-
-   - File: `backend/scripts/setup_local_database.sql`
-
-3. **Configure `backend/.env`** (copy from `backend/.env.example` if needed):
-
-   ```env
-   DATABASE_URL=postgresql+psycopg://postgres:YOUR_PASSWORD@localhost:5432/biometric_db
-   ```
-
-   Replace `YOUR_PASSWORD` with the password for PostgreSQL user `postgres` (the one you use in pgAdmin).  
-   If your database name or user differs, change the URL accordingly.
-
-   **Special characters in the password** must be URL-encoded in `DATABASE_URL` (e.g. `@` → `%40`).
-
-4. **Apply schema** (creates tables inside `biometric_db`):
-
-   ```bash
-   cd backend
-   .venv\Scripts\activate
-   pip install -r requirements.txt
-   alembic upgrade head
-   ```
-
-   Migrations are a **single revision** (`0003`) that creates the full current schema. If you had an older clone whose DB was stamped at revision `0001` or `0002` only, run `alembic stamp 0003` once (after confirming your tables match the current app) or recreate the database and run `alembic upgrade head` again.
-
-## Quick start (full stack)
-
-From the **repository root** (creates venv if needed, installs deps, runs migrations, starts API + Vite):
+From repository root:
 
 ```bash
 node start.js
 ```
 
-- API: [http://localhost:8000/docs](http://localhost:8000/docs)
-- UI: [http://localhost:5173](http://localhost:5173)
+This will:
 
-Set `VITE_API_URL=http://localhost:8000` if the frontend cannot reach the API (default in local dev).
+- create backend virtual environment if missing
+- install backend and frontend dependencies
+- run Alembic migrations
+- start FastAPI API server
+- start frontend Vite server
 
-### Celery + Redis (biometric device polling)
+Default URLs:
 
-The HTTP API does not require Redis. Celery does:
+- API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+- Frontend: [http://localhost:5173](http://localhost:5173)
 
-```bash
-set START_CELERY=1
+## Enable Celery Worker + Beat
+
+On Windows PowerShell:
+
+```powershell
+$env:START_CELERY="1"
 node start.js
 ```
 
-Install Redis locally and keep `REDIS_URL=redis://localhost:6379/0` in `backend/.env`, or point it at your Redis instance.
+On Linux/macOS shell:
 
-### Manual backend / frontend (without `start.js`)
+```bash
+START_CELERY=1 node start.js
+```
 
-**Backend**
+## Manual Setup (Backend + Frontend)
+
+### 1) Configure backend environment
+
+```bash
+cd backend
+copy .env.example .env
+```
+
+Update at minimum:
+
+- `DATABASE_URL`
+- `REDIS_URL`
+- `ZK_DEVICE_IP`
+- `JWT_SECRET_KEY`
+
+### 2) Install backend and run migrations
+
+Windows:
 
 ```bash
 cd backend
@@ -87,7 +105,18 @@ alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**Celery** (optional, two terminals):
+Linux/macOS:
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+alembic upgrade head
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 3) Start Celery (separate terminals)
 
 ```bash
 cd backend
@@ -95,54 +124,72 @@ celery -A app.workers.celery_app worker -l info
 celery -A app.workers.celery_app beat -l info
 ```
 
-**Copy everything from the terminal (read-only on device)** — users + attendance + session rebuild:
-
-```bash
-cd backend
-.venv\Scripts\python.exe scripts\sync_from_device.py
-```
-
-Users-only sync (no attendance pull):
-
-```bash
-python scripts/sync_users.py
-```
-
-Ensure `ZK_DEVICE_IP` and `ZK_DEVICE_PORT` in `backend/.env` match the machine (same LAN as your PC). Run periodically or use Celery + Redis for automatic polling.
-
-**Frontend**
+### 4) Start frontend
 
 ```bash
 cd frontend
 npm install
-set VITE_API_URL=http://localhost:8000
 npm run dev
 ```
 
-## API summary
+If needed, set frontend API URL:
 
-| Method | Path                         | Description                                      |
-|--------|------------------------------|--------------------------------------------------|
-| GET    | `/health`                    | Liveness                                         |
-| GET    | `/employees`                 | List employees                                   |
-| POST   | `/employees`                 | Upsert metadata by `device_user_id` (DB only)    |
-| GET    | `/attendance/logs`           | Raw punches (`from`, `to`, `employee_code`)      |
-| GET    | `/attendance/sessions`       | Paired sessions (`from`, `to`, `employee_id`)    |
-| GET    | `/attendance/daily-summary`  | Per-employee day rollup (`summary_date`)         |
-| GET    | `/attendance/{employee_id}`  | Sessions for one employee                        |
-| POST   | `/sync/device`               | Pull users + attendance from terminal (read-only), orphan punch→employee backfill, rebuild sessions for `SESSION_REBUILD_LOOKBACK_DAYS` |
+Windows PowerShell:
 
-### Sync timeouts and missing rows
+```powershell
+$env:VITE_API_URL="http://localhost:8000"
+npm run dev
+```
 
-- The browser must wait for **`POST /sync/device`** to finish (large buffers can take minutes). The attendance UI uses a **10-minute** HTTP timeout for that call.
-- Ensure **`ZK_DEVICE_TIMEOUT_SECONDS`** in `backend/.env` is high enough for your LAN device (try **120**).
-- Anyone who punches but was never in **`get_users()`** still appears after sync: orphan **`employee_code`** values get a placeholder **`employees`** row so the daily summary lists them (shows as **User {code}** until you edit the profile).
+Linux/macOS:
 
-## Safety rules
+```bash
+VITE_API_URL=http://localhost:8000 npm run dev
+```
 
-- **Device**: only `get_users()` and `get_attendance()` via pyzk — no template storage, no clearing attendance, no user provisioning on the device.
-- **Identity**: `device_user_id` is the terminal’s user id; the API never mints a separate device identity.
+## Production-Grade Startup Checklist
 
-## Configuration
+Before enabling writes in production:
 
-See `backend/.env.example` for all variables (database, Redis, ZK device, `TIMEZONE`, `DEVICE_POLL_INTERVAL_SECONDS`).
+- run `alembic upgrade head`
+- configure strong `JWT_SECRET_KEY`
+- configure `AUTH_BOOTSTRAP_ADMIN_EMAIL` and `AUTH_BOOTSTRAP_ADMIN_PASSWORD` for initial bootstrap only
+- validate Redis connectivity and Celery workers
+- verify health endpoints:
+  - `/health`
+  - `/health/db`
+  - `/health/redis`
+  - `/health/devices`
+  - `/health/queue`
+- review `/operations/alerts`
+- keep `DEVICE_READ_ONLY=true` during initial cutover until validation is complete
+
+## Key Operational Endpoints
+
+- Health: `/health/*`
+- Operational metrics: `/ops/metrics`
+- Operations center: `/operations/*`
+- Governance controls: `/governance/*`
+
+Full endpoint grouping is documented in `docs/api-overview.md`.
+
+## Safety and Platform Guarantees
+
+- No destructive biometric device operations are allowed.
+- Biometric template operations are not part of this platform.
+- Device writes are asynchronous, serialized per device, and verification-backed.
+- Attendance truth remains append-only (`attendance_logs`) and sessions are derived/rebuildable.
+- Reconciliation and quarantine controls are first-class operational mechanisms.
+
+## Troubleshooting
+
+- Check `backend/.env` for `DATABASE_URL` and `REDIS_URL`.
+- If migrations fail, ensure PostgreSQL is running and credentials are correct.
+- If queue is stuck, inspect:
+  - `/operations/queue`
+  - `/operations/dead-letters`
+  - `/operations/alerts`
+- If device behavior is unstable, use governance controls:
+  - `/governance/maintenance`
+  - `/governance/emergency-freeze`
+  - `/governance/quarantine`
