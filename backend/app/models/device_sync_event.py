@@ -17,6 +17,7 @@ class DeviceSyncEvent(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     device_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     event_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    event_source: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)

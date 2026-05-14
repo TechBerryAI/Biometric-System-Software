@@ -76,8 +76,28 @@ class Settings(BaseSettings):
     command_queue_batch_size: int = Field(default=25, ge=1, le=250, alias="COMMAND_QUEUE_BATCH_SIZE")
     command_max_retries: int = Field(default=5, ge=1, le=20, alias="COMMAND_MAX_RETRIES")
     command_retry_base_seconds: int = Field(default=30, ge=5, le=600, alias="COMMAND_RETRY_BASE_SECONDS")
+    command_retry_max_seconds: int = Field(default=900, ge=30, le=86400, alias="COMMAND_RETRY_MAX_SECONDS")
     command_stale_minutes: int = Field(default=15, ge=1, le=240, alias="COMMAND_STALE_MINUTES")
+    command_heartbeat_seconds: int = Field(default=10, ge=5, le=120, alias="COMMAND_HEARTBEAT_SECONDS")
+    command_lock_blocking_seconds: int = Field(default=1, ge=0, le=30, alias="COMMAND_LOCK_BLOCKING_SECONDS")
+    command_cooldown_ms: int = Field(default=250, ge=0, le=10000, alias="COMMAND_COOLDOWN_MS")
+    command_max_recover_verification_lookback: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        alias="COMMAND_MAX_RECOVER_VERIFICATION_LOOKBACK",
+    )
     reconciliation_interval_seconds: int = Field(default=300, ge=30, le=3600, alias="RECONCILIATION_INTERVAL_SECONDS")
+    snapshot_interval_seconds: int = Field(default=900, ge=60, le=21600, alias="SNAPSHOT_INTERVAL_SECONDS")
+    snapshot_retention_days: int = Field(default=30, ge=7, le=3650, alias="SNAPSHOT_RETENTION_DAYS")
+    command_history_retention_days: int = Field(default=90, ge=7, le=3650, alias="COMMAND_HISTORY_RETENTION_DAYS")
+    reconciliation_retention_days: int = Field(default=180, ge=30, le=3650, alias="RECONCILIATION_RETENTION_DAYS")
+    metrics_retention_days: int = Field(default=90, ge=7, le=3650, alias="METRICS_RETENTION_DAYS")
+    allow_device_uid_rewrite: bool = Field(default=False, alias="ALLOW_DEVICE_UID_REWRITE")
+    allow_device_privilege_update: bool = Field(default=False, alias="ALLOW_DEVICE_PRIVILEGE_UPDATE")
+    allow_device_card_rewrite: bool = Field(default=False, alias="ALLOW_DEVICE_CARD_REWRITE")
+    allow_device_admin_override: bool = Field(default=False, alias="ALLOW_DEVICE_ADMIN_OVERRIDE")
+    device_read_only: bool = Field(default=False, alias="DEVICE_READ_ONLY")
 
 
 @lru_cache

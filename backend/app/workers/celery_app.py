@@ -42,6 +42,30 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.recover_stale_commands",
         "schedule": timedelta(seconds=60),
     },
+    "process-reconciliation-jobs": {
+        "task": "app.workers.tasks.process_reconciliation_jobs",
+        "schedule": timedelta(seconds=settings.reconciliation_interval_seconds),
+    },
+    "capture-device-snapshot": {
+        "task": "app.workers.tasks.capture_device_snapshot",
+        "schedule": timedelta(seconds=settings.snapshot_interval_seconds),
+    },
+    "flag-stale-reconciliation-jobs": {
+        "task": "app.workers.tasks.flag_stale_reconciliation_jobs",
+        "schedule": timedelta(seconds=settings.reconciliation_interval_seconds),
+    },
+    "aggregate-fleet-health": {
+        "task": "app.workers.tasks.aggregate_fleet_health",
+        "schedule": timedelta(seconds=settings.reconciliation_interval_seconds),
+    },
+    "apply-retention-policies": {
+        "task": "app.workers.tasks.apply_retention_policies",
+        "schedule": timedelta(hours=6),
+    },
+    "seed-firmware-certifications": {
+        "task": "app.workers.tasks.seed_firmware_certifications",
+        "schedule": timedelta(hours=1),
+    },
 }
 
 import app.workers.tasks  # noqa: E402, F401 — register task definitions

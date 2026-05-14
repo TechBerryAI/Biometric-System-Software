@@ -28,6 +28,7 @@ from app.schemas.employee import (
 )
 from app.services.audit_service import append_audit_log
 from app.services.device_command_service import enqueue_device_command
+from app.services.system_governance_service import assert_device_write_allowed
 
 router = APIRouter(
     prefix="/employees",
@@ -107,6 +108,17 @@ def _rollover_device_mapping(
             active=True,
         )
     )
+
+
+def _ensure_device_writes_enabled(db: Session, *, device_id: str) -> None:
+    if get_settings().device_read_only:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Device write operations are disabled (DEVICE_READ_ONLY=true).",
+        )
+    allowed, reason = assert_device_write_allowed(db, device_id=device_id)
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=reason or "Device writes blocked.")
 
 
 @router.get("", response_model=list[EmployeeRead])
@@ -280,6 +292,7 @@ def upsert_employee_metadata(
     device_user_id must match the terminal user id.
     """
     settings = get_settings()
+    _ensure_device_writes_enabled(db, device_id=settings.zk_device_id)
     existing = db.execute(select(Employee).where(Employee.device_user_id == payload.device_user_id)).scalar_one_or_none()
     effective_at = datetime.now(ZoneInfo("UTC"))
     if existing is not None:
@@ -317,6 +330,7 @@ def upsert_employee_metadata(
             },
             correlation_id=getattr(request.state, "request_id", None),
             created_by=user.user_uuid,
+            initiated_from="api:employees.upsert",
         )
         append_audit_log(
             db,
@@ -369,6 +383,7 @@ def upsert_employee_metadata(
         },
         correlation_id=getattr(request.state, "request_id", None),
         created_by=user.user_uuid,
+        initiated_from="api:employees.upsert",
     )
     append_audit_log(
         db,
@@ -403,6 +418,7 @@ def update_employee(
     Update employee metadata and propagate identity/name changes to device + DB references.
     """
     existing = db.get(Employee, employee_id)
+    _ensure_device_writes_enabled(db, device_id=get_settings().zk_device_id)
     if existing is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
 
@@ -462,6 +478,7 @@ def update_employee(
         },
         correlation_id=getattr(request.state, "request_id", None),
         created_by=user.user_uuid,
+        initiated_from="api:employees.update",
     )
     append_audit_log(
         db,

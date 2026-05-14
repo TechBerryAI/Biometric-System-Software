@@ -10,8 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.models.device import Device
+from app.models.device_runtime_health import DeviceRuntimeHealth
 from app.models.device_sync_event import DeviceSyncEvent
 from app.models.device_user_mapping import DeviceUserMapping
+from app.models.reconciliation_job import ReconciliationJob
 from app.services.device_service import DeviceService
 
 
@@ -45,10 +47,26 @@ def update_device_health(db: Session, *, status: str, detail: str | None = None,
     device = ensure_default_device(db, settings)
     device.health_status = status
     device.last_seen = _utcnow() if status == "ONLINE" else device.last_seen
+    runtime = db.execute(select(DeviceRuntimeHealth).where(DeviceRuntimeHealth.device_id == settings.zk_device_id)).scalar_one_or_none()
+    if runtime is None:
+        runtime = DeviceRuntimeHealth(device_id=settings.zk_device_id)
+        db.add(runtime)
+        db.flush()
+    if status == "ONLINE":
+        if device.mode in {"OFFLINE", "DEGRADED"}:
+            device.mode = "NORMAL"
+    elif status == "OFFLINE":
+        device.mode = "OFFLINE"
+        runtime.timeout_frequency += 1
+        runtime.connection_stability_score = max(0, runtime.connection_stability_score - 5)
+    elif status == "DEGRADED":
+        if device.mode not in {"QUARANTINED", "OFFLINE"}:
+            device.mode = "DEGRADED"
     db.add(
         DeviceSyncEvent(
             device_id=settings.zk_device_id,
             event_type="HEALTH_CHECK",
+            event_source="service:device_registry",
             status=status,
             details={"detail": detail} if detail else None,
         )
@@ -74,6 +92,7 @@ def reconcile_device_mappings(db: Session, settings: Settings | None = None) -> 
         DeviceSyncEvent(
             device_id=settings.zk_device_id,
             event_type="RECONCILIATION",
+            event_source="worker:reconcile_devices",
             status="DRIFT" if missing_on_device or missing_mapping else "OK",
             details={
                 "missing_on_device": missing_on_device[:200],
@@ -83,6 +102,20 @@ def reconcile_device_mappings(db: Session, settings: Settings | None = None) -> 
             },
         )
     )
+    if missing_on_device or missing_mapping:
+        db.add(
+            ReconciliationJob(
+                job_type="DEVICE_MAPPING_RECONCILIATION",
+                target_entity=f"device:{settings.zk_device_id}",
+                status="PENDING",
+                findings={
+                    "missing_on_device": missing_on_device[:200],
+                    "missing_mapping": missing_mapping[:200],
+                    "missing_on_device_count": len(missing_on_device),
+                    "missing_mapping_count": len(missing_mapping),
+                },
+            )
+        )
     return {
         "missing_on_device": len(missing_on_device),
         "missing_mapping": len(missing_mapping),
