@@ -26,6 +26,43 @@ def _local_date(dt: datetime, tz: ZoneInfo) -> date:
     return dt.astimezone(tz).date()
 
 
+def _incremental_sync_floor(db: Session, *, device_id: str, settings: Settings) -> datetime | None:
+    """Use recent overlap window so incremental sync avoids reprocessing full history."""
+    latest = db.execute(
+        select(AttendanceLog.timestamp)
+        .where(AttendanceLog.device_id == device_id)
+        .order_by(AttendanceLog.timestamp.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if latest is None:
+        return None
+    return latest - timedelta(minutes=settings.device_sync_overlap_minutes)
+
+
+def _dedupe_device_records(
+    records: Sequence[DeviceAttendanceRecord],
+    *,
+    settings: Settings,
+) -> list[DeviceAttendanceRecord]:
+    """
+    Collapse noisy back-to-back duplicate punches produced by unstable device firmware.
+    Keeps earliest record within (employee, punch_type, window) group.
+    """
+    window = timedelta(seconds=settings.duplicate_punch_window_seconds)
+    if window.total_seconds() <= 0:
+        return list(records)
+    out: list[DeviceAttendanceRecord] = []
+    last_seen: dict[tuple[str, int], datetime] = {}
+    for row in sorted(records, key=lambda r: r.timestamp):
+        key = (row.user_id, row.punch)
+        prev = last_seen.get(key)
+        if prev is not None and row.timestamp - prev <= window:
+            continue
+        out.append(row)
+        last_seen[key] = row.timestamp
+    return out
+
+
 def _classify_punch(punch_type: str) -> bool | None:
     """True = check-in, False = check-out, None = unknown."""
     p = punch_type.strip().lower()
@@ -184,9 +221,23 @@ def insert_attendance_logs_idempotent(
 ) -> int:
     """Insert raw logs; duplicates ignored via unique (device_id, employee_code, timestamp)."""
     rows = 0
+    settings = get_settings()
+    duplicate_window = timedelta(seconds=settings.duplicate_punch_window_seconds)
     for r in records:
         employee_code = r.user_id
         punch_type = str(r.punch)
+        if duplicate_window.total_seconds() > 0:
+            existing_near_duplicate = db.execute(
+                select(AttendanceLog.id).where(
+                    AttendanceLog.device_id == device_id,
+                    AttendanceLog.employee_code == employee_code,
+                    AttendanceLog.punch_type == punch_type,
+                    AttendanceLog.timestamp >= r.timestamp - duplicate_window,
+                    AttendanceLog.timestamp <= r.timestamp + duplicate_window,
+                ).limit(1)
+            ).scalar_one_or_none()
+            if existing_near_duplicate is not None:
+                continue
         mapping = _resolve_mapping_for_punch(
             db,
             device_id=device_id,
@@ -267,9 +318,55 @@ def backfill_employees_from_orphan_logs(db: Session) -> int:
     return inserted
 
 
+def prune_recent_duplicate_logs(db: Session, *, settings: Settings, days: int | None = None) -> int:
+    """
+    Remove near-duplicate punches (same employee/device/punch within duplicate window)
+    in the recent sync horizon. Keeps earliest row and deletes later jitter duplicates.
+    """
+    window_seconds = settings.duplicate_punch_window_seconds
+    if window_seconds <= 0:
+        return 0
+    horizon_days = days or settings.session_rebuild_lookback_days
+    since = datetime.now(ZoneInfo("UTC")) - timedelta(days=horizon_days)
+    rows = list(
+        db.execute(
+            select(AttendanceLog)
+            .where(AttendanceLog.timestamp >= since)
+            .order_by(
+                AttendanceLog.device_id.asc(),
+                AttendanceLog.employee_code.asc(),
+                AttendanceLog.punch_type.asc(),
+                AttendanceLog.timestamp.asc(),
+                AttendanceLog.id.asc(),
+            )
+        ).scalars().all()
+    )
+    to_delete: list[int] = []
+    last_seen: dict[tuple[str, str, str], datetime] = {}
+    for row in rows:
+        key = (row.device_id, row.employee_code, row.punch_type)
+        prev = last_seen.get(key)
+        if prev is not None and (row.timestamp - prev).total_seconds() <= window_seconds:
+            to_delete.append(row.id)
+            continue
+        last_seen[key] = row.timestamp
+    if not to_delete:
+        return 0
+    deleted = (
+        db.query(AttendanceLog)
+        .filter(AttendanceLog.id.in_(to_delete))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    logger.info("Pruned duplicate attendance logs: %s", deleted)
+    return int(deleted or 0)
+
+
 def _pair_logs_for_day(
     logs: list[AttendanceLog],
     _tz: ZoneInfo,
+    *,
+    duplicate_window_seconds: int,
 ) -> list[tuple[AttendanceLog, AttendanceLog | None, str]]:
     """
     Pair IN/OUT for one employee for one local calendar day.
@@ -279,10 +376,15 @@ def _pair_logs_for_day(
     sessions: list[tuple[AttendanceLog, AttendanceLog | None, str]] = []
     pending_in: AttendanceLog | None = None
     next_expects_in = True
+    duplicate_window = timedelta(seconds=duplicate_window_seconds)
 
     for log in logs_sorted:
         cls = _classify_punch(log.punch_type)
         if cls is True:
+            if pending_in is not None and duplicate_window.total_seconds() > 0:
+                if log.timestamp - pending_in.timestamp <= duplicate_window:
+                    # Ignore rapid duplicate IN generated by some firmware.
+                    continue
             if pending_in is not None:
                 sessions.append((pending_in, None, "missing_check_out"))
             pending_in = log
@@ -291,6 +393,9 @@ def _pair_logs_for_day(
             if pending_in is None:
                 continue
             if log.timestamp <= pending_in.timestamp:
+                continue
+            if duplicate_window.total_seconds() > 0 and log.timestamp - pending_in.timestamp <= duplicate_window:
+                # Ignore immediate IN->OUT jitter that does not represent a real session.
                 continue
             sessions.append((pending_in, log, "complete"))
             pending_in = None
@@ -368,7 +473,11 @@ def rebuild_sessions_for_local_date(db: Session, target: date, settings: Setting
         emp = employee_by_id.get(employee_id)
         if emp is None:
             continue
-        pairs = _pair_logs_for_day(day_logs, tz)
+        pairs = _pair_logs_for_day(
+            day_logs,
+            tz,
+            duplicate_window_seconds=settings.duplicate_punch_window_seconds,
+        )
         for cin_log, cout_log, status in pairs:
             check_in = cin_log.timestamp
             check_out = cout_log.timestamp if cout_log else None
@@ -404,14 +513,30 @@ def run_device_sync(
     """
     settings = settings or get_settings()
     device = device or DeviceService(settings=settings)
-    records = device.fetch_attendance()
+    floor = _incremental_sync_floor(db, device_id=settings.zk_device_id, settings=settings)
+    fetched_records = device.fetch_attendance()
+    if floor is not None:
+        fetched_records = [row for row in fetched_records if row.timestamp >= floor]
+    records = _dedupe_device_records(fetched_records, settings=settings)
     n = insert_attendance_logs_idempotent(db, records, settings.zk_device_id)
+    _ = prune_recent_duplicate_logs(db, settings=settings)
     placeholders = backfill_employees_from_orphan_logs(db)
 
-    today = datetime.now(ZoneInfo(settings.timezone)).date()
+    tz = ZoneInfo(settings.timezone)
+    today = datetime.now(tz).date()
     lookback = settings.session_rebuild_lookback_days
-    for i in range(lookback):
-        rebuild_sessions_for_local_date(db, today - timedelta(days=i), settings=settings)
+    window_start = today - timedelta(days=lookback - 1)
+    affected_dates = sorted(
+        {
+            _local_date(row.timestamp, tz)
+            for row in records
+            if window_start <= _local_date(row.timestamp, tz) <= today
+        }
+    )
+    if not affected_dates:
+        affected_dates = [today]
+    for day in affected_dates:
+        rebuild_sessions_for_local_date(db, day, settings=settings)
 
     # Keep AI summaries/reporting aligned with fresh attendance syncs.
     try:
@@ -425,7 +550,7 @@ def run_device_sync(
     except Exception as exc:  # noqa: BLE001
         logger.warning("AI cache invalidation skipped: %s", exc)
 
-    return len(records), n, placeholders
+    return len(fetched_records), n, placeholders
 
 
 def run_user_sync(

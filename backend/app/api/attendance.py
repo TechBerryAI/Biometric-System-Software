@@ -30,11 +30,14 @@ def list_attendance_logs(
     date_from: date | None = Query(None, alias="from"),
     date_to: date | None = Query(None, alias="to"),
     employee_code: str | None = None,
+    limit: int | None = Query(None, ge=1),
     db: Session = Depends(get_db),
 ) -> list[AttendanceLog]:
     settings = get_settings()
     tz = settings.timezone
-    q = select(AttendanceLog).order_by(AttendanceLog.timestamp.desc())
+    max_limit = settings.attendance_api_max_limit
+    applied_limit = min(limit if limit is not None else settings.attendance_api_default_limit, max_limit)
+    q = select(AttendanceLog).order_by(AttendanceLog.timestamp.desc()).limit(applied_limit)
     if date_from is not None:
         start, _ = day_bounds_utc(date_from, tz)
         q = q.where(AttendanceLog.timestamp >= start)
@@ -51,11 +54,14 @@ def list_attendance_sessions(
     date_from: date | None = Query(None, alias="from"),
     date_to: date | None = Query(None, alias="to"),
     employee_id: int | None = Query(None, description="Filter by internal employee id"),
+    limit: int | None = Query(None, ge=1),
     db: Session = Depends(get_db),
 ) -> list[AttendanceSession]:
     settings = get_settings()
     tz = settings.timezone
-    q = select(AttendanceSession).order_by(AttendanceSession.check_in.desc())
+    max_limit = settings.attendance_api_max_limit
+    applied_limit = min(limit if limit is not None else settings.attendance_api_default_limit, max_limit)
+    q = select(AttendanceSession).order_by(AttendanceSession.check_in.desc()).limit(applied_limit)
     if date_from is not None:
         start, _ = day_bounds_utc(date_from, tz)
         q = q.where(AttendanceSession.check_in >= start)
@@ -84,6 +90,7 @@ def list_employee_attendance(
     employee_id: int,
     date_from: date | None = Query(None, alias="from"),
     date_to: date | None = Query(None, alias="to"),
+    limit: int | None = Query(None, ge=1),
     db: Session = Depends(get_db),
 ) -> list[AttendanceSession]:
     emp = db.get(Employee, employee_id)
@@ -99,5 +106,7 @@ def list_employee_attendance(
     if date_to is not None:
         _, end = day_bounds_utc(date_to, tz)
         q = q.where(AttendanceSession.check_in < end)
-    q = q.order_by(AttendanceSession.check_in.desc())
+    max_limit = settings.attendance_api_max_limit
+    applied_limit = min(limit if limit is not None else settings.attendance_api_default_limit, max_limit)
+    q = q.order_by(AttendanceSession.check_in.desc()).limit(applied_limit)
     return list(db.execute(q).scalars().all())

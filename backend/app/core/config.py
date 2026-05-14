@@ -38,6 +38,10 @@ class Settings(BaseSettings):
 
     timezone: str = Field(default="UTC", alias="TIMEZONE")
     device_poll_interval_seconds: int = Field(default=120, alias="DEVICE_POLL_INTERVAL_SECONDS")
+    device_sync_overlap_minutes: int = Field(default=15, ge=1, le=720, alias="DEVICE_SYNC_OVERLAP_MINUTES")
+    duplicate_punch_window_seconds: int = Field(default=30, ge=0, le=300, alias="DUPLICATE_PUNCH_WINDOW_SECONDS")
+    attendance_api_default_limit: int = Field(default=1000, ge=100, le=10000, alias="ATTENDANCE_API_DEFAULT_LIMIT")
+    attendance_api_max_limit: int = Field(default=5000, ge=500, le=50000, alias="ATTENDANCE_API_MAX_LIMIT")
     default_shift_start: time = Field(default=time(9, 30), alias="DEFAULT_SHIFT_START")
     # After each device pull, rebuild sessions for this many trailing local calendar days (1–62).
     session_rebuild_lookback_days: int = Field(
