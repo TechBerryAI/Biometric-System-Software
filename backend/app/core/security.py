@@ -57,7 +57,16 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         Permission.REPORT_READ,
         Permission.ANOMALY_MANAGE,
     },
+    "IT_ADMIN": {
+        Permission.EMPLOYEE_VIEW,
+        Permission.EMPLOYEE_EDIT,
+        Permission.SYNC_TRIGGER,
+        Permission.REPORT_READ,
+        Permission.ANOMALY_MANAGE,
+        Permission.METRICS_READ,
+    },
     "CEO": {
+        Permission.SYNC_TRIGGER,
         Permission.REPORT_READ,
         Permission.EMPLOYEE_VIEW,
     },
@@ -66,7 +75,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "DEVICE_OPERATOR": set(),
 }
 
-ALLOWED_APP_ROLES = {"SUPER_ADMIN", "HR_ADMIN", "CEO"}
+ALLOWED_APP_ROLES = {"SUPER_ADMIN", "HR_ADMIN", "IT_ADMIN", "CEO"}
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:

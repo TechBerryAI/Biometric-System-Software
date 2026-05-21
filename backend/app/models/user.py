@@ -15,6 +15,7 @@ from app.core.database import Base
 class UserRole(str, Enum):
     SUPER_ADMIN = "SUPER_ADMIN"
     HR_ADMIN = "HR_ADMIN"
+    IT_ADMIN = "IT_ADMIN"
     CEO = "CEO"
     MANAGER = "MANAGER"
     VIEWER = "VIEWER"

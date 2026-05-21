@@ -25,8 +25,16 @@ export function Profile() {
 
   const isGodMode = (user?.email ?? "").trim().toLowerCase() === GOD_MODE_EMAIL;
   const accountName = user?.full_name?.trim() || "Not set";
-  const roleLabel = isGodMode ? "GOD mode" : user?.role === "HR_ADMIN" ? "HR/Admin" : user?.role ?? "Unknown";
-  const accountTier = isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" ? "hr" : "other";
+  const roleLabel =
+    isGodMode
+      ? "GOD mode"
+      : user?.role === "IT_ADMIN"
+      ? "IT Admin"
+      : user?.role === "HR_ADMIN"
+      ? "HR Admin"
+      : user?.role ?? "Unknown";
+  const accountTier =
+    isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" || user?.role === "IT_ADMIN" ? "hr" : "other";
 
   useEffect(() => {
     setFullName(user?.full_name ?? "");

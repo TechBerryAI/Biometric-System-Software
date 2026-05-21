@@ -18,11 +18,11 @@ import { useUiStore } from "@/stores/ui-store";
 import { Button } from "@/components/ui/button";
 
 const items = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: "reports:read" as Permission },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: "dashboard:view" as Permission },
   { to: "/employees", label: "Employees", icon: Users, permission: "employee:view" as Permission },
   { to: "/attendance", label: "Attendance", icon: ClipboardList, permission: "reports:read" as Permission },
   { to: "/reports", label: "Reports", icon: FileBarChart2, permission: "anomaly:manage" as Permission },
-  { to: "/operations", label: "Operations", icon: ShieldCheck, permission: "metrics:read" as Permission },
+  { to: "/operations", label: "Operations", icon: ShieldCheck, permission: "device:manage" as Permission },
   { to: "/settings", label: "Settings", icon: Settings, permission: "metrics:read" as Permission },
 ] as const;
 
@@ -31,7 +31,7 @@ export function Sidebar() {
   const toggle = useUiStore((s) => s.toggleSidebar);
   const { can, user } = useAuth();
   const isGodMode = (user?.email ?? "").trim().toLowerCase() === "techberryaiteam@gmail.com";
-  const accountTier = isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" ? "hr" : "other";
+  const accountTier = isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" || user?.role === "IT_ADMIN" ? "hr" : "other";
   const visibleItems = items.filter((item) => can(item.permission));
 
   return (

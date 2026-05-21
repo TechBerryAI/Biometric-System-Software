@@ -189,16 +189,16 @@ def create_user(
     normalized_email = str(payload.email).strip().lower()
     selected_role = str(payload.role).strip().upper()
 
-    # God mode is reserved for a single owner account only.
-    if selected_role == "SUPER_ADMIN" and normalized_email != GOD_MODE_EMAIL:
+    # GOD mode is intentionally hidden from account creation UI and API.
+    if selected_role == "SUPER_ADMIN":
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Only {GOD_MODE_EMAIL} can be assigned Super Admin (GOD mode).",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="GOD mode is reserved and cannot be assigned from Add Account.",
         )
-    if normalized_email == GOD_MODE_EMAIL and selected_role != "SUPER_ADMIN":
+    if normalized_email == GOD_MODE_EMAIL:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{GOD_MODE_EMAIL} must remain Super Admin (GOD mode).",
+            detail=f"{GOD_MODE_EMAIL} is reserved for GOD mode and cannot be created here.",
         )
 
     settings = get_settings()

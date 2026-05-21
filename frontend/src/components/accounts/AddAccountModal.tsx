@@ -21,15 +21,14 @@ type Props = {
 
 const accountRoles: Array<{ value: AppUserRole; label: string }> = [
   { value: "HR_ADMIN", label: "HR Admin" },
-  { value: "CEO", label: "CEO" },
-  { value: "SUPER_ADMIN", label: "Super Admin (THE GOD only)" },
+  { value: "IT_ADMIN", label: "IT Admin" },
 ];
 const GOD_MODE_EMAIL = "techberryaiteam@gmail.com";
 
 export function AddAccountModal({ open, onOpenChange }: Props) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<AppUserRole>("CEO");
+  const [role, setRole] = useState<AppUserRole>("IT_ADMIN");
   const [formError, setFormError] = useState<string | null>(null);
   const normalizedEmail = email.trim().toLowerCase();
 
@@ -37,15 +36,9 @@ export function AddAccountModal({ open, onOpenChange }: Props) {
     if (!open) return;
     setEmail("");
     setPassword("");
-    setRole("CEO");
+    setRole("IT_ADMIN");
     setFormError(null);
   }, [open]);
-
-  useEffect(() => {
-    if (normalizedEmail !== GOD_MODE_EMAIL && role === "SUPER_ADMIN") {
-      setRole("CEO");
-    }
-  }, [normalizedEmail, role]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -74,12 +67,8 @@ export function AddAccountModal({ open, onOpenChange }: Props) {
       setFormError("Password must be at least 8 characters.");
       return;
     }
-    if (role === "SUPER_ADMIN" && normalizedEmail !== GOD_MODE_EMAIL) {
-      setFormError(`Only ${GOD_MODE_EMAIL} can be created as Super Admin (GOD mode).`);
-      return;
-    }
-    if (normalizedEmail === GOD_MODE_EMAIL && role !== "SUPER_ADMIN") {
-      setFormError(`${GOD_MODE_EMAIL} must remain Super Admin (GOD mode).`);
+    if (normalizedEmail === GOD_MODE_EMAIL) {
+      setFormError(`${GOD_MODE_EMAIL} is reserved for GOD mode and cannot be created from Add Account.`);
       return;
     }
     mutation.mutate();
@@ -129,18 +118,11 @@ export function AddAccountModal({ open, onOpenChange }: Props) {
               className="h-10 rounded-xl border border-line bg-surface-card px-3 text-sm text-ink shadow-sm transition-shadow hover:border-line focus-visible:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15"
             >
               {accountRoles.map((entry) => (
-                <option
-                  key={entry.value}
-                  value={entry.value}
-                  disabled={entry.value === "SUPER_ADMIN" && normalizedEmail !== GOD_MODE_EMAIL}
-                >
+                <option key={entry.value} value={entry.value}>
                   {entry.label}
                 </option>
               ))}
             </select>
-            <p className="text-xs text-ink-muted">
-              Super Admin (GOD mode) is reserved for <span className="font-medium">{GOD_MODE_EMAIL}</span>.
-            </p>
           </div>
           {formError ? (
             <p className="rounded-xl border border-status-absent-soft bg-status-absent-soft/40 px-3 py-2 text-sm text-status-absent">

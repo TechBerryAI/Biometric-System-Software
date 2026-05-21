@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { useAuth } from "@/auth/AuthContext";
 import { RequireAuth } from "@/auth/RequireAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Attendance } from "@/pages/Attendance";
@@ -10,6 +11,14 @@ import { Operations } from "@/pages/Operations";
 import { Profile } from "@/pages/Profile";
 import { Reports } from "@/pages/Reports";
 import { Settings } from "@/pages/Settings";
+
+function HomeRoute() {
+  const { can } = useAuth();
+  if (can("dashboard:view")) return <Dashboard />;
+  if (can("employee:view")) return <Navigate to="/employees" replace />;
+  if (can("reports:read")) return <Navigate to="/attendance" replace />;
+  return <Navigate to="/profile" replace />;
+}
 
 export default function App() {
   return (
@@ -23,11 +32,7 @@ export default function App() {
               <Routes>
                 <Route
                   path="/"
-                  element={
-                    <RequireAuth permission="reports:read">
-                      <Dashboard />
-                    </RequireAuth>
-                  }
+                  element={<HomeRoute />}
                 />
                 <Route
                   path="/employees"
@@ -64,7 +69,7 @@ export default function App() {
                 <Route
                   path="/operations"
                   element={
-                    <RequireAuth permission="metrics:read">
+                    <RequireAuth permission="device:manage">
                       <Operations />
                     </RequireAuth>
                   }

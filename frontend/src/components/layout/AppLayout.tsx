@@ -8,7 +8,8 @@ const GOD_MODE_EMAIL = "techberryaiteam@gmail.com";
 export function AppLayout({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const isGodMode = (user?.email ?? "").trim().toLowerCase() === GOD_MODE_EMAIL;
-  const accountTier = isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" ? "hr" : "other";
+  const accountTier =
+    isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" || user?.role === "IT_ADMIN" ? "hr" : "other";
 
   return (
     <div data-account-tier={accountTier} className="relative flex min-h-screen w-full bg-surface">

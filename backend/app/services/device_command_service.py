@@ -13,7 +13,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from redis import Redis
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -329,7 +329,11 @@ def _record_snapshot(
 
 
 def _start_execution_attempt(db: Session, *, command: DeviceCommand, worker_id: str) -> CommandExecutionHistory:
-    attempt = command.retries + 1
+    latest_attempt = db.execute(
+        select(func.max(CommandExecutionHistory.execution_attempt)).where(CommandExecutionHistory.command_id == command.id)
+    ).scalar_one()
+    base_attempt = command.retries + 1
+    attempt = max(base_attempt, (latest_attempt or 0) + 1)
     row = CommandExecutionHistory(
         command_id=command.id,
         execution_attempt=attempt,

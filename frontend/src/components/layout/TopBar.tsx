@@ -34,14 +34,17 @@ export function TopBar({ className }: { className?: string }) {
   const canManageUsers = can("user:manage");
   const normalizedEmail = user?.email?.trim().toLowerCase() ?? "";
   const isGodMode = normalizedEmail === GOD_MODE_EMAIL;
-  const accountTier = isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" ? "hr" : "other";
+  const accountTier =
+    isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" || user?.role === "IT_ADMIN" ? "hr" : "other";
   const roleLabel =
     accountTier === "god"
       ? "GOD mode"
       : accountTier === "ceo"
       ? "CEO"
+      : user?.role === "IT_ADMIN"
+      ? "IT Admin"
       : accountTier === "hr"
-      ? "HR/Admin"
+      ? "HR Admin"
       : user?.role ?? "No role";
   const displayName = user?.full_name?.trim() || user?.email || "Unknown user";
 

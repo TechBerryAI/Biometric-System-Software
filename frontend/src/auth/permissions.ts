@@ -1,6 +1,7 @@
-export type UserRole = "SUPER_ADMIN" | "HR_ADMIN" | "CEO" | "MANAGER" | "VIEWER" | "DEVICE_OPERATOR";
+export type UserRole = "SUPER_ADMIN" | "HR_ADMIN" | "IT_ADMIN" | "CEO" | "MANAGER" | "VIEWER" | "DEVICE_OPERATOR";
 
 export type Permission =
+  | "dashboard:view"
   | "user:manage"
   | "employee:view"
   | "employee:edit"
@@ -14,6 +15,7 @@ export type Permission =
 
 const rolePermissions: Record<UserRole, Permission[]> = {
   SUPER_ADMIN: [
+    "dashboard:view",
     "user:manage",
     "employee:view",
     "employee:edit",
@@ -25,8 +27,9 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     "metrics:read",
     "anomaly:manage",
   ],
-  HR_ADMIN: ["employee:view", "employee:edit", "sync:trigger", "reports:read", "anomaly:manage"],
-  CEO: ["employee:view", "reports:read"],
+  HR_ADMIN: ["dashboard:view", "employee:view", "employee:edit", "sync:trigger", "reports:read", "anomaly:manage"],
+  IT_ADMIN: ["employee:view", "employee:edit", "sync:trigger", "reports:read", "anomaly:manage", "metrics:read"],
+  CEO: ["dashboard:view", "employee:view", "sync:trigger", "reports:read"],
   MANAGER: [],
   VIEWER: [],
   DEVICE_OPERATOR: [],

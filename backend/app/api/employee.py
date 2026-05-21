@@ -27,7 +27,7 @@ from app.schemas.employee import (
     EmployeeUpdate,
 )
 from app.services.audit_service import append_audit_log
-from app.services.device_command_service import enqueue_device_command
+from app.services.device_command_service import enqueue_device_command, process_command
 from app.services.system_governance_service import assert_device_write_allowed
 
 router = APIRouter(
@@ -284,7 +284,7 @@ def get_employee_daily_attendance(
 def upsert_employee_metadata(
     payload: EmployeeCreate,
     request: Request,
-    user: User = Depends(require_permissions(Permission.EMPLOYEE_EDIT, Permission.DEVICE_MANAGE)),
+    user: User = Depends(require_permissions(Permission.EMPLOYEE_EDIT)),
     db: Session = Depends(get_db),
 ) -> Employee:
     """
@@ -316,7 +316,7 @@ def upsert_employee_metadata(
             device_user_id=payload.device_user_id,
             effective_at=effective_at,
         )
-        enqueue_device_command(
+        command = enqueue_device_command(
             db,
             device_id=settings.zk_device_id,
             command_type="UPSERT_USER",
@@ -332,6 +332,8 @@ def upsert_employee_metadata(
             created_by=user.user_uuid,
             initiated_from="api:employees.upsert",
         )
+        # Inline-safe processing fallback prevents queue buildup when workers lag/offline.
+        process_command(db, command, settings=settings, worker_id="api-inline")
         append_audit_log(
             db,
             actor_user_uuid=user.user_uuid,
@@ -369,7 +371,7 @@ def upsert_employee_metadata(
         device_user_id=payload.device_user_id,
         effective_at=effective_at,
     )
-    enqueue_device_command(
+    command = enqueue_device_command(
         db,
         device_id=settings.zk_device_id,
         command_type="UPSERT_USER",
@@ -385,6 +387,8 @@ def upsert_employee_metadata(
         created_by=user.user_uuid,
         initiated_from="api:employees.upsert",
     )
+    # Inline-safe processing fallback prevents queue buildup when workers lag/offline.
+    process_command(db, command, settings=settings, worker_id="api-inline")
     append_audit_log(
         db,
         actor_user_uuid=user.user_uuid,
@@ -411,7 +415,7 @@ def update_employee(
     employee_id: int,
     payload: EmployeeUpdate,
     request: Request,
-    user: User = Depends(require_permissions(Permission.EMPLOYEE_EDIT, Permission.DEVICE_MANAGE)),
+    user: User = Depends(require_permissions(Permission.EMPLOYEE_EDIT)),
     db: Session = Depends(get_db),
 ) -> Employee:
     """
@@ -464,7 +468,7 @@ def update_employee(
         device_user_id=new_device_user_id,
         effective_at=datetime.now(ZoneInfo("UTC")),
     )
-    enqueue_device_command(
+    command = enqueue_device_command(
         db,
         device_id=settings.zk_device_id,
         command_type="UPSERT_USER",
@@ -480,6 +484,8 @@ def update_employee(
         created_by=user.user_uuid,
         initiated_from="api:employees.update",
     )
+    # Inline-safe processing fallback prevents queue buildup when workers lag/offline.
+    process_command(db, command, settings=settings, worker_id="api-inline")
     append_audit_log(
         db,
         actor_user_uuid=user.user_uuid,

@@ -25,6 +25,7 @@ from app.models.user import User, UserRole
 ALLOWED_APP_ROLES = {
     UserRole.SUPER_ADMIN.value,
     UserRole.HR_ADMIN.value,
+    UserRole.IT_ADMIN.value,
     UserRole.CEO.value,
 }
 

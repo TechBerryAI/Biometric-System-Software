@@ -66,11 +66,11 @@ export type CurrentUserResponse = {
   user_uuid: string;
   email: string;
   full_name?: string | null;
-  role: "SUPER_ADMIN" | "HR_ADMIN" | "CEO";
+  role: "SUPER_ADMIN" | "HR_ADMIN" | "IT_ADMIN" | "CEO";
   active: boolean;
 };
 
-export type AppUserRole = "SUPER_ADMIN" | "HR_ADMIN" | "CEO";
+export type AppUserRole = "HR_ADMIN" | "IT_ADMIN";
 
 export type AccountCreatePayload = {
   email: string;
