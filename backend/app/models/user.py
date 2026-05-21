@@ -15,6 +15,7 @@ from app.core.database import Base
 class UserRole(str, Enum):
     SUPER_ADMIN = "SUPER_ADMIN"
     HR_ADMIN = "HR_ADMIN"
+    CEO = "CEO"
     MANAGER = "MANAGER"
     VIEWER = "VIEWER"
     DEVICE_OPERATOR = "DEVICE_OPERATOR"
@@ -26,6 +27,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid4()))
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
+    full_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False, default=UserRole.VIEWER.value)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")

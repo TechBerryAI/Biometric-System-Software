@@ -31,12 +31,18 @@ class LogoutRequest(BaseModel):
 class CurrentUserResponse(BaseModel):
     user_uuid: str
     email: str
+    full_name: str | None = None
     role: str
     active: bool
 
 
 class UserCreateRequest(BaseModel):
     email: EmailStr
+    full_name: str | None = Field(default=None, min_length=1, max_length=160)
     password: str = Field(min_length=8, max_length=128)
-    role: str = Field(pattern="^(SUPER_ADMIN|HR_ADMIN|MANAGER|VIEWER|DEVICE_OPERATOR)$")
+    role: str = Field(pattern="^(SUPER_ADMIN|HR_ADMIN|CEO)$")
     active: bool = True
+
+
+class ProfileUpdateRequest(BaseModel):
+    full_name: str = Field(min_length=1, max_length=160)

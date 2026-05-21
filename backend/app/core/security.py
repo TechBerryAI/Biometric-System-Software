@@ -26,6 +26,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 class Permission:
     USER_MANAGE = "user:manage"
+    EMPLOYEE_VIEW = "employee:view"
     EMPLOYEE_EDIT = "employee:edit"
     DEVICE_MANAGE = "device:manage"
     SYNC_TRIGGER = "sync:trigger"
@@ -39,6 +40,7 @@ class Permission:
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "SUPER_ADMIN": {
         Permission.USER_MANAGE,
+        Permission.EMPLOYEE_VIEW,
         Permission.EMPLOYEE_EDIT,
         Permission.DEVICE_MANAGE,
         Permission.SYNC_TRIGGER,
@@ -49,23 +51,22 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         Permission.ANOMALY_MANAGE,
     },
     "HR_ADMIN": {
+        Permission.EMPLOYEE_VIEW,
         Permission.EMPLOYEE_EDIT,
         Permission.SYNC_TRIGGER,
         Permission.REPORT_READ,
         Permission.ANOMALY_MANAGE,
     },
-    "MANAGER": {
+    "CEO": {
         Permission.REPORT_READ,
-        Permission.AI_ADMIN,
-        Permission.ANOMALY_MANAGE,
+        Permission.EMPLOYEE_VIEW,
     },
-    "VIEWER": {Permission.REPORT_READ},
-    "DEVICE_OPERATOR": {
-        Permission.DEVICE_MANAGE,
-        Permission.SYNC_TRIGGER,
-        Permission.METRICS_READ,
-    },
+    "MANAGER": set(),
+    "VIEWER": set(),
+    "DEVICE_OPERATOR": set(),
 }
+
+ALLOWED_APP_ROLES = {"SUPER_ADMIN", "HR_ADMIN", "CEO"}
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
@@ -141,6 +142,8 @@ def get_current_user(
     user = db.execute(select(User).where(User.user_uuid == user_uuid)).scalar_one_or_none()
     if user is None or not user.active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User inactive or missing")
+    if user.role not in ALLOWED_APP_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account role is not allowed to access the app.")
     return user
 
 

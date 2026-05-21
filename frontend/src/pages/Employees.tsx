@@ -1,28 +1,32 @@
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { PenSquare, Plus, Search } from "lucide-react";
+import { PenSquare, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useAuth } from "@/auth/AuthContext";
 import { AddEmployeeModal } from "@/components/employees/AddEmployeeModal";
 import { EmployeeAvatar } from "@/components/employees/EmployeeAvatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchEmployees } from "@/services/api";
 import { cn } from "@/lib/cn";
+import { useUiStore } from "@/stores/ui-store";
 import type { Employee } from "@/types";
 
 export function Employees() {
   const navigate = useNavigate();
+  const { can } = useAuth();
   const [searchParams] = useSearchParams();
-  const initialQ = searchParams.get("q") ?? "";
-  const [query, setQuery] = useState(initialQ);
+  const globalSearchQuery = useUiStore((s) => s.globalSearchQuery);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const canEditEmployees = can("employee:edit");
 
   useEffect(() => {
-    setQuery(searchParams.get("q") ?? "");
+    if (searchParams.get("add") !== "1") return;
+    setEditingEmployee(null);
+    setModalOpen(true);
   }, [searchParams]);
 
   const { data: rows, isLoading, error, refetch, isFetching } = useQuery({
@@ -32,7 +36,7 @@ export function Employees() {
 
   const filtered = useMemo(() => {
     if (!rows) return [];
-    const q = query.trim().toLowerCase();
+    const q = globalSearchQuery.trim().toLowerCase();
     const list = !q
       ? rows
       : rows.filter(
@@ -42,7 +46,7 @@ export function Employees() {
             (e.department?.toLowerCase().includes(q) ?? false)
         );
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
-  }, [rows, query]);
+  }, [rows, globalSearchQuery]);
 
   if (error) {
     return (
@@ -72,33 +76,26 @@ export function Employees() {
             is authoritative — never invented locally.
           </p>
         </div>
-        <Button
-          type="button"
-          onClick={() => {
-            setEditingEmployee(null);
-            setModalOpen(true);
-          }}
-          className="shrink-0 shadow-sm shadow-primary/20"
-        >
-          <Plus className="h-4 w-4" strokeWidth={2} />
-          Add employee
-        </Button>
+        {canEditEmployees ? (
+          <Button
+            type="button"
+            onClick={() => {
+              setEditingEmployee(null);
+              setModalOpen(true);
+            }}
+            className="shrink-0 shadow-sm shadow-primary/20"
+          >
+            <Plus className="h-4 w-4" strokeWidth={2} />
+            Add employee
+          </Button>
+        ) : null}
       </header>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1 max-w-md">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-subtle" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter by name, device ID, department…"
-            className="border-line/80 bg-surface-card pl-10"
-          />
-        </div>
-        {isFetching ? <span className="text-xs text-ink-muted">Refreshing…</span> : null}
-      </div>
+      {isFetching ? <span className="text-xs text-ink-muted">Refreshing…</span> : null}
 
-      <AddEmployeeModal open={modalOpen} onOpenChange={setModalOpen} employee={editingEmployee} />
+      {canEditEmployees ? (
+        <AddEmployeeModal open={modalOpen} onOpenChange={setModalOpen} employee={editingEmployee} />
+      ) : null}
 
       {isLoading ? (
         <div className="space-y-3">
@@ -161,20 +158,24 @@ export function Employees() {
                         {e.shift_start && e.shift_end ? `${e.shift_start} – ${e.shift_end}` : "—"}
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          className="h-8"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setEditingEmployee(e);
-                            setModalOpen(true);
-                          }}
-                        >
-                          <PenSquare className="h-3.5 w-3.5" />
-                          Edit
-                        </Button>
+                        {canEditEmployees ? (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="h-8"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setEditingEmployee(e);
+                              setModalOpen(true);
+                            }}
+                          >
+                            <PenSquare className="h-3.5 w-3.5" />
+                            Edit
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-ink-muted">View only</span>
+                        )}
                       </td>
                     </tr>
                   ))

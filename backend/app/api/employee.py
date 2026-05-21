@@ -33,7 +33,7 @@ from app.services.system_governance_service import assert_device_write_allowed
 router = APIRouter(
     prefix="/employees",
     tags=["employees"],
-    dependencies=[Depends(require_permissions(Permission.REPORT_READ))],
+    dependencies=[Depends(require_permissions(Permission.EMPLOYEE_VIEW))],
 )
 
 

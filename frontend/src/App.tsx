@@ -7,6 +7,7 @@ import { EmployeeProfile } from "@/pages/EmployeeProfile";
 import { Employees } from "@/pages/Employees";
 import { Login } from "@/pages/Login";
 import { Operations } from "@/pages/Operations";
+import { Profile } from "@/pages/Profile";
 import { Reports } from "@/pages/Reports";
 import { Settings } from "@/pages/Settings";
 
@@ -31,7 +32,7 @@ export default function App() {
                 <Route
                   path="/employees"
                   element={
-                    <RequireAuth permission="employee:edit">
+                    <RequireAuth permission="employee:view">
                       <Employees />
                     </RequireAuth>
                   }
@@ -39,7 +40,7 @@ export default function App() {
                 <Route
                   path="/employees/:employeeId"
                   element={
-                    <RequireAuth permission="employee:edit">
+                    <RequireAuth permission="employee:view">
                       <EmployeeProfile />
                     </RequireAuth>
                   }
@@ -55,7 +56,7 @@ export default function App() {
                 <Route
                   path="/reports"
                   element={
-                    <RequireAuth permission="reports:read">
+                    <RequireAuth permission="anomaly:manage">
                       <Reports />
                     </RequireAuth>
                   }
@@ -67,6 +68,10 @@ export default function App() {
                       <Operations />
                     </RequireAuth>
                   }
+                />
+                <Route
+                  path="/profile"
+                  element={<Profile />}
                 />
                 <Route
                   path="/settings"

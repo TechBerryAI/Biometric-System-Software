@@ -5,10 +5,19 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import Permission, get_current_user, require_permissions
 from app.models.user import User
-from app.schemas.auth import AuthTokens, CurrentUserResponse, LoginRequest, LogoutRequest, RefreshRequest, UserCreateRequest
+from app.schemas.auth import (
+    AuthTokens,
+    CurrentUserResponse,
+    LoginRequest,
+    LogoutRequest,
+    ProfileUpdateRequest,
+    RefreshRequest,
+    UserCreateRequest,
+)
 from app.services.audit_service import append_audit_log
 from app.services.auth_service import (
     LoginRateLimiter,
@@ -21,6 +30,7 @@ from app.services.auth_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+GOD_MODE_EMAIL = "techberryaiteam@gmail.com"
 
 
 @router.post("/bootstrap-admin", response_model=CurrentUserResponse)
@@ -31,7 +41,13 @@ def bootstrap_admin(db: Session = Depends(get_db)) -> CurrentUserResponse:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Bootstrap admin credentials are not configured.",
         )
-    return CurrentUserResponse(user_uuid=user.user_uuid, email=user.email, role=user.role, active=user.active)
+    return CurrentUserResponse(
+        user_uuid=user.user_uuid,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role,
+        active=user.active,
+    )
 
 
 @router.post("/login", response_model=AuthTokens)
@@ -140,7 +156,27 @@ def logout(payload: LogoutRequest, request: Request, user: User = Depends(get_cu
 
 @router.get("/me", response_model=CurrentUserResponse)
 def me(user: User = Depends(get_current_user)) -> CurrentUserResponse:
-    return CurrentUserResponse(user_uuid=user.user_uuid, email=user.email, role=user.role, active=user.active)
+    return CurrentUserResponse(
+        user_uuid=user.user_uuid,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role,
+        active=user.active,
+    )
+
+
+@router.put("/me", response_model=CurrentUserResponse)
+def update_me(payload: ProfileUpdateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> CurrentUserResponse:
+    user.full_name = payload.full_name.strip()
+    db.commit()
+    db.refresh(user)
+    return CurrentUserResponse(
+        user_uuid=user.user_uuid,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role,
+        active=user.active,
+    )
 
 
 @router.post("/users", response_model=CurrentUserResponse)
@@ -150,11 +186,38 @@ def create_user(
     actor: User = Depends(require_permissions(Permission.USER_MANAGE)),
     db: Session = Depends(get_db),
 ) -> CurrentUserResponse:
+    normalized_email = str(payload.email).strip().lower()
+    selected_role = str(payload.role).strip().upper()
+
+    # God mode is reserved for a single owner account only.
+    if selected_role == "SUPER_ADMIN" and normalized_email != GOD_MODE_EMAIL:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Only {GOD_MODE_EMAIL} can be assigned Super Admin (GOD mode).",
+        )
+    if normalized_email == GOD_MODE_EMAIL and selected_role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{GOD_MODE_EMAIL} must remain Super Admin (GOD mode).",
+        )
+
+    settings = get_settings()
+    bootstrap_email = (settings.auth_bootstrap_admin_email or "").strip().lower()
+    if bootstrap_email and bootstrap_email != GOD_MODE_EMAIL:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "AUTH_BOOTSTRAP_ADMIN_EMAIL must match the reserved GOD mode email "
+                f"({GOD_MODE_EMAIL})."
+            ),
+        )
+
     user = create_or_update_user(
         db,
-        email=str(payload.email),
+        email=normalized_email,
+        full_name=payload.full_name,
         password=payload.password,
-        role=payload.role,
+        role=selected_role,
         active=payload.active,
     )
     append_audit_log(
@@ -163,10 +226,16 @@ def create_user(
         action_type="AUTH_USER_UPSERT",
         entity_type="user",
         entity_id=user.user_uuid,
-        new_state={"email": user.email, "role": user.role, "active": user.active},
+        new_state={"email": user.email, "full_name": user.full_name, "role": user.role, "active": user.active},
         ip_address=request.client.host if request.client else None,
         request_id=getattr(request.state, "request_id", None),
     )
     db.commit()
     db.refresh(user)
-    return CurrentUserResponse(user_uuid=user.user_uuid, email=user.email, role=user.role, active=user.active)
+    return CurrentUserResponse(
+        user_uuid=user.user_uuid,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role,
+        active=user.active,
+    )

@@ -2,6 +2,7 @@ import { Bell, Search } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
+import { AddAccountModal } from "@/components/accounts/AddAccountModal";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
+import { useUiStore } from "@/stores/ui-store";
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -21,20 +23,27 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+const GOD_MODE_EMAIL = "techberryaiteam@gmail.com";
+
 export function TopBar({ className }: { className?: string }) {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
-  const [q, setQ] = useState("");
-
-  const onSearchKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key !== "Enter") return;
-      const t = q.trim();
-      if (!t) return;
-      navigate(`/employees?q=${encodeURIComponent(t)}`);
-    },
-    [navigate, q]
-  );
+  const { user, logout, can } = useAuth();
+  const globalSearchQuery = useUiStore((s) => s.globalSearchQuery);
+  const setGlobalSearchQuery = useUiStore((s) => s.setGlobalSearchQuery);
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const canManageUsers = can("user:manage");
+  const normalizedEmail = user?.email?.trim().toLowerCase() ?? "";
+  const isGodMode = normalizedEmail === GOD_MODE_EMAIL;
+  const accountTier = isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" ? "hr" : "other";
+  const roleLabel =
+    accountTier === "god"
+      ? "GOD mode"
+      : accountTier === "ceo"
+      ? "CEO"
+      : accountTier === "hr"
+      ? "HR/Admin"
+      : user?.role ?? "No role";
+  const displayName = user?.full_name?.trim() || user?.email || "Unknown user";
 
   const onLogout = useCallback(async () => {
     await logout();
@@ -45,15 +54,20 @@ export function TopBar({ className }: { className?: string }) {
     <header
       className={cn(
         "sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between gap-4 border-b border-line/70 bg-surface-card/90 px-4 shadow-nav backdrop-blur-md sm:px-6",
+        accountTier === "god" &&
+          "border-status-absent-soft/80 bg-[linear-gradient(90deg,rgba(254,226,226,0.32)_0%,rgba(255,255,255,0.92)_40%,rgba(255,255,255,0.92)_100%)]",
+        accountTier === "ceo" &&
+          "border-status-late-soft/90 bg-[linear-gradient(90deg,rgba(254,249,195,0.50)_0%,rgba(255,255,255,0.93)_40%,rgba(255,255,255,0.93)_100%)]",
+        accountTier === "hr" &&
+          "border-primary/20 bg-[linear-gradient(90deg,rgba(238,242,255,0.85)_0%,rgba(255,255,255,0.93)_40%,rgba(255,255,255,0.93)_100%)]",
         className
       )}
     >
       <div className="relative mx-auto w-full max-w-xl flex-1">
         <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-subtle" />
         <Input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={onSearchKeyDown}
+          value={globalSearchQuery}
+          onChange={(e) => setGlobalSearchQuery(e.target.value)}
           placeholder="Search employees, device ID…"
           className="h-10 border-line/80 bg-surface pl-10 pr-3 shadow-sm"
           aria-label="Search"
@@ -71,26 +85,45 @@ export function TopBar({ className }: { className?: string }) {
               type="button"
               className="flex items-center gap-2 rounded-xl py-1 pl-1 pr-2 transition-colors hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
             >
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-soft text-xs font-semibold text-violet">
-                {initials(user?.email ?? "User")}
+              <span
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-xl text-xs font-semibold",
+                  accountTier === "god" && "bg-status-absent-soft text-status-absent",
+                  accountTier === "ceo" && "bg-status-late-soft text-status-late",
+                  accountTier === "hr" && "bg-primary-soft text-primary",
+                  accountTier === "other" && "bg-violet-soft text-violet"
+                )}
+              >
+                {initials(displayName)}
               </span>
               <span className="hidden text-left text-sm lg:block">
-                <span className="block font-medium text-ink">{user?.email ?? "Unknown user"}</span>
-                <span className="block text-xs text-ink-muted">{user?.role ?? "No role"}</span>
+                <span className="block font-medium text-ink">{displayName}</span>
+                <span
+                  className={cn(
+                    "block text-xs text-ink-muted",
+                    accountTier === "god" && "font-semibold text-status-absent",
+                    accountTier === "ceo" && "font-semibold text-status-late",
+                    accountTier === "hr" && "font-semibold text-primary"
+                  )}
+                >
+                  {roleLabel}
+                </span>
               </span>
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuLabel>Session</DropdownMenuLabel>
+            <DropdownMenuLabel>Account</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => navigate("/settings")}>Settings</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => navigate("/reports")}>Reports</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => navigate("/operations")}>Operations</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => navigate("/profile")}>Profile</DropdownMenuItem>
+            {canManageUsers ? (
+              <DropdownMenuItem onSelect={() => setAccountModalOpen(true)}>Add New Account</DropdownMenuItem>
+            ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={onLogout}>Sign out</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <AddAccountModal open={accountModalOpen} onOpenChange={setAccountModalOpen} />
     </header>
   );
 }

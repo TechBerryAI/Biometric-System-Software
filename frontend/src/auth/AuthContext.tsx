@@ -13,6 +13,7 @@ import {
 type SessionUser = {
   user_uuid: string;
   email: string;
+  full_name?: string | null;
   role: UserRole;
   active: boolean;
 };
@@ -28,6 +29,7 @@ type AuthContextValue = {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
   can: (permission: Permission) => boolean;
 };
 
@@ -143,6 +145,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, [applySession, session?.refreshToken]);
 
+  const refreshUser = useCallback(async () => {
+    const me = await fetchCurrentUser();
+    if (!me) {
+      setUser(null);
+      return;
+    }
+    setUser(me as SessionUser);
+  }, []);
+
   const can = useCallback(
     (permission: Permission) => {
       if (!user) return false;
@@ -157,9 +168,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       login,
       logout,
+      refreshUser,
       can,
     }),
-    [user, loading, login, logout, can]
+    [user, loading, login, logout, refreshUser, can]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

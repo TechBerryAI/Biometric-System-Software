@@ -21,6 +21,23 @@ type Props = {
   employee?: Employee | null;
 };
 
+const DEPARTMENT_OPTIONS = [
+  "AI Department",
+  "Accounts",
+  "Digital Marketing",
+  "HR Department",
+  "IT / Administration",
+  "MS SQL DBA",
+  "MongoDB DBA",
+  "MySQL DBA",
+  "Operations",
+  "Oracle DBA",
+  "PostgreSQL DBA",
+  "TechBerry Sales",
+  "TiroNation Sales",
+  "Training and Development",
+] as const;
+
 export function AddEmployeeModal({ open, onOpenChange, employee }: Props) {
   const qc = useQueryClient();
   const [deviceUserId, setDeviceUserId] = useState("");
@@ -30,6 +47,9 @@ export function AddEmployeeModal({ open, onOpenChange, employee }: Props) {
   const [shiftEnd, setShiftEnd] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const isEditMode = Boolean(employee);
+  const departmentOptions = department && !DEPARTMENT_OPTIONS.includes(department as (typeof DEPARTMENT_OPTIONS)[number])
+    ? [department, ...DEPARTMENT_OPTIONS]
+    : DEPARTMENT_OPTIONS;
 
   useEffect(() => {
     if (!open) return;
@@ -125,11 +145,18 @@ export function AddEmployeeModal({ open, onOpenChange, employee }: Props) {
           </div>
           <div className="grid gap-2">
             <label className="text-xs font-medium text-ink-muted">Department</label>
-            <Input
+            <select
               value={department}
               onChange={(e) => setDepartment(e.target.value)}
-              placeholder="Optional"
-            />
+              className="h-10 rounded-xl border border-line bg-surface-card px-3 text-sm text-ink shadow-sm transition-shadow hover:border-line focus-visible:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15"
+            >
+              <option value="">Select department (optional)</option>
+              {departmentOptions.map((entry) => (
+                <option key={entry} value={entry}>
+                  {entry}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">

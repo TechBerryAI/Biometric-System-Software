@@ -1,6 +1,8 @@
-export type UserRole = "SUPER_ADMIN" | "HR_ADMIN" | "MANAGER" | "VIEWER" | "DEVICE_OPERATOR";
+export type UserRole = "SUPER_ADMIN" | "HR_ADMIN" | "CEO" | "MANAGER" | "VIEWER" | "DEVICE_OPERATOR";
 
 export type Permission =
+  | "user:manage"
+  | "employee:view"
   | "employee:edit"
   | "device:manage"
   | "sync:trigger"
@@ -12,6 +14,8 @@ export type Permission =
 
 const rolePermissions: Record<UserRole, Permission[]> = {
   SUPER_ADMIN: [
+    "user:manage",
+    "employee:view",
     "employee:edit",
     "device:manage",
     "sync:trigger",
@@ -21,10 +25,11 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     "metrics:read",
     "anomaly:manage",
   ],
-  HR_ADMIN: ["employee:edit", "sync:trigger", "reports:read", "anomaly:manage"],
-  MANAGER: ["reports:read", "ai:admin", "anomaly:manage"],
-  VIEWER: ["reports:read"],
-  DEVICE_OPERATOR: ["device:manage", "sync:trigger", "metrics:read"],
+  HR_ADMIN: ["employee:view", "employee:edit", "sync:trigger", "reports:read", "anomaly:manage"],
+  CEO: ["employee:view", "reports:read"],
+  MANAGER: [],
+  VIEWER: [],
+  DEVICE_OPERATOR: [],
 };
 
 export function hasPermission(role: UserRole, permission: Permission): boolean {

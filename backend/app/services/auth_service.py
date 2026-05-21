@@ -22,6 +22,12 @@ from app.core.security import (
 from app.models.refresh_token import RefreshToken
 from app.models.user import User, UserRole
 
+ALLOWED_APP_ROLES = {
+    UserRole.SUPER_ADMIN.value,
+    UserRole.HR_ADMIN.value,
+    UserRole.CEO.value,
+}
+
 
 def _utcnow() -> datetime:
     return datetime.now(ZoneInfo("UTC"))
@@ -82,6 +88,8 @@ class LoginRateLimiter:
 def authenticate_user(db: Session, email: str, password: str) -> User | None:
     user = db.execute(select(User).where(User.email == email.strip().lower())).scalar_one_or_none()
     if user is None or not user.active:
+        return None
+    if user.role not in ALLOWED_APP_ROLES:
         return None
     if not verify_password(password, user.password_hash):
         return None
@@ -151,6 +159,7 @@ def create_or_update_user(
     db: Session,
     *,
     email: str,
+    full_name: str | None = None,
     password: str,
     role: str,
     active: bool = True,
@@ -160,6 +169,7 @@ def create_or_update_user(
     if user is None:
         user = User(
             email=normalized_email,
+            full_name=full_name.strip() if full_name else None,
             password_hash=hash_password(password),
             role=role,
             active=active,
@@ -168,6 +178,7 @@ def create_or_update_user(
         db.flush()
         return user
     user.password_hash = hash_password(password)
+    user.full_name = full_name.strip() if full_name else None
     user.role = role
     user.active = active
     return user

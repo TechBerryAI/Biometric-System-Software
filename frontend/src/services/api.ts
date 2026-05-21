@@ -65,8 +65,19 @@ api.interceptors.response.use(
 export type CurrentUserResponse = {
   user_uuid: string;
   email: string;
-  role: "SUPER_ADMIN" | "HR_ADMIN" | "MANAGER" | "VIEWER" | "DEVICE_OPERATOR";
+  full_name?: string | null;
+  role: "SUPER_ADMIN" | "HR_ADMIN" | "CEO";
   active: boolean;
+};
+
+export type AppUserRole = "SUPER_ADMIN" | "HR_ADMIN" | "CEO";
+
+export type AccountCreatePayload = {
+  email: string;
+  full_name?: string;
+  password: string;
+  role: AppUserRole;
+  active?: boolean;
 };
 
 export type AuthTokens = {
@@ -108,6 +119,25 @@ export async function fetchCurrentUser(): Promise<CurrentUserResponse | null> {
   } catch {
     return null;
   }
+}
+
+export async function createAppAccount(payload: AccountCreatePayload): Promise<CurrentUserResponse> {
+  const normalized = {
+    email: payload.email.trim().toLowerCase(),
+    full_name: payload.full_name?.trim() || null,
+    password: payload.password,
+    role: payload.role,
+    active: payload.active ?? true,
+  };
+  const { data } = await api.post<CurrentUserResponse>("/auth/users", normalized);
+  return data;
+}
+
+export async function updateMyProfile(payload: { full_name: string }): Promise<CurrentUserResponse> {
+  const { data } = await api.put<CurrentUserResponse>("/auth/me", {
+    full_name: payload.full_name.trim(),
+  });
+  return data;
 }
 
 export async function fetchEmployees(): Promise<Employee[]> {

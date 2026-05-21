@@ -13,6 +13,7 @@ import {
   getApiErrorMessage,
   syncFromDevice,
 } from "@/services/api";
+import { useUiStore } from "@/stores/ui-store";
 import type { DailySummaryRow, Employee } from "@/types";
 import { downloadAttendanceSummaryPdf } from "@/utils/pdfReports";
 
@@ -34,7 +35,7 @@ type AttendanceRow = DailySummaryRow & { is_absent: boolean };
 
 export function Attendance() {
   const [date, setDate] = useState(todayISO);
-  const [query, setQuery] = useState("");
+  const globalSearchQuery = useUiStore((s) => s.globalSearchQuery);
   const [rows, setRows] = useState<AttendanceRow[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(false);
@@ -100,7 +101,7 @@ export function Attendance() {
   }, [refreshFromDevice]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = globalSearchQuery.trim().toLowerCase();
     const list = q
       ? rows.filter(
           (r) =>
@@ -116,7 +117,7 @@ export function Attendance() {
       if (!a.first_check_in && b.first_check_in) return 1;
       return a.employee_name.localeCompare(b.employee_name);
     });
-  }, [rows, query]);
+  }, [rows, globalSearchQuery]);
 
   const presentCount = filtered.filter((r) => !r.is_absent).length;
   const absentCount = filtered.filter((r) => r.is_absent).length;
@@ -162,14 +163,6 @@ export function Attendance() {
           <label className="flex min-w-[10rem] flex-col gap-1.5 text-sm">
             <span className="text-xs font-medium text-ink-muted">Date</span>
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </label>
-          <label className="flex min-w-[14rem] flex-1 flex-col gap-1.5 text-sm">
-            <span className="text-xs font-medium text-ink-muted">Search</span>
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Name or device ID"
-            />
           </label>
           <Button type="button" variant="secondary" onClick={() => void refreshFromDevice()} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
