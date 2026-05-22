@@ -13,6 +13,7 @@ from app.models.attendance_log import AttendanceLog
 from app.models.attendance_session import AttendanceSession
 from app.models.employee import Employee
 from app.schemas.attendance import DailySummaryRow
+from app.services.punch_classification import classify_punch
 
 
 def day_bounds_utc(d: date, tz_name: str) -> tuple[datetime, datetime]:
@@ -20,15 +21,6 @@ def day_bounds_utc(d: date, tz_name: str) -> tuple[datetime, datetime]:
     start_local = datetime.combine(d, time.min, tzinfo=tz)
     end_local = start_local + timedelta(days=1)
     return start_local.astimezone(ZoneInfo("UTC")), end_local.astimezone(ZoneInfo("UTC"))
-
-
-def is_in_punch(punch_type: str) -> bool | None:
-    p = punch_type.strip().lower()
-    if p in ("0", "in", "check_in", "i"):
-        return True
-    if p in ("1", "out", "check_out", "o"):
-        return False
-    return None
 
 
 def compute_daily_summary(db: Session, summary_date: date, settings: Settings | None = None) -> list[DailySummaryRow]:
@@ -54,27 +46,31 @@ def compute_daily_summary(db: Session, summary_date: date, settings: Settings | 
             by_employee_uuid.setdefault(lg.employee_uuid, []).append(lg)
         by_code.setdefault(lg.employee_code, []).append(lg)
 
+    sessions = list(
+        db.execute(
+            select(AttendanceSession).where(
+                AttendanceSession.check_in >= start_utc,
+                AttendanceSession.check_in < end_utc,
+            )
+        ).scalars()
+    )
+    sessions_by_employee_id: dict[int, list[AttendanceSession]] = {}
+    for sess in sessions:
+        sessions_by_employee_id.setdefault(sess.employee_id, []).append(sess)
+
     rows: list[DailySummaryRow] = []
     for emp in employees:
         emp_logs = by_employee_uuid.get(emp.employee_uuid, [])
         if not emp_logs:
             emp_logs = by_code.get(str(emp.device_user_id), [])
-        sess = db.execute(
-            select(AttendanceSession)
-            .where(
-                AttendanceSession.employee_id == emp.id,
-                AttendanceSession.check_in >= start_utc,
-                AttendanceSession.check_in < end_utc,
-            )
-            .order_by(AttendanceSession.check_in)
-        ).scalars().all()
+        sess = sessions_by_employee_id.get(emp.id, [])
 
         first_in: datetime | None = None
         last_out: datetime | None = None
         if emp_logs:
-            ins = [x.timestamp for x in emp_logs if is_in_punch(x.punch_type) is True]
+            ins = [x.timestamp for x in emp_logs if classify_punch(x.punch_type) is True]
             first_in = min(ins) if ins else emp_logs[0].timestamp
-            outs = [x.timestamp for x in emp_logs if is_in_punch(x.punch_type) is False]
+            outs = [x.timestamp for x in emp_logs if classify_punch(x.punch_type) is False]
             if outs:
                 last_out = max(outs)
             elif len(emp_logs) > 1:
@@ -109,7 +105,7 @@ def compute_daily_summary(db: Session, summary_date: date, settings: Settings | 
                 first_check_in=first_in,
                 last_check_out=last_out,
                 total_work_minutes=total_min,
-                sessions_count=len(emp_logs),
+                sessions_count=len(sess),
             )
         )
 

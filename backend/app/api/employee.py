@@ -28,6 +28,7 @@ from app.schemas.employee import (
 )
 from app.services.audit_service import append_audit_log
 from app.services.device_command_service import enqueue_device_command, process_command
+from app.services.punch_classification import classify_punch
 from app.services.system_governance_service import assert_device_write_allowed
 
 router = APIRouter(
@@ -42,15 +43,6 @@ def _day_bounds_utc(d: date, tz_name: str) -> tuple[datetime, datetime]:
     start_local = datetime.combine(d, time.min, tzinfo=tz)
     end_local = start_local + timedelta(days=1)
     return start_local.astimezone(ZoneInfo("UTC")), end_local.astimezone(ZoneInfo("UTC"))
-
-
-def _is_in_punch(punch_type: str) -> bool | None:
-    p = punch_type.strip().lower()
-    if p in ("0", "in", "check_in", "i"):
-        return True
-    if p in ("1", "out", "check_out", "o"):
-        return False
-    return None
 
 
 def _identity_filter_for_employee(emp: Employee, db: Session):
@@ -250,9 +242,9 @@ def get_employee_daily_attendance(
             d += timedelta(days=1)
             continue
 
-        ins = [x.timestamp for x in day_logs if _is_in_punch(x.punch_type) is True]
+        ins = [x.timestamp for x in day_logs if classify_punch(x.punch_type) is True]
         first_in = min(ins) if ins else day_logs[0].timestamp
-        outs = [x.timestamp for x in day_logs if _is_in_punch(x.punch_type) is False]
+        outs = [x.timestamp for x in day_logs if classify_punch(x.punch_type) is False]
         if outs:
             last_out = max(outs)
         elif len(day_logs) > 1:

@@ -18,6 +18,7 @@ from app.models.attendance_log import AttendanceLog
 from app.models.attendance_session import AttendanceSession
 from app.models.device_user_mapping import DeviceUserMapping
 from app.models.employee import Employee
+from app.services.punch_classification import classify_punch
 from app.services.device_service import DeviceAttendanceRecord, DeviceService, DeviceUser
 
 logger = logging.getLogger(__name__)
@@ -61,16 +62,6 @@ def _dedupe_device_records(
         out.append(row)
         last_seen[key] = row.timestamp
     return out
-
-
-def _classify_punch(punch_type: str) -> bool | None:
-    """True = check-in, False = check-out, None = unknown."""
-    p = punch_type.strip().lower()
-    if p in ("0", "in", "check_in", "i"):
-        return True
-    if p in ("1", "out", "check_out", "o"):
-        return False
-    return None
 
 
 def _ensure_active_mapping(
@@ -379,7 +370,7 @@ def _pair_logs_for_day(
     duplicate_window = timedelta(seconds=duplicate_window_seconds)
 
     for log in logs_sorted:
-        cls = _classify_punch(log.punch_type)
+        cls = classify_punch(log.punch_type)
         if cls is True:
             if pending_in is not None and duplicate_window.total_seconds() > 0:
                 if log.timestamp - pending_in.timestamp <= duplicate_window:
