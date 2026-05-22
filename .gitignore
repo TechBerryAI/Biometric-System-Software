@@ -205,6 +205,10 @@ cython_debug/
 node_modules/
 frontend/dist/
 
+# Keep frontend source lib files versioned.
+!frontend/src/lib/
+!frontend/src/lib/**
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
