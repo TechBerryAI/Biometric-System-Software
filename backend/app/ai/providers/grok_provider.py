@@ -77,6 +77,7 @@ class _CircuitBreaker:
 class GrokProvider:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._disabled_reason: str | None = None
         self._breaker = _CircuitBreaker(
             threshold=settings.ai_circuit_breaker_failures,
             reset_seconds=settings.ai_circuit_breaker_reset_seconds,
@@ -94,6 +95,8 @@ class GrokProvider:
     ) -> tuple[T, AIUsage]:
         if not self._settings.xai_api_key:
             raise AIProviderError("XAI_API_KEY is not configured.")
+        if self._disabled_reason:
+            raise AIProviderError(self._disabled_reason)
 
         if not self._breaker.can_execute():
             reset_at = self._breaker.opened_until()
@@ -142,6 +145,23 @@ class GrokProvider:
                     tokens_total=usage.total_tokens,
                 )
                 return parsed, usage
+            except httpx.HTTPStatusError as exc:
+                self._breaker.record_failure()
+                incr("ai_provider_failure")
+                status = exc.response.status_code if exc.response is not None else None
+                # Permanent client-side configuration errors should fail fast
+                # instead of retrying the same bad request several times.
+                if status in {400, 401, 403, 404}:
+                    detail = (
+                        f"xAI HTTP {status}. Check XAI_BASE_URL / XAI_MODEL / XAI_API_KEY configuration."
+                    )
+                    self._disabled_reason = detail
+                    raise AIProviderError(detail) from exc
+                if attempt >= max_attempts:
+                    log.warning("ai.provider.failed purpose=%s attempts=%s error=%s", purpose, attempt, exc)
+                    raise AIProviderError(f"AI completion failed for '{purpose}': {exc}") from exc
+                sleep_s = min(0.25 * (2 ** (attempt - 1)), 2.0)
+                time.sleep(sleep_s)
             except (httpx.HTTPError, ValueError, ValidationError, AIProviderError) as exc:
                 self._breaker.record_failure()
                 incr("ai_provider_failure")

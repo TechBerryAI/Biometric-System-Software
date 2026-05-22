@@ -15,9 +15,9 @@ const path = require("path");
 const ROOT = path.resolve(__dirname);
 const BACKEND = path.join(ROOT, "backend");
 const FRONTEND = path.join(ROOT, "frontend");
+const VENV_DIR = path.join(BACKEND, ".venv");
 const VENV_PY = path.join(
-  BACKEND,
-  ".venv",
+  VENV_DIR,
   process.platform === "win32" ? "Scripts" : "bin",
   process.platform === "win32" ? "python.exe" : "python"
 );
@@ -91,16 +91,32 @@ function resolvePythonLauncher() {
 }
 
 async function ensureVenv() {
-  if (fs.existsSync(VENV_PY)) {
-    log("Backend virtualenv already exists");
-    return;
+  const forceRecreate = process.env.FORCE_RECREATE_VENV === "1";
+  if (forceRecreate && fs.existsSync(VENV_DIR)) {
+    log("FORCE_RECREATE_VENV=1 -> removing existing backend/.venv ...");
+    fs.rmSync(VENV_DIR, { recursive: true, force: true });
   }
-  log("Creating backend virtualenv...");
-  const { cmd, argsPrefix } = resolvePythonLauncher();
-  const args = [...argsPrefix, "-m", "venv", ".venv"];
-  const r = spawn(cmd, args, { cwd: BACKEND, stdio: "inherit", shell: isWin });
-  const code = await waitForExit(r);
-  if (code !== 0) throw new Error(`venv creation failed with exit ${code}`);
+
+  if (!fs.existsSync(VENV_PY)) {
+    log("Creating backend virtualenv...");
+    const { cmd, argsPrefix } = resolvePythonLauncher();
+    const args = [...argsPrefix, "-m", "venv", ".venv"];
+    const r = spawn(cmd, args, { cwd: BACKEND, stdio: "inherit", shell: false });
+    const code = await waitForExit(r);
+    if (code !== 0) throw new Error(`venv creation failed with exit ${code}`);
+  } else {
+    log("Backend virtualenv already exists");
+  }
+
+  const verify = spawn(VENV_PY, ["-c", "import sys; print(sys.executable)"], {
+    cwd: BACKEND,
+    stdio: "inherit",
+    shell: false,
+  });
+  const verifyCode = await waitForExit(verify);
+  if (verifyCode !== 0) {
+    throw new Error("backend/.venv exists but python executable failed. Recreate with FORCE_RECREATE_VENV=1.");
+  }
 }
 
 function waitForExit(proc) {
@@ -191,15 +207,43 @@ function openBrowser(url) {
 }
 
 async function pipInstall() {
-  log("Installing Python dependencies...");
-  const py = fs.existsSync(VENV_PY) ? VENV_PY : "python";
-  const r = spawn(py, ["-m", "pip", "install", "-r", "requirements.txt"], {
+  if (!fs.existsSync(VENV_PY)) {
+    throw new Error("Virtualenv python missing at backend/.venv. Run with FORCE_RECREATE_VENV=1.");
+  }
+  const requirementsPath = path.join(BACKEND, "requirements.txt");
+  if (!fs.existsSync(requirementsPath)) {
+    throw new Error(`requirements.txt not found at ${requirementsPath}`);
+  }
+
+  log("Installing Python dependencies into backend/.venv ...");
+
+  const upgradePip = spawn(VENV_PY, ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], {
     cwd: BACKEND,
     stdio: "inherit",
     shell: false,
   });
+  const upgradeCode = await waitForExit(upgradePip);
+  if (upgradeCode !== 0) throw new Error(`pip bootstrap failed with exit ${upgradeCode}`);
+
+  const r = spawn(
+    VENV_PY,
+    ["-m", "pip", "install", "--require-virtualenv", "-r", requirementsPath],
+    {
+      cwd: BACKEND,
+      stdio: "inherit",
+      shell: false,
+    }
+  );
   const code = await waitForExit(r);
   if (code !== 0) throw new Error(`pip install failed with exit ${code}`);
+
+  const freezeCheck = spawn(VENV_PY, ["-m", "pip", "--version"], {
+    cwd: BACKEND,
+    stdio: "inherit",
+    shell: false,
+  });
+  const freezeCode = await waitForExit(freezeCheck);
+  if (freezeCode !== 0) throw new Error(`pip verification failed with exit ${freezeCode}`);
 }
 
 async function alembicUpgrade() {

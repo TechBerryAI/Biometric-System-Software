@@ -3,10 +3,11 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Crown,
   FileBarChart2,
   LayoutDashboard,
   ShieldCheck,
-  ScanFace,
+  Sparkles,
   Settings,
   Users,
 } from "lucide-react";
@@ -46,15 +47,28 @@ export function Sidebar() {
         accountTier === "hr" && "border-primary/15 bg-[linear-gradient(180deg,#f5f7ff_0%,#ffffff_12%,#ffffff_100%)]"
       )}
     >
-      <div className="flex h-14 items-center justify-between gap-2 border-b border-line/60 px-3">
+      <div className="flex h-20 items-center justify-between gap-2 border-b border-line/60 px-3">
         <div className={cn("flex min-w-0 items-center gap-2", collapsed && "justify-center w-full")}>
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
-            <ScanFace className="h-5 w-5" strokeWidth={1.75} />
+          <div
+            className={cn(
+              "relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl shadow-sm",
+              accountTier === "god" &&
+                "bg-[radial-gradient(circle_at_30%_20%,#FCA5A5_0%,#DC2626_60%,#991B1B_100%)] text-white",
+              accountTier === "ceo" &&
+                "bg-[radial-gradient(circle_at_30%_20%,#FDE68A_0%,#CA8A04_60%,#854D0E_100%)] text-white",
+              accountTier === "hr" &&
+                "bg-[radial-gradient(circle_at_30%_20%,#A5B4FC_0%,#4F46E5_60%,#312E81_100%)] text-white",
+              accountTier === "other" &&
+                "bg-[radial-gradient(circle_at_30%_20%,#C4B5FD_0%,#7C3AED_60%,#4C1D95_100%)] text-white"
+            )}
+          >
+            <Crown className="h-5 w-5" strokeWidth={1.9} />
+            <Sparkles className="absolute -right-1 -top-1 h-3 w-3 opacity-80" strokeWidth={2} />
           </div>
           {!collapsed ? (
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-ink tracking-tight">Attendance</p>
-              <p className="truncate text-[11px] text-ink-muted">Enterprise</p>
+              <p className="text-[15px] font-semibold leading-tight text-ink tracking-tight">Biometrica</p>
+              <p className="text-[11px] leading-tight text-ink-muted">Attendance Command</p>
             </div>
           ) : null}
         </div>
@@ -87,7 +101,7 @@ export function Sidebar() {
         </div>
       ) : null}
 
-      <nav className="flex flex-1 flex-col gap-0.5 p-2">
+      <nav className="flex flex-1 flex-col gap-1 p-2.5">
         {visibleItems.map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
@@ -96,17 +110,17 @@ export function Sidebar() {
             title={collapsed ? label : undefined}
             className={({ isActive }) =>
               cn(
-                "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                "group flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
                 collapsed && "justify-center px-0",
                 isActive
                   ? accountTier === "god"
-                    ? "bg-status-absent-soft/70 text-status-absent shadow-sm"
+                    ? "bg-status-absent-soft/70 text-status-absent shadow-sm ring-1 ring-status-absent/15"
                     : accountTier === "ceo"
-                    ? "bg-status-late-soft/80 text-status-late shadow-sm"
+                    ? "bg-status-late-soft/80 text-status-late shadow-sm ring-1 ring-status-late/15"
                     : accountTier === "hr"
-                    ? "bg-primary-soft text-primary shadow-sm"
-                    : "bg-primary-soft text-primary shadow-sm"
-                  : "text-ink-muted hover:bg-surface hover:text-ink"
+                    ? "bg-primary-soft text-primary shadow-sm ring-1 ring-primary/10"
+                    : "bg-primary-soft text-primary shadow-sm ring-1 ring-primary/10"
+                  : "text-ink-muted hover:bg-surface hover:text-ink hover:shadow-sm"
               )
             }
           >
@@ -118,10 +132,13 @@ export function Sidebar() {
 
       <div className={cn("mt-auto border-t border-line/60 p-3", collapsed && "px-2")}>
         {!collapsed ? (
-          <p className="rounded-xl bg-surface px-3 py-2 text-[11px] leading-snug text-ink-muted">
-            Read-only device sync. Identity follows terminal{" "}
-            <code className="rounded bg-surface-card px-1 font-mono text-[10px] text-ink">device_user_id</code>.
-          </p>
+          <div className="rounded-2xl border border-line/70 bg-surface px-3 py-2.5 text-[11px] leading-snug text-ink-muted shadow-sm">
+            <p className="font-medium text-ink/80">Read-only device sync</p>
+            <p className="mt-1">
+              Identity follows terminal{" "}
+              <code className="rounded bg-surface-card px-1 font-mono text-[10px] text-ink">device_user_id</code>.
+            </p>
+          </div>
         ) : null}
       </div>
     </motion.aside>
