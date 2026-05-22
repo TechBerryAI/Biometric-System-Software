@@ -258,7 +258,7 @@ async function alembicUpgrade() {
   const code = await waitForExit(r);
   if (code !== 0) {
     warn(
-      "Alembic failed ? check PostgreSQL is running, database exists, and DATABASE_URL in backend/.env is correct."
+      "Alembic failed ? check PostgreSQL is running, database exists, and backend/.env has valid DATABASE_URL or DB_* PostgreSQL settings."
     );
     throw new Error(`alembic upgrade failed with exit ${code}`);
   }
@@ -313,7 +313,7 @@ async function main() {
     const raw = fs.readFileSync(envPath, "utf8");
     if (/YOUR_PASSWORD|CHANGE_ME/i.test(raw)) {
       warn(
-        "backend/.env still contains YOUR_PASSWORD or CHANGE_ME ? set DATABASE_URL to your real PostgreSQL password."
+        "backend/.env still contains YOUR_PASSWORD or CHANGE_ME ? set DATABASE_URL (or DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD) to real PostgreSQL credentials."
       );
     }
   }

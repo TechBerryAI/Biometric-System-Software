@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from datetime import time
+from urllib.parse import quote_plus
 
-from pydantic import Field, PostgresDsn
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,10 +21,14 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False, alias="DEBUG")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
-    database_url: PostgresDsn = Field(
-        default="postgresql+psycopg://biometric:biometric@localhost:5432/biometric",
-        alias="DATABASE_URL",
-    )
+    # Primary setting. If omitted, it is built from DB_* fields below.
+    database_url: str | None = Field(default=None, alias="DATABASE_URL")
+    db_host: str | None = Field(default=None, alias="DB_HOST")
+    db_port: int | None = Field(default=None, alias="DB_PORT")
+    db_name: str | None = Field(default=None, alias="DB_NAME")
+    db_user: str | None = Field(default=None, alias="DB_USER")
+    db_password: str | None = Field(default=None, alias="DB_PASSWORD")
+    db_sslmode: str | None = Field(default=None, alias="DB_SSLMODE")
 
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     redis_namespace: str = Field(default="biometric", alias="REDIS_NAMESPACE")
@@ -102,6 +107,29 @@ class Settings(BaseSettings):
     allow_device_card_rewrite: bool = Field(default=False, alias="ALLOW_DEVICE_CARD_REWRITE")
     allow_device_admin_override: bool = Field(default=False, alias="ALLOW_DEVICE_ADMIN_OVERRIDE")
     device_read_only: bool = Field(default=False, alias="DEVICE_READ_ONLY")
+
+    @model_validator(mode="after")
+    def _compose_database_url(self) -> "Settings":
+        # Keep explicit DATABASE_URL untouched.
+        if self.database_url:
+            return self
+
+        # Build from split DB_* vars (useful for VM/tunneled TCP deployments).
+        if self.db_host and self.db_port and self.db_name and self.db_user is not None:
+            user = quote_plus(self.db_user)
+            auth = user
+            if self.db_password is not None:
+                auth = f"{user}:{quote_plus(self.db_password)}"
+
+            url = f"postgresql+psycopg://{auth}@{self.db_host}:{self.db_port}/{self.db_name}"
+            if self.db_sslmode:
+                url = f"{url}?sslmode={quote_plus(self.db_sslmode)}"
+            self.database_url = url
+            return self
+
+        # Backward-compatible local default.
+        self.database_url = "postgresql+psycopg://biometric:biometric@localhost:5432/biometric"
+        return self
 
 
 @lru_cache
