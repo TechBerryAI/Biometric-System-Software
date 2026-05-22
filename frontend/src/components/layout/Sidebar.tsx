@@ -6,17 +6,23 @@ import {
   Crown,
   FileBarChart2,
   LayoutDashboard,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
   Settings,
   Users,
+  Wifi,
 } from "lucide-react";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import type { Permission } from "@/auth/permissions";
 import { cn } from "@/lib/cn";
 import { useUiStore } from "@/stores/ui-store";
 import { Button } from "@/components/ui/button";
+import { fetchOperationalMetrics, getApiErrorMessage, syncFromDevice } from "@/services/api";
 
 const items = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: "dashboard:view" as Permission },
@@ -31,9 +37,54 @@ export function Sidebar() {
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
   const toggle = useUiStore((s) => s.toggleSidebar);
   const { can, user } = useAuth();
+  const queryClient = useQueryClient();
+  const [syncing, setSyncing] = useState(false);
+  const [syncState, setSyncState] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
   const isGodMode = (user?.email ?? "").trim().toLowerCase() === "techberryaiteam@gmail.com";
   const accountTier = isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" || user?.role === "IT_ADMIN" ? "hr" : "other";
   const visibleItems = items.filter((item) => can(item.permission));
+  const opsMetrics = useQuery({
+    queryKey: ["operational-metrics"],
+    queryFn: fetchOperationalMetrics,
+    staleTime: 45 * 1000,
+    refetchInterval: 45 * 1000,
+    retry: false,
+  });
+  const failingDevices = opsMetrics.data?.failing_devices ?? 0;
+  const retryPressure = (opsMetrics.data?.stale_commands ?? 0) + (opsMetrics.data?.dead_letter_commands ?? 0);
+  const syncHealthy = failingDevices === 0 && retryPressure === 0;
+
+  const refreshWorkforceViews = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["employees"] }),
+      queryClient.invalidateQueries({ queryKey: ["recent-attendance-logs"] }),
+      queryClient.invalidateQueries({ queryKey: ["attendance-trend"] }),
+      queryClient.invalidateQueries({ queryKey: ["operational-metrics"] }),
+      queryClient.invalidateQueries({ queryKey: ["attendance-anomalies"] }),
+      queryClient.invalidateQueries({ queryKey: ["management-insights"] }),
+    ]);
+  };
+
+  const onSyncNow = async () => {
+    setSyncing(true);
+    setSyncState(null);
+    try {
+      const result = await syncFromDevice();
+      await refreshWorkforceViews();
+      window.dispatchEvent(new Event("biometrica:device-sync"));
+      setSyncState({
+        tone: "ok",
+        message: `Synced ${result.new_attendance_logs} new logs from ${result.attendance_records_fetched} fetched records.`,
+      });
+    } catch (error: unknown) {
+      setSyncState({
+        tone: "warn",
+        message: getApiErrorMessage(error) || "Sync failed. Check device connectivity and retry.",
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   return (
     <motion.aside
@@ -86,6 +137,18 @@ export function Sidebar() {
         ) : null}
       </div>
 
+      {!collapsed ? (
+        <div className="border-b border-line/60 px-3 py-3">
+          <div className="rounded-2xl border border-line/70 bg-surface px-3 py-2 shadow-sm">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-ink-muted">Workspace</p>
+            <div className="mt-1 flex items-center justify-between">
+              <p className="text-sm font-semibold text-ink">Global HQ</p>
+              <span className="rounded-full bg-primary-soft px-2 py-0.5 text-[10px] font-semibold text-primary">Live</span>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {collapsed ? (
         <div className="flex justify-center py-2">
           <Button
@@ -124,20 +187,67 @@ export function Sidebar() {
               )
             }
           >
-            <Icon className="h-[18px] w-[18px] shrink-0 stroke-[1.75]" />
-            {!collapsed ? <span className="truncate">{label}</span> : null}
+            {({ isActive }) => (
+              <>
+                {isActive && !collapsed ? (
+                  <motion.span
+                    layoutId="sidebar-active-pill"
+                    className="absolute left-1.5 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-primary"
+                  />
+                ) : null}
+                <Icon className="h-[18px] w-[18px] shrink-0 stroke-[1.75]" />
+                {!collapsed ? <span className="truncate">{label}</span> : null}
+                {!collapsed && label === "Operations" ? (
+                  <span className="ml-auto rounded-full bg-status-absent-soft px-1.5 py-0.5 text-[10px] font-semibold text-status-absent">
+                    2
+                  </span>
+                ) : null}
+              </>
+            )}
           </NavLink>
         ))}
       </nav>
 
       <div className={cn("mt-auto border-t border-line/60 p-3", collapsed && "px-2")}>
         {!collapsed ? (
-          <div className="rounded-2xl border border-line/70 bg-surface px-3 py-2.5 text-[11px] leading-snug text-ink-muted shadow-sm">
-            <p className="font-medium text-ink/80">Read-only device sync</p>
-            <p className="mt-1">
-              Identity follows terminal{" "}
-              <code className="rounded bg-surface-card px-1 font-mono text-[10px] text-ink">device_user_id</code>.
-            </p>
+          <div className="space-y-2">
+            <div className="rounded-2xl border border-line/70 bg-surface px-3 py-2.5 text-[11px] leading-snug text-ink-muted shadow-sm">
+              <p className="flex items-center justify-between font-medium text-ink/80">
+                <span>Device sync health</span>
+                <span className={cn("inline-flex items-center gap-1", syncHealthy ? "text-emerald-600" : "text-amber-600")}>
+                  <span className={cn("h-2 w-2 animate-pulse rounded-full", syncHealthy ? "bg-emerald-500" : "bg-amber-500")} />
+                  {syncHealthy ? "Healthy" : "Degraded"}
+                </span>
+              </p>
+              <p className="mt-1 flex items-center gap-1">
+                <Wifi className="h-3.5 w-3.5 text-primary" />
+                {opsMetrics.isLoading
+                  ? "Checking live device status..."
+                  : `${failingDevices} devices failing, ${retryPressure} sync retries pending`}
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="rounded-xl text-xs"
+                onClick={() => void onSyncNow()}
+                disabled={syncing}
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
+                Sync now
+              </Button>
+            </div>
+            {syncState ? (
+              <p
+                className={cn(
+                  "rounded-xl px-2 py-1 text-[11px]",
+                  syncState.tone === "ok" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                )}
+              >
+                {syncState.message}
+              </p>
+            ) : null}
           </div>
         ) : null}
       </div>

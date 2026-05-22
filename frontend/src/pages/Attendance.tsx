@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,7 +10,6 @@ import {
   fetchDailySummary,
   fetchEmployees,
   getApiErrorMessage,
-  syncFromDevice,
 } from "@/services/api";
 import { useUiStore } from "@/stores/ui-store";
 import type { DailySummaryRow, Employee } from "@/types";
@@ -66,39 +64,19 @@ export function Attendance() {
     }
   }, [fetchRoster]);
 
-  /** Same as scripts/sync_from_device.py via API, then reload roster for the selected date. */
-  const refreshFromDevice = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    let syncWarning: string | null = null;
-    try {
-      await syncFromDevice();
-    } catch (e: unknown) {
-      syncWarning = getApiErrorMessage(e);
-    }
-    try {
-      await fetchRoster();
-      if (syncWarning) {
-        setError(`${syncWarning} Roster may be stale until the device is reachable.`);
-      }
-    } catch (e: unknown) {
-      setError(getApiErrorMessage(e) || "Failed to load attendance");
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchRoster]);
-
   useEffect(() => {
     void load();
   }, [load]);
 
   useEffect(() => {
-    const intervalMs = 120_000;
-    const id = window.setInterval(() => {
-      void refreshFromDevice();
-    }, intervalMs);
-    return () => window.clearInterval(id);
-  }, [refreshFromDevice]);
+    const handler = () => {
+      void load();
+    };
+    window.addEventListener("biometrica:device-sync", handler);
+    return () => {
+      window.removeEventListener("biometrica:device-sync", handler);
+    };
+  }, [load]);
 
   const filtered = useMemo(() => {
     const q = globalSearchQuery.trim().toLowerCase();
@@ -152,34 +130,25 @@ export function Attendance() {
         <p className="mt-2 max-w-2xl text-sm text-ink-muted leading-relaxed">
           Daily roster sorted by punch order.{" "}
           <span className="text-ink-subtle">
-            Refresh pulls the latest punches from the terminal, then reloads this view; the same sync runs every 2
-            minutes in the background.
+            Use the sidebar <strong>Sync now</strong> action to pull latest device punches. This page auto-updates
+            after each successful sync.
           </span>
         </p>
       </header>
-
-      <Card className="overflow-hidden">
-        <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:flex-wrap sm:items-end">
-          <label className="flex min-w-[10rem] flex-col gap-1.5 text-sm">
-            <span className="text-xs font-medium text-ink-muted">Date</span>
-            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </label>
-          <Button type="button" variant="secondary" onClick={() => void refreshFromDevice()} disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
-          </Button>
-        </CardContent>
-      </Card>
 
       <Card className="border-primary/10 bg-gradient-to-br from-primary-soft/40 via-surface-card to-surface-card">
         <CardContent className="flex flex-col gap-4 p-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h2 className="font-display text-display-lg text-ink">Export</h2>
             <p className="mt-1 max-w-xl text-sm text-ink-muted">
-              Generate a printable PDF for the selected window — perfect for audits and payroll handoff.
+              Select date and period together, then generate a printable PDF for audits and payroll handoff.
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <label className="flex flex-col gap-1.5 text-sm">
+              <span className="text-xs font-medium text-ink-muted">Date</span>
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </label>
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="text-xs font-medium text-ink-muted">Period</span>
               <select

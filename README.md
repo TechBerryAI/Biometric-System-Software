@@ -48,6 +48,18 @@ From repository root:
 node start.js
 ```
 
+For VM app-server startup (example VM IP `192.168.1.117`):
+
+```bash
+node start-vm.js
+```
+
+or:
+
+```bash
+npm run start:vm
+```
+
 This will:
 
 - create backend virtual environment if missing
