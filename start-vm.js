@@ -1,12 +1,12 @@
 /**
- * VM startup: backend venv + pip, Alembic migrations, frontend npm install, uvicorn + Vite.
- * Intended for VM app server deployments where frontend/API must be reachable over LAN.
+ * VM startup runner: starts backend + frontend only (no install/bootstrap).
+ * Intended for VM app server use where dependencies are already present.
  *
  * Usage: node start-vm.js
  * Env:   VM_HOST=192.168.1.117
  *        API_PORT=8000 FRONTEND_PORT=5173
  *        API_BIND_HOST=0.0.0.0 FRONTEND_BIND_HOST=0.0.0.0
- *        PYTHON=path\to\python.exe START_CELERY=1 SKIP_OPEN_BROWSER=1
+ *        START_CELERY=1 SKIP_OPEN_BROWSER=1
  *        VITE_API_URL=http://192.168.1.117:8000
  */
 
@@ -77,58 +77,6 @@ function ensureBackendEnv() {
   if (!fs.existsSync(envPath) && fs.existsSync(example)) {
     fs.copyFileSync(example, envPath);
     log("Created backend/.env from .env.example; set real database and device values before continuing.");
-  }
-}
-
-function resolvePythonLauncher() {
-  if (process.env.PYTHON) return { cmd: process.env.PYTHON, argsPrefix: [] };
-  try {
-    execSync("python --version", { stdio: "ignore", shell: isWin });
-    return { cmd: "python", argsPrefix: [] };
-  } catch {
-    /* continue */
-  }
-  try {
-    execSync("py -3 --version", { stdio: "ignore", shell: isWin });
-    return { cmd: "py", argsPrefix: ["-3"] };
-  } catch {
-    throw new Error("Python 3.11+ not found. Install Python or set PYTHON to your python.exe path.");
-  }
-}
-
-function waitForExit(proc) {
-  return new Promise((resolve, reject) => {
-    proc.on("exit", (code) => resolve(code ?? 0));
-    proc.on("error", reject);
-  });
-}
-
-async function ensureVenv() {
-  const forceRecreate = process.env.FORCE_RECREATE_VENV === "1";
-  if (forceRecreate && fs.existsSync(VENV_DIR)) {
-    log("FORCE_RECREATE_VENV=1 -> removing existing backend/.venv ...");
-    fs.rmSync(VENV_DIR, { recursive: true, force: true });
-  }
-
-  if (!fs.existsSync(VENV_PY)) {
-    log("Creating backend virtualenv...");
-    const { cmd, argsPrefix } = resolvePythonLauncher();
-    const args = [...argsPrefix, "-m", "venv", ".venv"];
-    const r = spawn(cmd, args, { cwd: BACKEND, stdio: "inherit", shell: false });
-    const code = await waitForExit(r);
-    if (code !== 0) throw new Error(`venv creation failed with exit ${code}`);
-  } else {
-    log("Backend virtualenv already exists");
-  }
-
-  const verify = spawn(VENV_PY, ["-c", "import sys; print(sys.executable)"], {
-    cwd: BACKEND,
-    stdio: "inherit",
-    shell: false,
-  });
-  const verifyCode = await waitForExit(verify);
-  if (verifyCode !== 0) {
-    throw new Error("backend/.venv exists but python executable failed. Recreate with FORCE_RECREATE_VENV=1.");
   }
 }
 
@@ -210,71 +158,13 @@ function openBrowser(url) {
   }
 }
 
-async function pipInstall() {
+function preflightChecks() {
   if (!fs.existsSync(VENV_PY)) {
-    throw new Error("Virtualenv python missing at backend/.venv. Run with FORCE_RECREATE_VENV=1.");
+    throw new Error("Missing backend virtualenv python at backend/.venv. This script does not install dependencies.");
   }
-  const requirementsPath = path.join(BACKEND, "requirements.txt");
-  if (!fs.existsSync(requirementsPath)) {
-    throw new Error(`requirements.txt not found at ${requirementsPath}`);
+  if (!fs.existsSync(path.join(FRONTEND, "node_modules")) || !hasViteBinary()) {
+    throw new Error("Frontend dependencies are missing (node_modules/vite). This script does not run npm install.");
   }
-
-  log("Installing Python dependencies into backend/.venv ...");
-
-  const upgradePip = spawn(VENV_PY, ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], {
-    cwd: BACKEND,
-    stdio: "inherit",
-    shell: false,
-  });
-  const upgradeCode = await waitForExit(upgradePip);
-  if (upgradeCode !== 0) throw new Error(`pip bootstrap failed with exit ${upgradeCode}`);
-
-  const r = spawn(VENV_PY, ["-m", "pip", "install", "--require-virtualenv", "-r", requirementsPath], {
-    cwd: BACKEND,
-    stdio: "inherit",
-    shell: false,
-  });
-  const code = await waitForExit(r);
-  if (code !== 0) throw new Error(`pip install failed with exit ${code}`);
-
-  const freezeCheck = spawn(VENV_PY, ["-m", "pip", "--version"], {
-    cwd: BACKEND,
-    stdio: "inherit",
-    shell: false,
-  });
-  const freezeCode = await waitForExit(freezeCheck);
-  if (freezeCode !== 0) throw new Error(`pip verification failed with exit ${freezeCode}`);
-}
-
-async function alembicUpgrade() {
-  log("Running database migrations...");
-  const r = spawn(VENV_PY, ["-m", "alembic", "upgrade", "head"], {
-    cwd: BACKEND,
-    stdio: "inherit",
-    shell: false,
-    env: envForBackendChild(),
-  });
-  const code = await waitForExit(r);
-  if (code !== 0) {
-    warn("Alembic failed; verify PostgreSQL, backend/.env credentials, and network connectivity from VM.");
-    throw new Error(`alembic upgrade failed with exit ${code}`);
-  }
-}
-
-async function npmInstallFrontend() {
-  const hasNodeModules = fs.existsSync(path.join(FRONTEND, "node_modules"));
-  if (hasNodeModules && hasViteBinary()) {
-    log("Frontend dependencies present; skipping npm install");
-    return;
-  }
-  if (hasNodeModules && !hasViteBinary()) {
-    warn("node_modules exists but Vite binary missing; reinstalling frontend dependencies.");
-  } else {
-    log("Installing frontend dependencies (npm install)...");
-  }
-  const r = runNpm(["install"], { cwd: FRONTEND });
-  const code = await waitForExit(r);
-  if (code !== 0) throw new Error(`npm install failed with exit ${code}`);
 }
 
 function shutdown() {
@@ -296,7 +186,7 @@ function shutdown() {
 }
 
 async function main() {
-  log(`Biometric attendance VM startup (${VM_HOST})`);
+  log(`Biometric attendance VM runner (${VM_HOST})`);
   process.chdir(ROOT);
 
   if (!fs.existsSync(BACKEND) || !fs.existsSync(FRONTEND)) {
@@ -304,6 +194,7 @@ async function main() {
   }
 
   ensureBackendEnv();
+  preflightChecks();
 
   const envPath = path.join(BACKEND, ".env");
   if (fs.existsSync(envPath)) {
@@ -312,11 +203,6 @@ async function main() {
       warn("backend/.env still contains placeholder credentials; update DATABASE_URL or DB_* values.");
     }
   }
-
-  await ensureVenv();
-  await pipInstall();
-  await alembicUpgrade();
-  await npmInstallFrontend();
 
   const apiUrl = process.env.VITE_API_URL || `http://${VM_HOST}:${API_PORT}`;
   const apiHealthLocal = `http://127.0.0.1:${API_PORT}/health`;
