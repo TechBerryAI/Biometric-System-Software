@@ -12,6 +12,7 @@
 
 const { spawn, execSync } = require("child_process");
 const http = require("http");
+const net = require("net");
 const fs = require("fs");
 const path = require("path");
 
@@ -152,24 +153,32 @@ async function waitForHttp(url, label, { maxWaitMs = 120000, intervalMs = 500 } 
 }
 
 function openBrowser(url) {
-  if (process.env.SKIP_OPEN_BROWSER === "1") {
-    log("SKIP_OPEN_BROWSER=1 -> not opening browser.");
+  const explicitOpen = process.env.OPEN_BROWSER === "1";
+  const explicitSkip = process.env.SKIP_OPEN_BROWSER === "1";
+  if (!explicitOpen || explicitSkip) {
+    log("Browser auto-open is disabled for VM mode (set OPEN_BROWSER=1 to enable).");
     return;
   }
+
   log(`Opening browser: ${url}`);
   try {
+    let p = null;
     if (isWin) {
-      const p = spawn("cmd.exe", ["/d", "/c", "start", "", url], {
+      p = spawn("cmd.exe", ["/d", "/c", "start", "", url], {
         detached: true,
         stdio: "ignore",
         shell: false,
       });
-      p.unref();
     } else if (process.platform === "darwin") {
-      const p = spawn("open", [url], { detached: true, stdio: "ignore" });
-      p.unref();
+      p = spawn("open", [url], { detached: true, stdio: "ignore" });
     } else {
-      const p = spawn("xdg-open", [url], { detached: true, stdio: "ignore" });
+      p = spawn("xdg-open", [url], { detached: true, stdio: "ignore" });
+    }
+
+    if (p) {
+      p.on("error", (err) => {
+        warn(`Could not auto-open browser (${err.message}). Open manually: ${url}`);
+      });
       p.unref();
     }
   } catch (e) {
@@ -177,7 +186,26 @@ function openBrowser(url) {
   }
 }
 
-function preflightChecks() {
+function isPortInUse(host, port, timeoutMs = 800) {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", () => {
+      resolve(false);
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.connect(port, host);
+  });
+}
+
+async function preflightChecks() {
   const backendPy = resolveBackendPython();
   if (!backendPy) {
     throw new Error(
@@ -186,6 +214,16 @@ function preflightChecks() {
   }
   if (!fs.existsSync(path.join(FRONTEND, "node_modules")) || !hasViteBinary()) {
     throw new Error("Frontend dependencies are missing (node_modules/vite). This script does not run npm install.");
+  }
+  if (await isPortInUse("127.0.0.1", Number(API_PORT))) {
+    throw new Error(
+      `API port ${API_PORT} is already in use. Stop existing backend process before running start-vm.js.`
+    );
+  }
+  if (await isPortInUse("127.0.0.1", Number(FRONTEND_PORT))) {
+    throw new Error(
+      `Frontend port ${FRONTEND_PORT} is already in use. Stop existing Vite process before running start-vm.js.`
+    );
   }
   return backendPy;
 }
@@ -217,7 +255,7 @@ async function main() {
   }
 
   ensureBackendEnv();
-  const backendPython = preflightChecks();
+  const backendPython = await preflightChecks();
 
   const envPath = path.join(BACKEND, ".env");
   if (fs.existsSync(envPath)) {
@@ -263,7 +301,7 @@ async function main() {
   }
 
   log(`Starting Vite on http://${FRONTEND_BIND_HOST}:${FRONTEND_PORT} (API ${apiUrl})...`);
-  runNpm(["run", "dev", "--", "--host", FRONTEND_BIND_HOST, "--port", FRONTEND_PORT], {
+  runNpm(["run", "dev", "--", "--host", FRONTEND_BIND_HOST, "--port", FRONTEND_PORT, "--strictPort"], {
     cwd: FRONTEND,
     env: frontendEnv,
   });
