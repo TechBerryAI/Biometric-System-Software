@@ -18,12 +18,6 @@ const path = require("path");
 const ROOT = path.resolve(__dirname);
 const BACKEND = path.join(ROOT, "backend");
 const FRONTEND = path.join(ROOT, "frontend");
-const VENV_DIR = path.join(BACKEND, ".venv");
-const VENV_PY = path.join(
-  VENV_DIR,
-  process.platform === "win32" ? "Scripts" : "bin",
-  process.platform === "win32" ? "python.exe" : "python"
-);
 const children = [];
 const isWin = process.platform === "win32";
 
@@ -78,6 +72,31 @@ function ensureBackendEnv() {
     fs.copyFileSync(example, envPath);
     log("Created backend/.env from .env.example; set real database and device values before continuing.");
   }
+}
+
+function venvPythonPath(venvDir) {
+  return path.join(
+    venvDir,
+    isWin ? "Scripts" : "bin",
+    isWin ? "python.exe" : "python"
+  );
+}
+
+function resolveBackendPython() {
+  const override = process.env.BACKEND_VENV_PY;
+  if (override && fs.existsSync(override)) return override;
+
+  const candidates = [
+    venvPythonPath(path.join(BACKEND, ".venv")),
+    venvPythonPath(path.join(BACKEND, "venv")),
+    venvPythonPath(path.join(BACKEND, "env")),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  return null;
 }
 
 function envForBackendChild(extra = {}) {
@@ -159,12 +178,16 @@ function openBrowser(url) {
 }
 
 function preflightChecks() {
-  if (!fs.existsSync(VENV_PY)) {
-    throw new Error("Missing backend virtualenv python at backend/.venv. This script does not install dependencies.");
+  const backendPy = resolveBackendPython();
+  if (!backendPy) {
+    throw new Error(
+      "Missing backend venv python. Expected one of backend/.venv, backend/venv, backend/env (or set BACKEND_VENV_PY). This script does not install dependencies."
+    );
   }
   if (!fs.existsSync(path.join(FRONTEND, "node_modules")) || !hasViteBinary()) {
     throw new Error("Frontend dependencies are missing (node_modules/vite). This script does not run npm install.");
   }
+  return backendPy;
 }
 
 function shutdown() {
@@ -194,7 +217,7 @@ async function main() {
   }
 
   ensureBackendEnv();
-  preflightChecks();
+  const backendPython = preflightChecks();
 
   const envPath = path.join(BACKEND, ".env");
   if (fs.existsSync(envPath)) {
@@ -212,7 +235,7 @@ async function main() {
 
   log(`Starting FastAPI (uvicorn) on http://${API_BIND_HOST}:${API_PORT} ...`);
   run(
-    VENV_PY,
+    backendPython,
     ["-m", "uvicorn", "app.main:app", "--reload", "--host", API_BIND_HOST, "--port", API_PORT],
     {
       cwd: BACKEND,
@@ -225,12 +248,12 @@ async function main() {
 
   if (process.env.START_CELERY === "1") {
     log("Starting Celery worker + beat (requires Redis)...");
-    run(VENV_PY, ["-m", "celery", "-A", "app.workers.celery_app", "worker", "-l", "info"], {
+    run(backendPython, ["-m", "celery", "-A", "app.workers.celery_app", "worker", "-l", "info"], {
       cwd: BACKEND,
       shell: false,
       env: envForBackendChild(),
     });
-    run(VENV_PY, ["-m", "celery", "-A", "app.workers.celery_app", "beat", "-l", "info"], {
+    run(backendPython, ["-m", "celery", "-A", "app.workers.celery_app", "beat", "-l", "info"], {
       cwd: BACKEND,
       shell: false,
       env: envForBackendChild(),
