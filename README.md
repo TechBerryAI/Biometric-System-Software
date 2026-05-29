@@ -196,6 +196,7 @@ Full endpoint grouping is documented in `docs/api-overview.md`.
 ## Troubleshooting
 
 - Check `backend/.env` for `DATABASE_URL` and `REDIS_URL`.
+- If login shows browser CORS/preflight errors on VM/LAN hosts, set `VITE_API_URL` correctly and verify backend CORS vars (`CORS_ALLOW_ORIGINS`, `CORS_ALLOW_PRIVATE_NETWORK_ORIGINS`).
 - If migrations fail, ensure PostgreSQL is running and credentials are correct.
 - If queue is stuck, inspect:
   - `/operations/queue`

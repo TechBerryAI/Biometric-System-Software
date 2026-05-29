@@ -270,6 +270,16 @@ async function main() {
   const frontendPublicOrigin = `http://${VM_HOST}:${FRONTEND_PORT}`;
   const frontendLocalOrigin = `http://127.0.0.1:${FRONTEND_PORT}`;
   const frontendEnv = { ...process.env, VITE_API_URL: apiUrl };
+  const backendCorsOrigins =
+    process.env.CORS_ALLOW_ORIGINS ||
+    [
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+      "http://frontend:5173",
+      frontendPublicOrigin,
+      frontendLocalOrigin,
+    ].join(",");
+  const backendEnv = envForBackendChild({ CORS_ALLOW_ORIGINS: backendCorsOrigins });
 
   log(`Starting FastAPI (uvicorn) on http://${API_BIND_HOST}:${API_PORT} ...`);
   run(
@@ -278,7 +288,7 @@ async function main() {
     {
       cwd: BACKEND,
       shell: false,
-      env: envForBackendChild(),
+      env: backendEnv,
     }
   );
 
@@ -289,12 +299,12 @@ async function main() {
     run(backendPython, ["-m", "celery", "-A", "app.workers.celery_app", "worker", "-l", "info"], {
       cwd: BACKEND,
       shell: false,
-      env: envForBackendChild(),
+      env: backendEnv,
     });
     run(backendPython, ["-m", "celery", "-A", "app.workers.celery_app", "beat", "-l", "info"], {
       cwd: BACKEND,
       shell: false,
-      env: envForBackendChild(),
+      env: backendEnv,
     });
   } else {
     log("Tip: set START_CELERY=1 to run worker+beat (requires Redis)");

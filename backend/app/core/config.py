@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     app_name: str = Field(default="Biometric Attendance API", alias="APP_NAME")
     debug: bool = Field(default=False, alias="DEBUG")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    cors_allow_origins: str = Field(
+        default="http://localhost:5173,http://127.0.0.1:5173,http://frontend:5173",
+        alias="CORS_ALLOW_ORIGINS",
+    )
+    cors_allow_origin_regex: str = Field(default=r"^http://(localhost|127\.0\.0\.1):\d+$", alias="CORS_ALLOW_ORIGIN_REGEX")
+    cors_allow_private_network_origins: bool = Field(default=True, alias="CORS_ALLOW_PRIVATE_NETWORK_ORIGINS")
 
     # Primary setting. If omitted, it is built from DB_* fields below.
     database_url: str | None = Field(default=None, alias="DATABASE_URL")
@@ -130,6 +136,20 @@ class Settings(BaseSettings):
         # Backward-compatible local default.
         self.database_url = "postgresql+psycopg://biometric:biometric@localhost:5432/biometric"
         return self
+
+    @property
+    def cors_allowed_origins(self) -> list[str]:
+        """Parse comma-separated CORS origins into a normalized list."""
+        values = [item.strip().rstrip("/") for item in self.cors_allow_origins.split(",")]
+        # Keep order stable while removing empty/duplicate values.
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for origin in values:
+            if not origin or origin in seen:
+                continue
+            seen.add(origin)
+            deduped.append(origin)
+        return deduped
 
 
 @lru_cache

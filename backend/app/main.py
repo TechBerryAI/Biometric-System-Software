@@ -66,15 +66,20 @@ async def request_context_middleware(request: Request, call_next):
     )
     return response
 
+cors_origin_patterns: list[str] = []
+if settings.cors_allow_origin_regex:
+    cors_origin_patterns.append(settings.cors_allow_origin_regex)
+
+if settings.cors_allow_private_network_origins:
+    # Support VM/LAN app access (10.x, 172.16-31.x, 192.168.x) without manual code changes.
+    cors_origin_patterns.append(r"^https?://((10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?$")
+
+combined_cors_origin_regex = "|".join(f"(?:{pattern})" for pattern in cors_origin_patterns) or None
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://frontend:5173",
-    ],
-    # Allow Vite fallback ports (5174, 5175, ...) during local development.
-    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
+    allow_origins=settings.cors_allowed_origins,
+    allow_origin_regex=combined_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

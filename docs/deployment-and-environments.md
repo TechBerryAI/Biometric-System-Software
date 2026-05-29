@@ -22,6 +22,10 @@ Minimum production components:
   - `DATABASE_URL`
   - `REDIS_URL`
   - `REDIS_NAMESPACE`
+- CORS/frontend access:
+  - `CORS_ALLOW_ORIGINS` (comma-separated exact origins)
+  - `CORS_ALLOW_ORIGIN_REGEX` (optional regex)
+  - `CORS_ALLOW_PRIVATE_NETWORK_ORIGINS` (`true` to allow LAN/VM origins like `192.168.x.x`)
 - Device:
   - `ZK_DEVICE_IP`, `ZK_DEVICE_PORT`, `ZK_DEVICE_PASSWORD`, `ZK_DEVICE_TIMEOUT_SECONDS`, `ZK_DEVICE_ID`
 - Queue/reconciliation:
@@ -67,6 +71,11 @@ node start.js
    - `/health/redis`
    - `/health/devices`
    - `/operations/alerts`
+
+## VM/LAN CORS Notes
+
+- If frontend is served from a VM/LAN IP (`http://192.168.x.x:5173`), keep `CORS_ALLOW_PRIVATE_NETWORK_ORIGINS=true` or add that exact frontend origin to `CORS_ALLOW_ORIGINS`.
+- `start-vm.js` now auto-injects VM frontend origin into backend CORS origins unless you explicitly set `CORS_ALLOW_ORIGINS`.
 
 ## Production Safety Checklist
 
