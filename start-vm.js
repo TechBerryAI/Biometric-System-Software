@@ -7,7 +7,8 @@
  *        API_PORT=8000 FRONTEND_PORT=5173
  *        API_BIND_HOST=0.0.0.0 FRONTEND_BIND_HOST=0.0.0.0
  *        START_CELERY=1 SKIP_OPEN_BROWSER=1
- *        VITE_API_URL=http://192.168.1.117:8000
+ *        VITE_API_URL=/api
+ *        VITE_DEV_PROXY_TARGET=http://127.0.0.1:8000
  */
 
 const { spawn, execSync } = require("child_process");
@@ -265,11 +266,12 @@ async function main() {
     }
   }
 
-  const apiUrl = process.env.VITE_API_URL || `http://${VM_HOST}:${API_PORT}`;
+  const apiUrl = process.env.VITE_API_URL || "/api";
+  const devProxyTarget = process.env.VITE_DEV_PROXY_TARGET || `http://127.0.0.1:${API_PORT}`;
   const apiHealthLocal = `http://127.0.0.1:${API_PORT}/health`;
   const frontendPublicOrigin = `http://${VM_HOST}:${FRONTEND_PORT}`;
   const frontendLocalOrigin = `http://127.0.0.1:${FRONTEND_PORT}`;
-  const frontendEnv = { ...process.env, VITE_API_URL: apiUrl };
+  const frontendEnv = { ...process.env, VITE_API_URL: apiUrl, VITE_DEV_PROXY_TARGET: devProxyTarget };
   const backendCorsOrigins =
     process.env.CORS_ALLOW_ORIGINS ||
     [
@@ -310,7 +312,9 @@ async function main() {
     log("Tip: set START_CELERY=1 to run worker+beat (requires Redis)");
   }
 
-  log(`Starting Vite on http://${FRONTEND_BIND_HOST}:${FRONTEND_PORT} (API ${apiUrl})...`);
+  log(
+    `Starting Vite on http://${FRONTEND_BIND_HOST}:${FRONTEND_PORT} (API base ${apiUrl}, dev proxy ${devProxyTarget})...`
+  );
   runNpm(["run", "dev", "--", "--host", FRONTEND_BIND_HOST, "--port", FRONTEND_PORT, "--strictPort"], {
     cwd: FRONTEND,
     env: frontendEnv,
@@ -320,7 +324,7 @@ async function main() {
 
   log("Startup complete. Ctrl+C stops all processes");
   log(`Frontend (VM): ${frontendPublicOrigin}`);
-  log(`API (VM): ${apiUrl}`);
+  log(`API (VM): ${apiUrl} via frontend proxy target ${devProxyTarget}`);
   openBrowser(frontendPublicOrigin + "/");
 
   process.on("SIGINT", shutdown);

@@ -4,7 +4,8 @@
  *
  * Usage: node start.js
  * Env:   PYTHON=path\to\python.exe   START_CELERY=1   SKIP_OPEN_BROWSER=1
- *        FRONTEND_PORT=5173   VITE_API_URL=http://localhost:8000
+ *        FRONTEND_PORT=5173   VITE_API_URL=/api
+ *        VITE_DEV_PROXY_TARGET=http://localhost:8000
  */
 
 const { spawn, execSync } = require("child_process");
@@ -323,11 +324,12 @@ async function main() {
   await alembicUpgrade();
   await npmInstallFrontend();
 
-  const apiUrl = process.env.VITE_API_URL || "http://localhost:8000";
-  const apiHealth = apiUrl.replace(/\/$/, "") + "/health";
+  const apiUrl = process.env.VITE_API_URL || "/api";
+  const devProxyTarget = process.env.VITE_DEV_PROXY_TARGET || "http://localhost:8000";
+  const apiHealth = devProxyTarget.replace(/\/$/, "") + "/health";
   const fePort = process.env.FRONTEND_PORT || "5173";
   const feOrigin = `http://localhost:${fePort}`;
-  const feEnv = { ...process.env, VITE_API_URL: apiUrl };
+  const feEnv = { ...process.env, VITE_API_URL: apiUrl, VITE_DEV_PROXY_TARGET: devProxyTarget };
 
   log("Starting FastAPI (uvicorn) on http://0.0.0.0:8000 ...");
   run(VENV_PY, ["-m", "uvicorn", "app.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"], {
@@ -354,7 +356,7 @@ async function main() {
     log("Tip: set START_CELERY=1 to run worker+beat (requires Redis)");
   }
 
-  log(`Starting Vite on ${feOrigin} (API ${apiUrl})...`);
+  log(`Starting Vite on ${feOrigin} (API base ${apiUrl}, dev proxy ${devProxyTarget})...`);
   runNpm(["run", "dev", "--", "--host", "0.0.0.0", "--port", fePort], {
     cwd: FRONTEND,
     env: feEnv,

@@ -149,14 +149,15 @@ If needed, set frontend API URL:
 Windows PowerShell:
 
 ```powershell
-$env:VITE_API_URL="http://localhost:8000"
+$env:VITE_API_URL="/api"
+$env:VITE_DEV_PROXY_TARGET="http://localhost:8000"
 npm run dev
 ```
 
 Linux/macOS:
 
 ```bash
-VITE_API_URL=http://localhost:8000 npm run dev
+VITE_API_URL=/api VITE_DEV_PROXY_TARGET=http://localhost:8000 npm run dev
 ```
 
 ## Production-Grade Startup Checklist

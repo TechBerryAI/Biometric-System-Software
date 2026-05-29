@@ -1,6 +1,8 @@
 # API Overview
 
-Base URL (local): `http://localhost:8000`
+Backend direct base URL (service): `http://localhost:8000`
+
+Frontend-facing base URL (recommended behind reverse proxy): `/api`
 
 Swagger UI: `/docs`
 

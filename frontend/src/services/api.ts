@@ -1,4 +1,5 @@
 import axios from "axios";
+import { API_BASE_URL } from "@/config/api";
 import type {
   AttendanceLog,
   AttendanceSession,
@@ -9,8 +10,7 @@ import type {
   EmployeeDetail,
 } from "@/types";
 
-const baseURL =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://localhost:8000";
+const baseURL = API_BASE_URL;
 
 export const api = axios.create({
   baseURL,

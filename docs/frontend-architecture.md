@@ -43,8 +43,10 @@ Key paths:
 
 ## Environment Integration
 
-- frontend reads API base from `VITE_API_URL`
-- default local target is `http://localhost:8000`
+- frontend API base is centralized in `src/config/api.ts`
+- frontend reads `VITE_API_URL` (recommended value in all environments: `/api`)
+- Vite development proxy uses `VITE_DEV_PROXY_TARGET` (default `http://localhost:8000`)
+- all API calls should go through `src/services/api.ts` (no component-level hardcoded hosts)
 
 ## Reliability UX Expectations
 

@@ -14,7 +14,7 @@ Minimum production components:
 ## Required Environment Files
 
 - `backend/.env` (copy from `backend/.env.example`)
-- frontend environment variable `VITE_API_URL` at build/runtime
+- frontend `frontend/.env` (shared for local + production frontend base path)
 
 ## Critical Backend Variables
 
@@ -76,6 +76,36 @@ node start.js
 
 - If frontend is served from a VM/LAN IP (`http://192.168.x.x:5173`), keep `CORS_ALLOW_PRIVATE_NETWORK_ORIGINS=true` or add that exact frontend origin to `CORS_ALLOW_ORIGINS`.
 - `start-vm.js` now auto-injects VM frontend origin into backend CORS origins unless you explicitly set `CORS_ALLOW_ORIGINS`.
+
+## Reverse Proxy Contract (Nginx)
+
+Use `/api` as the only frontend API base path.
+
+```nginx
+server {
+    listen 80;
+    server_name 192.168.1.117;
+
+    root /var/www/biometric-frontend/dist;
+    index index.html;
+
+    location / {
+        try_files $uri /index.html;
+    }
+
+    # IMPORTANT: trailing slash in both location and proxy_pass rewrites /api/* -> /* upstream.
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Without the trailing-slash rewrite form above, upstream receives `/api/auth/login` instead of `/auth/login`.
 
 ## Production Safety Checklist
 
