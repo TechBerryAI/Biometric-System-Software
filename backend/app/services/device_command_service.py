@@ -17,6 +17,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.god_mode import is_god_mode_user
 from app.core.redis_keys import with_namespace
 from app.models.certified_firmware_profile import CertifiedFirmwareProfile
 from app.models.command_execution_history import CommandExecutionHistory
@@ -28,6 +29,7 @@ from app.models.device_state_snapshot import DeviceStateSnapshot
 from app.models.device_sync_event import DeviceSyncEvent
 from app.models.operation_safety_profile import OperationSafetyProfile
 from app.models.reconciliation_job import ReconciliationJob
+from app.models.user import User
 from app.models.verification_result import VerificationResult
 from app.services.audit_service import append_audit_log
 from app.services.device_service import DeviceService
@@ -150,6 +152,12 @@ def enqueue_device_command(
     allowlist = DeviceService.safe_command_allowlist()
     if command_type not in allowlist:
         raise RuntimeError(f"Rejected unsafe command type '{command_type}'.")
+    if command_type in GOD_HIDDEN_COMMAND_TYPES:
+        if not created_by:
+            raise RuntimeError("CORRECT_ATTENDANCE requires an authenticated GOD mode actor.")
+        actor = db.execute(select(User).where(User.user_uuid == created_by)).scalar_one_or_none()
+        if not is_god_mode_user(actor):
+            raise RuntimeError("CORRECT_ATTENDANCE is restricted to GOD mode.")
     key = _idempotency_key(device_id, command_type, payload)
     existing = db.execute(
         select(DeviceCommand).where(

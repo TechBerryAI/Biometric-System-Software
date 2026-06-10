@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pencil } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
+import { isGodMode } from "@/auth/godMode";
+import { useAuth } from "@/auth/AuthContext";
+import { Button } from "@/components/ui/button";import {
   Dialog,
   DialogBody,
   DialogContent,
@@ -50,6 +51,8 @@ export function GodAttendanceCorrectionModal({
   row,
   onApplied,
 }: ModalProps) {
+  const { user } = useAuth();
+  const godMode = isGodMode(user);
   const date = row?.summary_date ?? "";
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
@@ -76,11 +79,15 @@ export function GodAttendanceCorrectionModal({
   }, [employeeId, date]);
 
   useEffect(() => {
-    if (!open || !date) return;
+    if (!open || !date || !godMode) return;
     setSuccess(null);
     setError(null);
     void loadPreview();
-  }, [open, date, loadPreview]);
+  }, [open, date, godMode, loadPreview]);
+
+  if (!godMode) {
+    return null;
+  }
 
   const apply = async () => {
     if (!date) return;

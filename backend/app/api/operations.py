@@ -11,7 +11,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.god_mode import is_god_mode_email
+from app.core.god_mode import is_god_mode_user
 from app.core.security import Permission, get_current_user, require_permissions
 from app.models.audit_log import AuditLog
 from app.models.certified_firmware_profile import CertifiedFirmwareProfile
@@ -50,7 +50,7 @@ def list_audit_logs(
 ) -> list[AuditLog]:
     query = select(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit)
     rows = list(db.execute(query).scalars().all())
-    if not is_god_mode_email(user.email):
+    if not is_god_mode_user(user):
         rows = [row for row in rows if row.action_type not in GOD_HIDDEN_AUDIT_ACTIONS]
     return rows
 
@@ -70,7 +70,7 @@ def list_device_commands(
     if status:
         query = query.where(DeviceCommand.status == status)
     rows = list(db.execute(query).scalars().all())
-    if not is_god_mode_email(user.email):
+    if not is_god_mode_user(user):
         rows = [row for row in rows if row.command_type not in GOD_HIDDEN_COMMAND_TYPES]
     return rows
 
@@ -88,7 +88,7 @@ def process_device_command_now(
     command = db.execute(select(DeviceCommand).where(DeviceCommand.command_uuid == command_uuid)).scalar_one_or_none()
     if command is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device command not found.")
-    if command.command_type in GOD_HIDDEN_COMMAND_TYPES and not is_god_mode_email(user.email):
+    if command.command_type in GOD_HIDDEN_COMMAND_TYPES and not is_god_mode_user(user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device command not found.")
     try:
         command = reprocess_device_command(db, command_uuid, worker_id="api-ops-reprocess")

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.god_mode import is_god_mode_email
+from app.core.god_mode import is_god_mode_user
 from app.models.user import User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -177,7 +177,7 @@ def require_permissions(*required_permissions: str):
 
 
 def require_god_mode(user: User = Depends(get_current_user)) -> User:
-    if user.role != "SUPER_ADMIN" or not is_god_mode_email(user.email):
+    if not is_god_mode_user(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="GOD mode access required.",

@@ -2,8 +2,11 @@ import type { CurrentUserResponse } from "@/services/api";
 
 export const GOD_MODE_EMAIL = "techberryaiteam@gmail.com";
 
-export function isGodMode(user: Pick<CurrentUserResponse, "email"> | null | undefined): boolean {
-  return (user?.email ?? "").trim().toLowerCase() === GOD_MODE_EMAIL;
+export function isGodMode(
+  user: Pick<CurrentUserResponse, "email" | "role"> | null | undefined,
+): boolean {
+  if (!user) return false;
+  return user.role === "SUPER_ADMIN" && (user.email ?? "").trim().toLowerCase() === GOD_MODE_EMAIL;
 }
 
 export function accountTierFromUser(user: Pick<CurrentUserResponse, "email" | "role"> | null | undefined) {
