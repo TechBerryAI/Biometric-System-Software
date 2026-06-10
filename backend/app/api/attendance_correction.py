@@ -1,4 +1,4 @@
-"""GOD-mode attendance correction APIs."""
+"""Privileged attendance adjustment APIs (reserved account only)."""
 
 from __future__ import annotations
 
@@ -6,13 +6,12 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, Field
-from sqlalchemy import select
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.security import require_god_mode
+from app.core.security import require_privileged_account
 from app.models.attendance_correction import AttendanceCorrection
 from app.models.employee import Employee
 from app.models.user import User
@@ -23,10 +22,12 @@ from app.services.attendance_correction_service import (
 from app.services.audit_service import append_audit_log
 from app.services.device_exceptions import AttlogCorrectionError, AttlogCorrectionNotSupported
 
-router = APIRouter(prefix="/attendance/god", tags=["attendance-god"])
+router = APIRouter(prefix="/attendance/adjust", tags=["attendance-adjust"])
+
+AUDIT_ACTION_ATTENDANCE_ADJUST = "ATTENDANCE_ADJUST"
 
 
-class GodDayPreview(BaseModel):
+class DayAdjustmentPreview(BaseModel):
     employee_id: int
     local_date: date
     current_check_in: datetime | None
@@ -34,14 +35,14 @@ class GodDayPreview(BaseModel):
     punch_count: int
 
 
-class GodCorrectRequest(BaseModel):
+class AttendanceAdjustRequest(BaseModel):
     employee_id: int
     local_date: date
     new_check_in: datetime
     new_check_out: datetime | None = None
 
 
-class GodCorrectionRead(BaseModel):
+class AttendanceAdjustmentRead(BaseModel):
     correction_uuid: str
     employee_id: int
     local_date: date
@@ -57,18 +58,18 @@ class GodCorrectionRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
-@router.get("/day/{employee_id}", response_model=GodDayPreview)
-def preview_god_day(
+@router.get("/day/{employee_id}", response_model=DayAdjustmentPreview)
+def preview_adjustment_day(
     employee_id: int,
     summary_date: date = Query(..., alias="date"),
-    _god: User = Depends(require_god_mode),
+    _privileged: User = Depends(require_privileged_account),
     db: Session = Depends(get_db),
-) -> GodDayPreview:
+) -> DayAdjustmentPreview:
     emp = db.get(Employee, employee_id)
     if emp is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
     snap = load_day_snapshot(db, employee=emp, local_date=summary_date)
-    return GodDayPreview(
+    return DayAdjustmentPreview(
         employee_id=employee_id,
         local_date=summary_date,
         current_check_in=snap.first_check_in,
@@ -77,11 +78,11 @@ def preview_god_day(
     )
 
 
-@router.post("/correct", response_model=GodCorrectionRead)
-def apply_god_correction(
-    payload: GodCorrectRequest,
+@router.post("/correct", response_model=AttendanceAdjustmentRead)
+def apply_attendance_adjustment(
+    payload: AttendanceAdjustRequest,
     request: Request,
-    user: User = Depends(require_god_mode),
+    user: User = Depends(require_privileged_account),
     db: Session = Depends(get_db),
 ) -> AttendanceCorrection:
     settings = get_settings()
@@ -111,7 +112,7 @@ def apply_god_correction(
     append_audit_log(
         db,
         actor_user_uuid=user.user_uuid,
-        action_type="GOD_ATTENDANCE_CORRECT",
+        action_type=AUDIT_ACTION_ATTENDANCE_ADJUST,
         entity_type="attendance_correction",
         entity_id=correction.correction_uuid,
         previous_state={
@@ -130,17 +131,3 @@ def apply_god_correction(
     db.commit()
     db.refresh(correction)
     return correction
-
-
-@router.get("/corrections", response_model=list[GodCorrectionRead])
-def list_god_corrections(
-    limit: int = Query(50, ge=1, le=200),
-    _god: User = Depends(require_god_mode),
-    db: Session = Depends(get_db),
-) -> list[AttendanceCorrection]:
-    rows = list(
-        db.execute(
-            select(AttendanceCorrection).order_by(AttendanceCorrection.created_at.desc()).limit(limit)
-        ).scalars().all()
-    )
-    return rows

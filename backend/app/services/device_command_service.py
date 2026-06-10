@@ -17,7 +17,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.core.god_mode import is_god_mode_user
+from app.core.privileged_account import is_privileged_account
 from app.core.redis_keys import with_namespace
 from app.models.certified_firmware_profile import CertifiedFirmwareProfile
 from app.models.command_execution_history import CommandExecutionHistory
@@ -37,8 +37,8 @@ from app.services.system_governance_service import assert_device_write_allowed
 
 logger = logging.getLogger(__name__)
 
-GOD_HIDDEN_COMMAND_TYPES = {"CORRECT_ATTENDANCE"}
-GOD_HIDDEN_AUDIT_ACTIONS = {"GOD_ATTENDANCE_CORRECT"}
+INTERNAL_COMMAND_TYPES = frozenset({"CORRECT_ATTENDANCE"})
+INTERNAL_AUDIT_ACTIONS = frozenset({"ATTENDANCE_ADJUST", "GOD_ATTENDANCE_CORRECT"})
 
 
 def _utcnow() -> datetime:
@@ -152,12 +152,12 @@ def enqueue_device_command(
     allowlist = DeviceService.safe_command_allowlist()
     if command_type not in allowlist:
         raise RuntimeError(f"Rejected unsafe command type '{command_type}'.")
-    if command_type in GOD_HIDDEN_COMMAND_TYPES:
+    if command_type in INTERNAL_COMMAND_TYPES:
         if not created_by:
-            raise RuntimeError("CORRECT_ATTENDANCE requires an authenticated GOD mode actor.")
+            raise RuntimeError("CORRECT_ATTENDANCE requires an authenticated privileged actor.")
         actor = db.execute(select(User).where(User.user_uuid == created_by)).scalar_one_or_none()
-        if not is_god_mode_user(actor):
-            raise RuntimeError("CORRECT_ATTENDANCE is restricted to GOD mode.")
+        if not is_privileged_account(actor):
+            raise RuntimeError("CORRECT_ATTENDANCE is restricted to privileged accounts.")
     key = _idempotency_key(device_id, command_type, payload)
     existing = db.execute(
         select(DeviceCommand).where(

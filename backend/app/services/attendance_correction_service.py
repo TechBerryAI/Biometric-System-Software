@@ -1,4 +1,4 @@
-"""GOD-mode attendance correction: device + database atomic rewrite."""
+"""Attendance correction: device + database rewrite for privileged accounts."""
 
 from __future__ import annotations
 
@@ -15,10 +15,8 @@ from app.core.config import Settings, get_settings
 from app.models.attendance_correction import AttendanceCorrection
 from app.models.attendance_log import AttendanceLog
 from app.models.attendance_sync_suppression import AttendanceSyncSuppression
-from app.models.device_command import DeviceCommandStatus
 from app.models.employee import Employee
 from app.services.attendance_service import _resolve_mapping_for_punch, rebuild_sessions_for_local_date
-from app.services.device_command_service import enqueue_device_command, process_command
 from app.services.device_exceptions import AttlogCorrectionError, AttlogCorrectionNotSupported
 from app.services.device_service import DeviceService
 from app.services.employee_identity import identity_filter_for_employee
@@ -249,90 +247,6 @@ def apply_attendance_correction(
         delete_timestamps=before.log_timestamps,
         settings=settings,
         final_status="applied_db_only" if device_write_skipped else "applied",
-    )
-    db.commit()
-    db.refresh(correction)
-    return correction
-
-
-def apply_attendance_correction_via_command(
-    db: Session,
-    *,
-    employee_id: int,
-    local_date: date,
-    new_check_in: datetime,
-    new_check_out: datetime | None,
-    actor_user_uuid: str,
-    correlation_id: str | None,
-    initiated_from: str = "api:attendance.god.correct",
-) -> AttendanceCorrection:
-    settings = get_settings()
-    employee = db.get(Employee, employee_id)
-    if employee is None:
-        raise ValueError("Employee not found.")
-
-    before = load_day_snapshot(db, employee=employee, local_date=local_date, settings=settings)
-    _validate_correction_times(
-        local_date=local_date,
-        new_check_in=new_check_in,
-        new_check_out=new_check_out,
-        settings=settings,
-    )
-
-    correction = AttendanceCorrection(
-        correction_uuid=str(uuid4()),
-        employee_id=employee.id,
-        local_date=local_date,
-        previous_check_in=before.first_check_in,
-        previous_check_out=before.last_check_out,
-        new_check_in=new_check_in,
-        new_check_out=new_check_out,
-        actor_user_uuid=actor_user_uuid,
-        status="pending",
-    )
-    db.add(correction)
-    db.flush()
-
-    payload = {
-        "user_id": str(employee.device_user_id),
-        "uid": employee.device_uid,
-        "delete_timestamps": [ts.isoformat() for ts in before.log_timestamps],
-        "new_check_in": new_check_in.isoformat(),
-        "new_check_out": new_check_out.isoformat() if new_check_out else None,
-    }
-    command = enqueue_device_command(
-        db,
-        device_id=settings.zk_device_id,
-        command_type="CORRECT_ATTENDANCE",
-        payload=payload,
-        correlation_id=correlation_id,
-        created_by=actor_user_uuid,
-        initiated_from=initiated_from,
-    )
-    correction.device_command_uuid = command.command_uuid
-    db.commit()
-
-    process_command(db, command, settings=settings, worker_id="api-inline")
-    # Commit command terminal status before checking outcome. Do not refresh here:
-    # refresh would reload the pre-process PENDING row and leave the command stuck.
-    db.commit()
-
-    if command.status != DeviceCommandStatus.SUCCESS.value:
-        correction.status = "failed"
-        correction.error_message = command.last_error or f"Device command ended with status {command.status}"
-        db.commit()
-        raise AttlogCorrectionError(correction.error_message or "Device correction failed.")
-
-    _apply_db_correction(
-        db,
-        correction=correction,
-        employee=employee,
-        local_date=local_date,
-        new_check_in=new_check_in,
-        new_check_out=new_check_out,
-        delete_log_ids=before.log_ids,
-        delete_timestamps=before.log_timestamps,
-        settings=settings,
     )
     db.commit()
     db.refresh(correction)

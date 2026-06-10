@@ -3,11 +3,11 @@ import { motion } from "framer-motion";
 import { ArrowLeft, Download } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
-import { isGodMode } from "@/auth/godMode";
+import { isPrivilegedAccount } from "@/auth/privilegedAccess";
 import {
-  GodAttendanceCorrectionModal,
-  GodAttendanceRowEditButton,
-} from "@/components/attendance/GodAttendanceCorrectionPanel";
+  AttendanceAdjustmentModal,
+  AttendanceRowEditButton,
+} from "@/components/attendance/AttendanceAdjustmentPanel";
 import { EmployeeAvatar } from "@/components/employees/EmployeeAvatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,7 +59,7 @@ type TabId = "profile" | "attendance";
 export function EmployeeProfile() {
   const { employeeId } = useParams<{ employeeId: string }>();
   const { user } = useAuth();
-  const godMode = isGodMode(user);
+  const canAdjustAttendance = isPrivilegedAccount(user);
   const numericEmployeeId = Number(employeeId);
 
   const [tab, setTab] = useState<TabId>("profile");
@@ -279,16 +279,6 @@ export function EmployeeProfile() {
         </div>
       ) : (
         <div className="space-y-6">
-          {godMode ? (
-            <Card className="border-primary/20 bg-primary-soft/30">
-              <CardContent className="p-4 text-sm text-ink">
-                <span className="font-medium text-primary">GOD mode:</span>{" "}
-                <span className="text-ink-muted">
-                  Click any attendance row (or use Edit) to change check-in, check-out, and device punches for that day.
-                </span>
-              </CardContent>
-            </Card>
-          ) : null}
           <Card>
             <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:flex-wrap sm:items-end">
               <label className="flex flex-col gap-1.5 text-sm">
@@ -340,13 +330,13 @@ export function EmployeeProfile() {
                     <th className="px-5 py-3.5">Out</th>
                     <th className="px-5 py-3.5">Work</th>
                     <th className="px-5 py-3.5">Punches</th>
-                    {godMode ? <th className="px-5 py-3.5">Actions</th> : null}
+                    {canAdjustAttendance ? <th className="px-5 py-3.5">Actions</th> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={godMode ? 6 : 5} className="px-5 py-14 text-center text-ink-muted">
+                      <td colSpan={canAdjustAttendance ? 6 : 5} className="px-5 py-14 text-center text-ink-muted">
                         No rows in this range.
                       </td>
                     </tr>
@@ -354,13 +344,13 @@ export function EmployeeProfile() {
                     rows.map((r, idx) => (
                       <tr
                         key={r.summary_date}
-                        role={godMode ? "button" : undefined}
-                        tabIndex={godMode ? 0 : undefined}
+                        role={canAdjustAttendance ? "button" : undefined}
+                        tabIndex={canAdjustAttendance ? 0 : undefined}
                         onClick={() => {
-                          if (godMode) openCorrection(r);
+                          if (canAdjustAttendance) openCorrection(r);
                         }}
                         onKeyDown={(e) => {
-                          if (godMode && (e.key === "Enter" || e.key === " ")) {
+                          if (canAdjustAttendance && (e.key === "Enter" || e.key === " ")) {
                             e.preventDefault();
                             openCorrection(r);
                           }
@@ -368,7 +358,7 @@ export function EmployeeProfile() {
                         className={cn(
                           "border-b border-line/40 transition-colors",
                           idx % 2 === 1 && "bg-surface/[0.35]",
-                          godMode &&
+                          canAdjustAttendance &&
                             "cursor-pointer hover:bg-primary-soft/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
                         )}
                       >
@@ -383,9 +373,9 @@ export function EmployeeProfile() {
                           {fmtMinutes(r.total_work_minutes)}
                         </td>
                         <td className="px-5 py-3.5 tabular-nums text-ink-muted">{r.punch_count}</td>
-                        {godMode ? (
+                        {canAdjustAttendance ? (
                           <td className="px-5 py-3.5">
-                            <GodAttendanceRowEditButton onClick={() => openCorrection(r)} />
+                            <AttendanceRowEditButton onClick={() => openCorrection(r)} />
                           </td>
                         ) : null}
                       </tr>
@@ -396,8 +386,8 @@ export function EmployeeProfile() {
             </div>
           </div>
 
-          {godMode ? (
-            <GodAttendanceCorrectionModal
+          {canAdjustAttendance ? (
+            <AttendanceAdjustmentModal
               open={correctionOpen}
               onOpenChange={setCorrectionOpen}
               employeeId={numericEmployeeId}

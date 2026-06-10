@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pencil } from "lucide-react";
-import { isGodMode } from "@/auth/godMode";
+import { isPrivilegedAccount } from "@/auth/privilegedAccess";
 import { useAuth } from "@/auth/AuthContext";
-import { Button } from "@/components/ui/button";import {
+import { Button } from "@/components/ui/button";
+import {
   Dialog,
   DialogBody,
   DialogContent,
@@ -13,10 +14,10 @@ import { Button } from "@/components/ui/button";import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
-  applyGodAttendanceCorrection,
-  fetchGodDayPreview,
+  applyAttendanceAdjustment,
+  fetchAttendanceDayPreview,
   getApiErrorMessage,
-  type GodDayPreview,
+  type AttendanceDayPreview,
 } from "@/services/api";
 import type { EmployeeDailyAttendance } from "@/types";
 
@@ -44,7 +45,7 @@ type ModalProps = {
   onApplied: () => void;
 };
 
-export function GodAttendanceCorrectionModal({
+export function AttendanceAdjustmentModal({
   open,
   onOpenChange,
   employeeId,
@@ -52,11 +53,11 @@ export function GodAttendanceCorrectionModal({
   onApplied,
 }: ModalProps) {
   const { user } = useAuth();
-  const godMode = isGodMode(user);
+  const canAdjust = isPrivilegedAccount(user);
   const date = row?.summary_date ?? "";
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
-  const [preview, setPreview] = useState<GodDayPreview | null>(null);
+  const [preview, setPreview] = useState<AttendanceDayPreview | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +68,7 @@ export function GodAttendanceCorrectionModal({
     setLoadingPreview(true);
     setError(null);
     try {
-      const data = await fetchGodDayPreview(employeeId, date);
+      const data = await fetchAttendanceDayPreview(employeeId, date);
       setPreview(data);
       setCheckIn(toLocalInputValue(data.current_check_in));
       setCheckOut(toLocalInputValue(data.current_check_out));
@@ -79,13 +80,13 @@ export function GodAttendanceCorrectionModal({
   }, [employeeId, date]);
 
   useEffect(() => {
-    if (!open || !date || !godMode) return;
+    if (!open || !date || !canAdjust) return;
     setSuccess(null);
     setError(null);
     void loadPreview();
-  }, [open, date, godMode, loadPreview]);
+  }, [open, date, canAdjust, loadPreview]);
 
-  if (!godMode) {
+  if (!canAdjust) {
     return null;
   }
 
@@ -101,7 +102,7 @@ export function GodAttendanceCorrectionModal({
     try {
       const newCheckIn = new Date(checkIn);
       const newCheckOut = checkOut ? new Date(checkOut) : null;
-      const result = await applyGodAttendanceCorrection({
+      const result = await applyAttendanceAdjustment({
         employee_id: employeeId,
         local_date: date,
         new_check_in: newCheckIn.toISOString(),
@@ -109,13 +110,13 @@ export function GodAttendanceCorrectionModal({
       });
       setSuccess(
         result.status === "applied_db_only"
-          ? "Attendance updated in the database. This device firmware cannot rewrite punch memory; sync suppressions prevent old device punches from returning."
+          ? "Attendance updated in the database. Sync suppressions prevent old device punches from returning."
           : "Attendance updated on device and across all records.",
       );
       onApplied();
       await loadPreview();
     } catch (e: unknown) {
-      setError(getApiErrorMessage(e) || "Correction failed");
+      setError(getApiErrorMessage(e) || "Update failed");
     } finally {
       setApplying(false);
     }
@@ -125,10 +126,10 @@ export function GodAttendanceCorrectionModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle className="text-status-absent">Edit attendance — {date ? fmtDate(date) : ""}</DialogTitle>
+          <DialogTitle>Edit attendance — {date ? fmtDate(date) : ""}</DialogTitle>
           <DialogDescription>
-            Updates check-in and check-out in the database (and on the device when firmware supports it). Corrected
-            times appear as original punches in reports; old device punches are suppressed from re-sync.
+            Update check-in and check-out for this day. Corrected times appear in reports; prior device punches are
+            suppressed from re-sync when needed.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-4">
@@ -143,7 +144,7 @@ export function GodAttendanceCorrectionModal({
                     In: {fmtDateTime(preview.current_check_in)} · Out: {fmtDateTime(preview.current_check_out)} ·
                     Punches: {preview.punch_count}
                   </p>
-                  <p className="mt-3 font-medium text-ink">After correction</p>
+                  <p className="mt-3 font-medium text-ink">After update</p>
                   <p className="mt-1 text-ink-muted">
                     In: {checkIn ? new Date(checkIn).toLocaleString() : "—"} · Out:{" "}
                     {checkOut ? new Date(checkOut).toLocaleString() : "—"}
@@ -178,7 +179,7 @@ export function GodAttendanceCorrectionModal({
             {loadingPreview ? "Refreshing…" : "Refresh preview"}
           </Button>
           <Button type="button" onClick={() => void apply()} disabled={applying || loadingPreview || !checkIn}>
-            {applying ? "Applying…" : "Apply correction"}
+            {applying ? "Applying…" : "Apply"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -190,7 +191,7 @@ type RowEditButtonProps = {
   onClick: () => void;
 };
 
-export function GodAttendanceRowEditButton({ onClick }: RowEditButtonProps) {
+export function AttendanceRowEditButton({ onClick }: RowEditButtonProps) {
   return (
     <Button
       type="button"

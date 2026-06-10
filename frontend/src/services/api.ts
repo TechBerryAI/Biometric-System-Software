@@ -336,7 +336,7 @@ export async function syncFromDevice(full = false): Promise<DeviceSyncResponse> 
   return data;
 }
 
-export type GodDayPreview = {
+export type AttendanceDayPreview = {
   employee_id: number;
   local_date: string;
   current_check_in: string | null;
@@ -344,7 +344,7 @@ export type GodDayPreview = {
   punch_count: number;
 };
 
-export type GodCorrectionRead = {
+export type AttendanceAdjustmentRead = {
   correction_uuid: string;
   employee_id: number;
   local_date: string;
@@ -358,25 +358,20 @@ export type GodCorrectionRead = {
   applied_at: string | null;
 };
 
-export async function fetchGodDayPreview(employeeId: number, date: string): Promise<GodDayPreview> {
-  const { data } = await api.get<GodDayPreview>(`/attendance/god/day/${employeeId}`, { params: { date } });
+export async function fetchAttendanceDayPreview(employeeId: number, date: string): Promise<AttendanceDayPreview> {
+  const { data } = await api.get<AttendanceDayPreview>(`/attendance/adjust/day/${employeeId}`, { params: { date } });
   return data;
 }
 
-export async function applyGodAttendanceCorrection(payload: {
+export async function applyAttendanceAdjustment(payload: {
   employee_id: number;
   local_date: string;
   new_check_in: string;
   new_check_out?: string | null;
-}): Promise<GodCorrectionRead> {
-  const { data } = await api.post<GodCorrectionRead>("/attendance/god/correct", payload, {
+}): Promise<AttendanceAdjustmentRead> {
+  const { data } = await api.post<AttendanceAdjustmentRead>("/attendance/adjust/correct", payload, {
     timeout: SYNC_HTTP_TIMEOUT_MS,
   });
-  return data;
-}
-
-export async function fetchGodCorrections(limit = 50): Promise<GodCorrectionRead[]> {
-  const { data } = await api.get<GodCorrectionRead[]>("/attendance/god/corrections", { params: { limit } });
   return data;
 }
 

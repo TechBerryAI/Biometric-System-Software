@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { createAppAccount, getApiErrorMessage, type AppUserRole } from "@/services/api";
-import { GOD_MODE_EMAIL } from "@/auth/godMode";
 
 type Props = {
   open: boolean;
@@ -30,7 +29,6 @@ export function AddAccountModal({ open, onOpenChange }: Props) {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<AppUserRole>("IT_ADMIN");
   const [formError, setFormError] = useState<string | null>(null);
-  const normalizedEmail = email.trim().toLowerCase();
 
   useEffect(() => {
     if (!open) return;
@@ -65,10 +63,6 @@ export function AddAccountModal({ open, onOpenChange }: Props) {
     }
     if (password.length < 8) {
       setFormError("Password must be at least 8 characters.");
-      return;
-    }
-    if (normalizedEmail === GOD_MODE_EMAIL) {
-      setFormError(`${GOD_MODE_EMAIL} is reserved for GOD mode and cannot be created from Add Account.`);
       return;
     }
     mutation.mutate();

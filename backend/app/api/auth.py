@@ -30,7 +30,7 @@ from app.services.auth_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-from app.core.god_mode import GOD_MODE_EMAIL
+from app.core.privileged_account import is_privileged_email, privileged_account_email
 
 
 @router.post("/bootstrap-admin", response_model=CurrentUserResponse)
@@ -189,27 +189,24 @@ def create_user(
     normalized_email = str(payload.email).strip().lower()
     selected_role = str(payload.role).strip().upper()
 
-    # GOD mode is intentionally hidden from account creation UI and API.
     if selected_role == "SUPER_ADMIN":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="GOD mode is reserved and cannot be assigned from Add Account.",
+            detail="This role cannot be assigned from Add Account.",
         )
-    if normalized_email == GOD_MODE_EMAIL:
+    if is_privileged_email(normalized_email):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{GOD_MODE_EMAIL} is reserved for GOD mode and cannot be created here.",
+            detail="This email address is reserved.",
         )
 
     settings = get_settings()
     bootstrap_email = (settings.auth_bootstrap_admin_email or "").strip().lower()
-    if bootstrap_email and bootstrap_email != GOD_MODE_EMAIL:
+    reserved_email = privileged_account_email(settings)
+    if bootstrap_email and bootstrap_email != reserved_email:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=(
-                "AUTH_BOOTSTRAP_ADMIN_EMAIL must match the reserved GOD mode email "
-                f"({GOD_MODE_EMAIL})."
-            ),
+            detail="AUTH_BOOTSTRAP_ADMIN_EMAIL is misconfigured.",
         )
 
     user = create_or_update_user(

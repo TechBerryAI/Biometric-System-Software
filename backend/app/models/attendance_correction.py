@@ -1,4 +1,4 @@
-"""GOD-mode attendance correction ledger (internal, not exposed in normal attendance APIs)."""
+"""Internal attendance correction ledger."""
 
 from __future__ import annotations
 

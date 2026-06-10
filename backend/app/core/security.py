@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.god_mode import is_god_mode_user
+from app.core.privileged_account import is_privileged_account
 from app.models.user import User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -176,10 +176,10 @@ def require_permissions(*required_permissions: str):
     return _dependency
 
 
-def require_god_mode(user: User = Depends(get_current_user)) -> User:
-    if not is_god_mode_user(user):
+def require_privileged_account(user: User = Depends(get_current_user)) -> User:
+    if not is_privileged_account(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="GOD mode access required.",
+            detail="Access denied.",
         )
     return user

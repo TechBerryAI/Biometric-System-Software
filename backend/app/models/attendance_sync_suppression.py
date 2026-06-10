@@ -1,4 +1,4 @@
-"""Prevent re-import of superseded device punch timestamps after GOD corrections."""
+"""Prevent re-import of superseded device punch timestamps after attendance adjustments."""
 
 from __future__ import annotations
 

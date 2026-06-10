@@ -2,7 +2,7 @@ import { Bell, Search } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
-import { accountTierFromUser } from "@/auth/godMode";
+import { accountTierFromUser, roleLabelFromUser } from "@/auth/privilegedAccess";
 import { AddAccountModal } from "@/components/accounts/AddAccountModal";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,16 +32,7 @@ export function TopBar({ className }: { className?: string }) {
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const canManageUsers = can("user:manage");
   const accountTier = accountTierFromUser(user);
-  const roleLabel =
-    accountTier === "god"
-      ? "GOD mode"
-      : accountTier === "ceo"
-      ? "CEO"
-      : user?.role === "IT_ADMIN"
-      ? "IT Admin"
-      : accountTier === "hr"
-      ? "HR Admin"
-      : user?.role ?? "No role";
+  const roleLabel = roleLabelFromUser(user);
   const displayName = user?.full_name?.trim() || user?.email || "Unknown user";
 
   const onLogout = useCallback(async () => {
@@ -53,8 +44,6 @@ export function TopBar({ className }: { className?: string }) {
     <header
       className={cn(
         "sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between gap-4 border-b border-line/70 bg-surface-card/90 px-4 shadow-nav backdrop-blur-md sm:px-6",
-        accountTier === "god" &&
-          "border-status-absent-soft/80 bg-[linear-gradient(90deg,rgba(254,226,226,0.32)_0%,rgba(255,255,255,0.92)_40%,rgba(255,255,255,0.92)_100%)]",
         accountTier === "ceo" &&
           "border-status-late-soft/90 bg-[linear-gradient(90deg,rgba(254,249,195,0.50)_0%,rgba(255,255,255,0.93)_40%,rgba(255,255,255,0.93)_100%)]",
         accountTier === "hr" &&
@@ -87,7 +76,6 @@ export function TopBar({ className }: { className?: string }) {
               <span
                 className={cn(
                   "flex h-9 w-9 items-center justify-center rounded-xl text-xs font-semibold",
-                  accountTier === "god" && "bg-status-absent-soft text-status-absent",
                   accountTier === "ceo" && "bg-status-late-soft text-status-late",
                   accountTier === "hr" && "bg-primary-soft text-primary",
                   accountTier === "other" && "bg-violet-soft text-violet"
@@ -100,7 +88,6 @@ export function TopBar({ className }: { className?: string }) {
                 <span
                   className={cn(
                     "block text-xs text-ink-muted",
-                    accountTier === "god" && "font-semibold text-status-absent",
                     accountTier === "ceo" && "font-semibold text-status-late",
                     accountTier === "hr" && "font-semibold text-primary"
                   )}
