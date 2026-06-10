@@ -2,6 +2,7 @@ import { Bell, Search } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
+import { accountTierFromUser } from "@/auth/godMode";
 import { AddAccountModal } from "@/components/accounts/AddAccountModal";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,8 +24,6 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-const GOD_MODE_EMAIL = "techberryaiteam@gmail.com";
-
 export function TopBar({ className }: { className?: string }) {
   const navigate = useNavigate();
   const { user, logout, can } = useAuth();
@@ -32,10 +31,7 @@ export function TopBar({ className }: { className?: string }) {
   const setGlobalSearchQuery = useUiStore((s) => s.setGlobalSearchQuery);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const canManageUsers = can("user:manage");
-  const normalizedEmail = user?.email?.trim().toLowerCase() ?? "";
-  const isGodMode = normalizedEmail === GOD_MODE_EMAIL;
-  const accountTier =
-    isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" || user?.role === "IT_ADMIN" ? "hr" : "other";
+  const accountTier = accountTierFromUser(user);
   const roleLabel =
     accountTier === "god"
       ? "GOD mode"

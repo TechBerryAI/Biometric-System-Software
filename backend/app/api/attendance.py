@@ -17,6 +17,7 @@ from app.models.attendance_session import AttendanceSession
 from app.models.employee import Employee
 from app.schemas.attendance import AttendanceLogRead, AttendanceSessionRead, DailySummaryRow
 from app.services.daily_summary_service import compute_daily_summary, day_bounds_utc
+from app.services.employee_identity import identity_filter_for_employee
 
 router = APIRouter(
     prefix="/attendance",
@@ -30,6 +31,8 @@ def list_attendance_logs(
     date_from: date | None = Query(None, alias="from"),
     date_to: date | None = Query(None, alias="to"),
     employee_code: str | None = None,
+    employee_id: int | None = Query(None, description="Filter by internal employee id"),
+    offset: int = Query(0, ge=0),
     limit: int | None = Query(None, ge=1),
     db: Session = Depends(get_db),
 ) -> list[AttendanceLog]:
@@ -37,7 +40,7 @@ def list_attendance_logs(
     tz = settings.timezone
     max_limit = settings.attendance_api_max_limit
     applied_limit = min(limit if limit is not None else settings.attendance_api_default_limit, max_limit)
-    q = select(AttendanceLog).order_by(AttendanceLog.timestamp.desc()).limit(applied_limit)
+    q = select(AttendanceLog).order_by(AttendanceLog.timestamp.desc()).offset(offset).limit(applied_limit)
     if date_from is not None:
         start, _ = day_bounds_utc(date_from, tz)
         q = q.where(AttendanceLog.timestamp >= start)
@@ -46,6 +49,11 @@ def list_attendance_logs(
         q = q.where(AttendanceLog.timestamp < end)
     if employee_code is not None:
         q = q.where(AttendanceLog.employee_code == employee_code)
+    if employee_id is not None:
+        emp = db.get(Employee, employee_id)
+        if emp is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
+        q = q.where(identity_filter_for_employee(emp, db))
     return list(db.execute(q).scalars().all())
 
 

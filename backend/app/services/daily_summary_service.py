@@ -60,8 +60,9 @@ def compute_daily_summary(db: Session, summary_date: date, settings: Settings | 
 
     rows: list[DailySummaryRow] = []
     for emp in employees:
-        emp_logs = by_employee_uuid.get(emp.employee_uuid, [])
-        if not emp_logs:
+        if emp.employee_uuid and emp.employee_uuid in by_employee_uuid:
+            emp_logs = by_employee_uuid[emp.employee_uuid]
+        else:
             emp_logs = by_code.get(str(emp.device_user_id), [])
         sess = sessions_by_employee_id.get(emp.id, [])
 

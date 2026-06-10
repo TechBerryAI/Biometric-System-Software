@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from zk.exception import ZKError
@@ -14,6 +14,7 @@ from app.core.security import Permission, require_permissions
 from app.models.user import User
 from app.services.attendance_service import run_device_sync, run_user_sync
 from app.services.audit_service import append_audit_log
+from app.services.device_exceptions import DeviceFetchError
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -32,6 +33,7 @@ class DeviceSyncResponse(BaseModel):
 @router.post("/device", response_model=DeviceSyncResponse)
 def sync_from_device(
     request: Request,
+    full: bool = Query(False, description="Ignore incremental sync floor and pull all device attendance"),
     user: User = Depends(require_permissions(Permission.SYNC_TRIGGER)),
     db: Session = Depends(get_db),
 ) -> DeviceSyncResponse:
@@ -42,8 +44,8 @@ def sync_from_device(
     """
     try:
         u_total, u_ins = run_user_sync(db)
-        a_fetch, a_ins, placeholders = run_device_sync(db)
-    except ZKError as exc:
+        a_fetch, a_ins, placeholders = run_device_sync(db, full_resync=full)
+    except (ZKError, DeviceFetchError) as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Device communication error: {exc}",

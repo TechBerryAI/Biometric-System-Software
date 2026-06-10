@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { createAppAccount, getApiErrorMessage, type AppUserRole } from "@/services/api";
+import { GOD_MODE_EMAIL } from "@/auth/godMode";
 
 type Props = {
   open: boolean;
@@ -23,7 +24,6 @@ const accountRoles: Array<{ value: AppUserRole; label: string }> = [
   { value: "HR_ADMIN", label: "HR Admin" },
   { value: "IT_ADMIN", label: "IT Admin" },
 ];
-const GOD_MODE_EMAIL = "techberryaiteam@gmail.com";
 
 export function AddAccountModal({ open, onOpenChange }: Props) {
   const [email, setEmail] = useState("");

@@ -16,12 +16,31 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.models.attendance_log import AttendanceLog
 from app.models.attendance_session import AttendanceSession
+from app.models.attendance_sync_suppression import AttendanceSyncSuppression
 from app.models.device_user_mapping import DeviceUserMapping
 from app.models.employee import Employee
 from app.services.punch_classification import classify_punch
 from app.services.device_service import DeviceAttendanceRecord, DeviceService, DeviceUser
 
 logger = logging.getLogger(__name__)
+
+
+def _is_suppressed_timestamp(
+    db: Session,
+    *,
+    device_id: str,
+    employee_code: str,
+    timestamp: datetime,
+) -> bool:
+    row = db.execute(
+        select(AttendanceSyncSuppression.id).where(
+            AttendanceSyncSuppression.device_id == device_id,
+            AttendanceSyncSuppression.employee_code == employee_code,
+            AttendanceSyncSuppression.suppressed_timestamp == timestamp,
+        ).limit(1)
+    ).scalar_one_or_none()
+    return row is not None
+
 
 def _local_date(dt: datetime, tz: ZoneInfo) -> date:
     return dt.astimezone(tz).date()
@@ -214,9 +233,13 @@ def insert_attendance_logs_idempotent(
     rows = 0
     settings = get_settings()
     duplicate_window = timedelta(seconds=settings.duplicate_punch_window_seconds)
+    suppressed = 0
     for r in records:
         employee_code = r.user_id
         punch_type = str(r.punch)
+        if _is_suppressed_timestamp(db, device_id=device_id, employee_code=employee_code, timestamp=r.timestamp):
+            suppressed += 1
+            continue
         if duplicate_window.total_seconds() > 0:
             existing_near_duplicate = db.execute(
                 select(AttendanceLog.id).where(
@@ -228,6 +251,13 @@ def insert_attendance_logs_idempotent(
                 ).limit(1)
             ).scalar_one_or_none()
             if existing_near_duplicate is not None:
+                logger.info(
+                    "Skipping near-duplicate punch device=%s employee=%s ts=%s punch=%s",
+                    device_id,
+                    employee_code,
+                    r.timestamp.isoformat(),
+                    punch_type,
+                )
                 continue
         mapping = _resolve_mapping_for_punch(
             db,
@@ -251,6 +281,8 @@ def insert_attendance_logs_idempotent(
         rc = res.rowcount
         if rc is not None and rc > 0:
             rows += rc
+    if suppressed:
+        logger.info("Skipped suppressed device punches during sync: %s", suppressed)
     db.commit()
     return rows
 
@@ -333,9 +365,9 @@ def prune_recent_duplicate_logs(db: Session, *, settings: Settings, days: int | 
         ).scalars().all()
     )
     to_delete: list[int] = []
-    last_seen: dict[tuple[str, str, str], datetime] = {}
+    last_seen: dict[tuple[str, str, str, str | None], datetime] = {}
     for row in rows:
-        key = (row.device_id, row.employee_code, row.punch_type)
+        key = (row.device_id, row.employee_code, row.punch_type, row.employee_uuid)
         prev = last_seen.get(key)
         if prev is not None and (row.timestamp - prev).total_seconds() <= window_seconds:
             to_delete.append(row.id)
@@ -495,6 +527,8 @@ def run_device_sync(
     db: Session,
     device: DeviceService | None = None,
     settings: Settings | None = None,
+    *,
+    full_resync: bool = False,
 ) -> tuple[int, int, int]:
     """
     Fetch attendance from device, insert logs, backfill missing employees for any punch codes,
@@ -504,7 +538,7 @@ def run_device_sync(
     """
     settings = settings or get_settings()
     device = device or DeviceService(settings=settings)
-    floor = _incremental_sync_floor(db, device_id=settings.zk_device_id, settings=settings)
+    floor = None if full_resync else _incremental_sync_floor(db, device_id=settings.zk_device_id, settings=settings)
     fetched_records = device.fetch_attendance()
     if floor is not None:
         fetched_records = [row for row in fetched_records if row.timestamp >= floor]
@@ -524,6 +558,15 @@ def run_device_sync(
             if window_start <= _local_date(row.timestamp, tz) <= today
         }
     )
+    if placeholders > 0:
+        orphan_dates = sorted(
+            {
+                _local_date(row.timestamp, tz)
+                for row in records
+                if window_start <= _local_date(row.timestamp, tz) <= today
+            }
+        )
+        affected_dates = sorted(set(affected_dates) | set(orphan_dates))
     if not affected_dates:
         affected_dates = [today]
     for day in affected_dates:

@@ -1,18 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useAuth } from "@/auth/AuthContext";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { accountTierFromUser } from "@/auth/godMode";
 import { fetchAuditLogs, fetchDeviceCommands, fetchOperationalMetrics } from "@/services/api";
 import { cn } from "@/lib/cn";
-
-const GOD_MODE_EMAIL = "techberryaiteam@gmail.com";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function Operations() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<"commands" | "audits">("commands");
-  const isGodMode = (user?.email ?? "").trim().toLowerCase() === GOD_MODE_EMAIL;
-  const accountTier =
-    isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" || user?.role === "IT_ADMIN" ? "hr" : "other";
+  const accountTier = accountTierFromUser(user);
   const sliderToneClass =
     accountTier === "god"
       ? "bg-status-absent shadow-[0_8px_22px_rgba(220,38,38,0.32)]"

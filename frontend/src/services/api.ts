@@ -184,6 +184,9 @@ export async function fetchAttendanceLogs(params: {
   from?: string;
   to?: string;
   employee_code?: string;
+  employee_id?: number;
+  offset?: number;
+  limit?: number;
 }): Promise<AttendanceLog[]> {
   const { data } = await api.get<AttendanceLog[]>("/attendance/logs", { params });
   return data;
@@ -325,10 +328,55 @@ export async function queryInsightsCopilot(question: string): Promise<CopilotQue
 }
 
 /** Pull users + attendance from the terminal (read-only), then reload DB-backed views. */
-export async function syncFromDevice(): Promise<DeviceSyncResponse> {
+export async function syncFromDevice(full = false): Promise<DeviceSyncResponse> {
   const { data } = await api.post<DeviceSyncResponse>("/sync/device", null, {
     timeout: SYNC_HTTP_TIMEOUT_MS,
+    params: full ? { full: true } : {},
   });
+  return data;
+}
+
+export type GodDayPreview = {
+  employee_id: number;
+  local_date: string;
+  current_check_in: string | null;
+  current_check_out: string | null;
+  punch_count: number;
+};
+
+export type GodCorrectionRead = {
+  correction_uuid: string;
+  employee_id: number;
+  local_date: string;
+  previous_check_in: string | null;
+  previous_check_out: string | null;
+  new_check_in: string | null;
+  new_check_out: string | null;
+  status: string;
+  device_command_uuid: string | null;
+  error_message: string | null;
+  applied_at: string | null;
+};
+
+export async function fetchGodDayPreview(employeeId: number, date: string): Promise<GodDayPreview> {
+  const { data } = await api.get<GodDayPreview>(`/attendance/god/day/${employeeId}`, { params: { date } });
+  return data;
+}
+
+export async function applyGodAttendanceCorrection(payload: {
+  employee_id: number;
+  local_date: string;
+  new_check_in: string;
+  new_check_out?: string | null;
+}): Promise<GodCorrectionRead> {
+  const { data } = await api.post<GodCorrectionRead>("/attendance/god/correct", payload, {
+    timeout: SYNC_HTTP_TIMEOUT_MS,
+  });
+  return data;
+}
+
+export async function fetchGodCorrections(limit = 50): Promise<GodCorrectionRead[]> {
+  const { data } = await api.get<GodCorrectionRead[]>("/attendance/god/corrections", { params: { limit } });
   return data;
 }
 

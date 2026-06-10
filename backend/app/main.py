@@ -15,6 +15,7 @@ from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.api.attendance import router as attendance_router
+from app.api.attendance_correction import router as attendance_correction_router
 from app.api.auth import router as auth_router
 from app.api.employee import router as employee_router
 from app.api.enterprise_operations import router as enterprise_operations_router
@@ -87,6 +88,7 @@ app.add_middleware(
 
 app.include_router(employee_router)
 app.include_router(attendance_router)
+app.include_router(attendance_correction_router)
 app.include_router(insights_router)
 app.include_router(sync_router)
 app.include_router(auth_router)

@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowLeft, Download } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
+import { useAuth } from "@/auth/AuthContext";
+import { isGodMode } from "@/auth/godMode";
+import {
+  GodAttendanceCorrectionModal,
+  GodAttendanceRowEditButton,
+} from "@/components/attendance/GodAttendanceCorrectionPanel";
 import { EmployeeAvatar } from "@/components/employees/EmployeeAvatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,6 +58,8 @@ type TabId = "profile" | "attendance";
 
 export function EmployeeProfile() {
   const { employeeId } = useParams<{ employeeId: string }>();
+  const { user } = useAuth();
+  const godMode = isGodMode(user);
   const numericEmployeeId = Number(employeeId);
 
   const [tab, setTab] = useState<TabId>("profile");
@@ -62,6 +70,13 @@ export function EmployeeProfile() {
   const [loadingEmployee, setLoadingEmployee] = useState(true);
   const [loadingAttendance, setLoadingAttendance] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [correctionRow, setCorrectionRow] = useState<EmployeeDailyAttendance | null>(null);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+
+  const openCorrection = useCallback((row: EmployeeDailyAttendance) => {
+    setCorrectionRow(row);
+    setCorrectionOpen(true);
+  }, []);
 
   const loadEmployee = useCallback(async () => {
     if (!Number.isFinite(numericEmployeeId)) return;
@@ -264,6 +279,16 @@ export function EmployeeProfile() {
         </div>
       ) : (
         <div className="space-y-6">
+          {godMode ? (
+            <Card className="border-primary/20 bg-primary-soft/30">
+              <CardContent className="p-4 text-sm text-ink">
+                <span className="font-medium text-primary">GOD mode:</span>{" "}
+                <span className="text-ink-muted">
+                  Click any attendance row (or use Edit) to change check-in, check-out, and device punches for that day.
+                </span>
+              </CardContent>
+            </Card>
+          ) : null}
           <Card>
             <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:flex-wrap sm:items-end">
               <label className="flex flex-col gap-1.5 text-sm">
@@ -315,12 +340,13 @@ export function EmployeeProfile() {
                     <th className="px-5 py-3.5">Out</th>
                     <th className="px-5 py-3.5">Work</th>
                     <th className="px-5 py-3.5">Punches</th>
+                    {godMode ? <th className="px-5 py-3.5">Actions</th> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-5 py-14 text-center text-ink-muted">
+                      <td colSpan={godMode ? 6 : 5} className="px-5 py-14 text-center text-ink-muted">
                         No rows in this range.
                       </td>
                     </tr>
@@ -328,9 +354,22 @@ export function EmployeeProfile() {
                     rows.map((r, idx) => (
                       <tr
                         key={r.summary_date}
+                        role={godMode ? "button" : undefined}
+                        tabIndex={godMode ? 0 : undefined}
+                        onClick={() => {
+                          if (godMode) openCorrection(r);
+                        }}
+                        onKeyDown={(e) => {
+                          if (godMode && (e.key === "Enter" || e.key === " ")) {
+                            e.preventDefault();
+                            openCorrection(r);
+                          }
+                        }}
                         className={cn(
-                          "border-b border-line/40 hover:bg-surface/80",
-                          idx % 2 === 1 && "bg-surface/[0.35]"
+                          "border-b border-line/40 transition-colors",
+                          idx % 2 === 1 && "bg-surface/[0.35]",
+                          godMode &&
+                            "cursor-pointer hover:bg-primary-soft/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
                         )}
                       >
                         <td className="px-5 py-3.5">{fmtDate(r.summary_date)}</td>
@@ -344,6 +383,11 @@ export function EmployeeProfile() {
                           {fmtMinutes(r.total_work_minutes)}
                         </td>
                         <td className="px-5 py-3.5 tabular-nums text-ink-muted">{r.punch_count}</td>
+                        {godMode ? (
+                          <td className="px-5 py-3.5">
+                            <GodAttendanceRowEditButton onClick={() => openCorrection(r)} />
+                          </td>
+                        ) : null}
                       </tr>
                     ))
                   )}
@@ -351,6 +395,19 @@ export function EmployeeProfile() {
               </table>
             </div>
           </div>
+
+          {godMode ? (
+            <GodAttendanceCorrectionModal
+              open={correctionOpen}
+              onOpenChange={setCorrectionOpen}
+              employeeId={numericEmployeeId}
+              row={correctionRow}
+              onApplied={() => {
+                void loadAttendance();
+                void loadEmployee();
+              }}
+            />
+          ) : null}
         </div>
       )}
     </div>

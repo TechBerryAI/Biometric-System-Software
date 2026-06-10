@@ -30,7 +30,7 @@ from app.services.auth_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-GOD_MODE_EMAIL = "techberryaiteam@gmail.com"
+from app.core.god_mode import GOD_MODE_EMAIL
 
 
 @router.post("/bootstrap-admin", response_model=CurrentUserResponse)

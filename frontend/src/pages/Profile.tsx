@@ -2,13 +2,12 @@ import { useMutation } from "@tanstack/react-query";
 import { Loader2, PencilLine } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/auth/AuthContext";
+import { accountTierFromUser, isGodMode } from "@/auth/godMode";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { getApiErrorMessage, updateMyProfile } from "@/services/api";
-
-const GOD_MODE_EMAIL = "techberryaiteam@gmail.com";
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -23,18 +22,17 @@ export function Profile() {
   const [editing, setEditing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const isGodMode = (user?.email ?? "").trim().toLowerCase() === GOD_MODE_EMAIL;
+  const godMode = isGodMode(user);
   const accountName = user?.full_name?.trim() || "Not set";
   const roleLabel =
-    isGodMode
+    godMode
       ? "GOD mode"
       : user?.role === "IT_ADMIN"
       ? "IT Admin"
       : user?.role === "HR_ADMIN"
       ? "HR Admin"
       : user?.role ?? "Unknown";
-  const accountTier =
-    isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" || user?.role === "IT_ADMIN" ? "hr" : "other";
+  const accountTier = accountTierFromUser(user);
 
   useEffect(() => {
     setFullName(user?.full_name ?? "");

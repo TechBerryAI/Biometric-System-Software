@@ -18,6 +18,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
+import { accountTierFromUser } from "@/auth/godMode";
 import type { Permission } from "@/auth/permissions";
 import { cn } from "@/lib/cn";
 import { useUiStore } from "@/stores/ui-store";
@@ -40,8 +41,7 @@ export function Sidebar() {
   const queryClient = useQueryClient();
   const [syncing, setSyncing] = useState(false);
   const [syncState, setSyncState] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
-  const isGodMode = (user?.email ?? "").trim().toLowerCase() === "techberryaiteam@gmail.com";
-  const accountTier = isGodMode ? "god" : user?.role === "CEO" ? "ceo" : user?.role === "HR_ADMIN" || user?.role === "IT_ADMIN" ? "hr" : "other";
+  const accountTier = accountTierFromUser(user);
   const visibleItems = items.filter((item) => can(item.permission));
   const opsMetrics = useQuery({
     queryKey: ["operational-metrics"],

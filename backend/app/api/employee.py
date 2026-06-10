@@ -18,6 +18,7 @@ from app.models.attendance_log import AttendanceLog
 from app.models.attendance_session import AttendanceSession
 from app.models.device_user_mapping import DeviceUserMapping
 from app.models.employee import Employee
+from app.services.employee_identity import identity_filter_for_employee
 from app.models.user import User
 from app.schemas.employee import (
     EmployeeCreate,
@@ -46,18 +47,7 @@ def _day_bounds_utc(d: date, tz_name: str) -> tuple[datetime, datetime]:
 
 
 def _identity_filter_for_employee(emp: Employee, db: Session):
-    mapped_codes = {
-        row[0]
-        for row in db.execute(
-            select(DeviceUserMapping.device_user_id).where(DeviceUserMapping.employee_uuid == emp.employee_uuid)
-        ).all()
-        if row[0]
-    }
-    mapped_codes.add(emp.device_user_id)
-    return or_(
-        AttendanceLog.employee_uuid == emp.employee_uuid,
-        and_(AttendanceLog.employee_uuid.is_(None), AttendanceLog.employee_code.in_(mapped_codes)),
-    )
+    return identity_filter_for_employee(emp, db)
 
 
 def _rollover_device_mapping(

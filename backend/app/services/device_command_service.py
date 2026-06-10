@@ -35,6 +35,9 @@ from app.services.system_governance_service import assert_device_write_allowed
 
 logger = logging.getLogger(__name__)
 
+GOD_HIDDEN_COMMAND_TYPES = {"CORRECT_ATTENDANCE"}
+GOD_HIDDEN_AUDIT_ACTIONS = {"GOD_ATTENDANCE_CORRECT"}
+
 
 def _utcnow() -> datetime:
     return datetime.now(ZoneInfo("UTC"))
@@ -55,6 +58,48 @@ def _execution_hash(command: DeviceCommand, attempt: int) -> str:
 
 def _lock_key(device_id: str, settings: Settings) -> str:
     return with_namespace(settings.redis_namespace, f"device:lock:{device_id}")
+
+
+class _LocalDeviceLock:
+    """In-process mutex when Redis is unavailable (single-worker dev)."""
+
+    _registry: dict[str, threading.Lock] = {}
+    _registry_guard = threading.Lock()
+
+    def __init__(self, key: str) -> None:
+        with self._registry_guard:
+            if key not in self._registry:
+                self._registry[key] = threading.Lock()
+            self._mutex = self._registry[key]
+        self._held = False
+
+    def acquire(self, blocking: bool = True, blocking_timeout: float | None = None) -> bool:
+        if blocking_timeout is not None:
+            deadline = time.monotonic() + blocking_timeout
+            while True:
+                if self._mutex.acquire(blocking=False):
+                    self._held = True
+                    return True
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(0.05)
+        self._held = self._mutex.acquire(blocking=blocking)
+        return self._held
+
+    def release(self) -> None:
+        if self._held:
+            self._mutex.release()
+            self._held = False
+
+    def extend(self, *_args: Any, **_kwargs: Any) -> bool:
+        return self._held
+
+
+def _acquire_local_lock(key: str, *, blocking_timeout: float = 15) -> _LocalDeviceLock | None:
+    lock = _LocalDeviceLock(key)
+    if lock.acquire(blocking=True, blocking_timeout=blocking_timeout):
+        return lock
+    return None
 
 
 def _snapshot_hash(payload: dict[str, Any]) -> str:
@@ -140,6 +185,31 @@ def enqueue_device_command(
     return command
 
 
+def reprocess_device_command(
+    db: Session,
+    command_uuid: str,
+    *,
+    settings: Settings | None = None,
+    worker_id: str = "api-reprocess",
+) -> DeviceCommand:
+    """Run inline processing for a queued command (e.g. stuck PENDING after API timeout)."""
+    command = db.execute(
+        select(DeviceCommand).where(DeviceCommand.command_uuid == command_uuid)
+    ).scalar_one_or_none()
+    if command is None:
+        raise ValueError("Device command not found.")
+    if command.status not in (
+        DeviceCommandStatus.PENDING.value,
+        DeviceCommandStatus.RETRYING.value,
+        DeviceCommandStatus.FAILED.value,
+    ):
+        return command
+    process_command(db, command, settings=settings, worker_id=worker_id)
+    db.commit()
+    db.refresh(command)
+    return command
+
+
 def claim_pending_commands(db: Session, *, settings: Settings | None = None) -> list[DeviceCommand]:
     settings = settings or get_settings()
     now = _utcnow()
@@ -192,14 +262,23 @@ def _record_sync_event(
 
 def _acquire_lock(device_id: str, settings: Settings) -> tuple[Redis | None, Any, str]:
     key = _lock_key(device_id, settings)
+    lock_wait_seconds = max(settings.command_lock_blocking_seconds, 15)
     try:
         client = Redis.from_url(str(settings.redis_url), socket_timeout=2, socket_connect_timeout=2)
         lock_timeout = settings.zk_device_timeout_seconds + settings.command_heartbeat_seconds + 10
-        lock = client.lock(key, timeout=lock_timeout, blocking_timeout=settings.command_lock_blocking_seconds)
-        if lock.acquire(blocking=False):
+        lock = client.lock(key, timeout=lock_timeout, blocking_timeout=lock_wait_seconds)
+        if lock.acquire(blocking=True, blocking_timeout=lock_wait_seconds):
             return client, lock, key
-    except Exception:  # noqa: BLE001
-        return None, None, key
+        logger.warning("Redis device lock busy for device_id=%s key=%s", device_id, key)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Redis device lock unavailable for device_id=%s (%s); using in-process fallback",
+            device_id,
+            exc,
+        )
+        local = _acquire_local_lock(key, blocking_timeout=lock_wait_seconds)
+        if local is not None:
+            return None, local, key
     return None, None, key
 
 
@@ -464,7 +543,52 @@ def _verify_upsert_result(
             mismatch_details=details.get("mismatch_details"),
         )
     )
-    return ok
+    return ok, details
+
+
+def _parse_iso_datetime(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _execute_correct_attendance_command(
+    db: Session,
+    *,
+    command: DeviceCommand,
+    device_service: DeviceService,
+    payload: dict[str, Any],
+    execution_row: CommandExecutionHistory,
+    runtime_health: DeviceRuntimeHealth,
+) -> None:
+    delete_ts = [_parse_iso_datetime(ts) for ts in payload.get("delete_timestamps", [])]
+    new_in_raw = payload.get("new_check_in")
+    new_out_raw = payload.get("new_check_out")
+    new_check_in = _parse_iso_datetime(new_in_raw) if new_in_raw else None
+    new_check_out = _parse_iso_datetime(new_out_raw) if new_out_raw else None
+    if new_check_in is None:
+        raise ValueError("new_check_in is required for CORRECT_ATTENDANCE.")
+    device_service.correct_attendance(
+        user_id=str(payload["user_id"]),
+        uid=payload.get("uid"),
+        delete_timestamps=delete_ts,
+        new_check_in=new_check_in,
+        new_check_out=new_check_out,
+    )
+    command.status = DeviceCommandStatus.SUCCESS.value
+    command.completed_at = _utcnow()
+    command.verification_status = "SUCCESS"
+    command.last_error = None
+    _finish_execution_attempt(execution_row, final_status="SUCCESS", verification_result="SUCCESS")
+    runtime_health.connection_stability_score = min(100, runtime_health.connection_stability_score + 1)
+    _update_runtime_risk_level(runtime_health)
+    _apply_device_mode_transitions(db, device_id=command.device_id, runtime=runtime_health)
+    _record_sync_event(
+        db,
+        device_id=command.device_id,
+        event_type="COMMAND_EXECUTED",
+        status="SUCCESS",
+        details={"command_uuid": command.command_uuid, "command_type": command.command_type},
+        correlation_id=command.correlation_id,
+    )
 
 
 def _mark_retry_or_terminal(command: DeviceCommand, *, settings: Settings, error_message: str) -> None:
@@ -493,6 +617,11 @@ def process_command(
     settings = settings or get_settings()
     worker_id = worker_id or os.getenv("HOSTNAME") or "unknown-worker"
     runtime_health = _get_or_create_runtime_health(db, device_id=command.device_id)
+    if command.status in (DeviceCommandStatus.PENDING.value, DeviceCommandStatus.RETRYING.value):
+        now = _utcnow()
+        command.status = DeviceCommandStatus.RUNNING.value
+        command.started_at = command.started_at or now
+        command.heartbeat_at = now
     if settings.device_read_only:
         append_audit_log(
             db,
@@ -541,7 +670,7 @@ def process_command(
         command.retry_backoff_seconds = 5
         command.status = DeviceCommandStatus.RETRYING.value
         command.next_attempt_at = _utcnow() + timedelta(seconds=5)
-        command.last_error = "Device lock contention"
+        command.last_error = "Device lock contention — another write is in progress. Retry in a few seconds."
         runtime_health.reconnect_frequency += 1
         runtime_health.connection_stability_score = max(0, runtime_health.connection_stability_score - 1)
         _update_runtime_risk_level(runtime_health)
@@ -602,35 +731,36 @@ def process_command(
         certified = _resolve_certified_profile(db, firmware_version=firmware_version)
         operation_profile = _resolve_operation_profile(db, operation_type=command.command_type)
         if certified is None or certified.certification_status in {"UNCERTIFIED", "UNSTABLE"}:
-            command.status = DeviceCommandStatus.RECONCILIATION_REQUIRED.value
-            command.completed_at = _utcnow()
-            command.last_error = f"Firmware '{firmware_version}' is not certified for production writes."
-            runtime_health.protocol_error_rate += 1
-            runtime_health.connection_stability_score = max(0, runtime_health.connection_stability_score - 8)
-            _update_runtime_risk_level(runtime_health)
-            _apply_device_mode_transitions(
-                db,
-                device_id=command.device_id,
-                runtime=runtime_health,
-                reason="uncertified firmware auto-restricted",
-            )
-            _record_reconciliation_job(
-                db,
-                job_type="FIRMWARE_CERTIFICATION_REQUIRED",
-                target_entity=f"device:{command.device_id}",
-                findings={
-                    "command_uuid": command.command_uuid,
-                    "firmware_version": firmware_version,
-                    "certification_status": certified.certification_status if certified else "UNKNOWN",
-                },
-                correlation_id=command.correlation_id,
-            )
-            device_row = db.execute(select(Device).where(Device.name == command.device_id)).scalar_one_or_none()
-            if device_row is not None:
-                device_row.mode = "READ_ONLY"
-                device_row.quarantine_reason = f"uncertified firmware: {firmware_version}"
-            _finish_execution_attempt(execution_row, final_status="FIRMWARE_RESTRICTED")
-            return
+            if command.command_type != "CORRECT_ATTENDANCE":
+                command.status = DeviceCommandStatus.RECONCILIATION_REQUIRED.value
+                command.completed_at = _utcnow()
+                command.last_error = f"Firmware '{firmware_version}' is not certified for production writes."
+                runtime_health.protocol_error_rate += 1
+                runtime_health.connection_stability_score = max(0, runtime_health.connection_stability_score - 8)
+                _update_runtime_risk_level(runtime_health)
+                _apply_device_mode_transitions(
+                    db,
+                    device_id=command.device_id,
+                    runtime=runtime_health,
+                    reason="uncertified firmware auto-restricted",
+                )
+                _record_reconciliation_job(
+                    db,
+                    job_type="FIRMWARE_CERTIFICATION_REQUIRED",
+                    target_entity=f"device:{command.device_id}",
+                    findings={
+                        "command_uuid": command.command_uuid,
+                        "firmware_version": firmware_version,
+                        "certification_status": certified.certification_status if certified else "UNKNOWN",
+                    },
+                    correlation_id=command.correlation_id,
+                )
+                device_row = db.execute(select(Device).where(Device.name == command.device_id)).scalar_one_or_none()
+                if device_row is not None:
+                    device_row.mode = "READ_ONLY"
+                    device_row.quarantine_reason = f"uncertified firmware: {firmware_version}"
+                _finish_execution_attempt(execution_row, final_status="FIRMWARE_RESTRICTED")
+                return
         if operation_profile is not None and operation_profile.risk_level == "FORBIDDEN":
             command.status = DeviceCommandStatus.FAILED.value
             command.completed_at = _utcnow()
@@ -645,7 +775,7 @@ def process_command(
                 correlation_id=command.correlation_id,
             )
             return
-        if profile is not None and not profile.supports_user_write:
+        if profile is not None and not profile.supports_user_write and command.command_type != "CORRECT_ATTENDANCE":
             command.status = DeviceCommandStatus.RECONCILIATION_REQUIRED.value
             command.completed_at = _utcnow()
             command.last_error = f"Firmware profile '{firmware_version}' disallows user write."
@@ -664,6 +794,16 @@ def process_command(
             return
 
         payload = command.payload
+        if command.command_type == "CORRECT_ATTENDANCE":
+            _execute_correct_attendance_command(
+                db,
+                command=command,
+                device_service=device_service,
+                payload=payload,
+                execution_row=execution_row,
+                runtime_health=runtime_health,
+            )
+            return
         if command.retries > 0:
             recovered = _recover_if_already_applied(
                 db,
