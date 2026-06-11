@@ -29,6 +29,7 @@ const rolePermissions: Record<UserRole, Permission[]> = {
   ],
   HR_ADMIN: ["dashboard:view", "employee:view", "employee:edit", "sync:trigger", "reports:read", "anomaly:manage"],
   IT_ADMIN: [
+    "user:manage",
     "employee:view",
     "employee:edit",
     "sync:trigger",

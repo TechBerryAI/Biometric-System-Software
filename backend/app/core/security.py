@@ -59,6 +59,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         Permission.ANOMALY_MANAGE,
     },
     "IT_ADMIN": {
+        Permission.USER_MANAGE,
         Permission.EMPLOYEE_VIEW,
         Permission.EMPLOYEE_EDIT,
         Permission.SYNC_TRIGGER,
