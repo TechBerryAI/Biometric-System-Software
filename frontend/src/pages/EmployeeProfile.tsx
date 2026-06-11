@@ -23,7 +23,14 @@ import { downloadEmployeeReportPdf } from "@/utils/pdfReports";
 
 function fmtDateTime(v: string | null): string {
   if (!v) return "—";
-  return new Date(v).toLocaleString();
+  return new Date(v).toLocaleString(undefined, {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 function fmtDate(v: string): string {

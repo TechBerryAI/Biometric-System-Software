@@ -66,7 +66,9 @@ export function Profile() {
         <Card className="relative overflow-hidden lg:col-span-2">
           <div
             className={
-              accountTier === "ceo"
+              accountTier === "god"
+                ? "h-1.5 w-full bg-gradient-to-r from-status-absent via-status-absent to-status-absent-soft"
+                : accountTier === "ceo"
                 ? "h-1.5 w-full bg-gradient-to-r from-status-late via-status-late to-status-late-soft"
                 : "h-1.5 w-full bg-gradient-to-r from-primary via-primary to-primary-soft"
             }
@@ -93,7 +95,9 @@ export function Profile() {
             <div className="mb-2 flex items-center gap-3 rounded-2xl border border-line/70 bg-surface p-3">
               <span
                 className={
-                  accountTier === "ceo"
+                  accountTier === "god"
+                    ? "flex h-11 w-11 items-center justify-center rounded-xl bg-status-absent-soft text-sm font-semibold text-status-absent"
+                    : accountTier === "ceo"
                     ? "flex h-11 w-11 items-center justify-center rounded-xl bg-status-late-soft text-sm font-semibold text-status-late"
                     : "flex h-11 w-11 items-center justify-center rounded-xl bg-primary-soft text-sm font-semibold text-primary"
                 }
@@ -165,7 +169,7 @@ export function Profile() {
           </CardHeader>
           <CardContent className="space-y-3">
             <Badge
-              variant={user?.role === "CEO" ? "outline" : "default"}
+              variant={accountTier === "god" ? "absent" : user?.role === "CEO" ? "outline" : "default"}
               className={user?.role === "CEO" ? "border-status-late-soft bg-status-late-soft text-status-late" : ""}
             >
               {roleLabel}

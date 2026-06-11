@@ -93,6 +93,7 @@ export function Sidebar() {
       transition={{ type: "spring", stiffness: 420, damping: 38 }}
       className={cn(
         "sticky top-0 z-40 flex h-screen shrink-0 flex-col overflow-hidden border-r border-line/70 bg-surface-card shadow-nav",
+        accountTier === "god" && "border-status-absent-soft/70 bg-[linear-gradient(180deg,#fff7f7_0%,#ffffff_12%,#ffffff_100%)]",
         accountTier === "ceo" && "border-status-late-soft/80 bg-[linear-gradient(180deg,#fffcf1_0%,#ffffff_12%,#ffffff_100%)]",
         accountTier === "hr" && "border-primary/15 bg-[linear-gradient(180deg,#f5f7ff_0%,#ffffff_12%,#ffffff_100%)]"
       )}
@@ -102,6 +103,8 @@ export function Sidebar() {
           <div
             className={cn(
               "relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl shadow-sm",
+              accountTier === "god" &&
+                "bg-[radial-gradient(circle_at_30%_20%,#FCA5A5_0%,#DC2626_60%,#991B1B_100%)] text-white",
               accountTier === "ceo" &&
                 "bg-[radial-gradient(circle_at_30%_20%,#FDE68A_0%,#CA8A04_60%,#854D0E_100%)] text-white",
               accountTier === "hr" &&
@@ -173,7 +176,9 @@ export function Sidebar() {
                 "group flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
                 collapsed && "justify-center px-0",
                 isActive
-                  ? accountTier === "ceo"
+                  ? accountTier === "god"
+                    ? "bg-status-absent-soft/70 text-status-absent shadow-sm ring-1 ring-status-absent/15"
+                    : accountTier === "ceo"
                     ? "bg-status-late-soft/80 text-status-late shadow-sm ring-1 ring-status-late/15"
                     : accountTier === "hr"
                     ? "bg-primary-soft text-primary shadow-sm ring-1 ring-primary/10"

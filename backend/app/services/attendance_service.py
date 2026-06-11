@@ -445,7 +445,13 @@ def _pair_logs_for_day(
     return sessions
 
 
-def rebuild_sessions_for_local_date(db: Session, target: date, settings: Settings | None = None) -> int:
+def rebuild_sessions_for_local_date(
+    db: Session,
+    target: date,
+    settings: Settings | None = None,
+    *,
+    commit: bool = True,
+) -> int:
     """
     Recompute AttendanceSession rows for all employees for a given local calendar day.
     Deletes existing sessions whose check_in falls on that local date, then rebuilds from logs.
@@ -519,7 +525,8 @@ def rebuild_sessions_for_local_date(db: Session, target: date, settings: Setting
             )
             created += 1
 
-    db.commit()
+    if commit:
+        db.commit()
     return created
 
 

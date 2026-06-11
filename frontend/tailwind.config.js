@@ -59,6 +59,11 @@ export default {
       transitionDuration: {
         DEFAULT: "200ms",
       },
+      cursor: {
+        DEFAULT: 'url("/cursors/arrow.svg") 2 2, default',
+        pointer: 'url("/cursors/hand.svg") 10 4, pointer',
+        text: 'url("/cursors/text.svg") 8 10, text',
+      },
     },
   },
   plugins: [],

@@ -134,8 +134,13 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Environments
+# Environments — never commit secrets (use .env.example as template)
 .env
+.env.*
+!.env.example
+!**/.env.example
+backend/.env
+frontend/.env
 .envrc
 .venv
 env/
@@ -204,8 +209,6 @@ cython_debug/
 # Node (frontend)
 node_modules/
 frontend/dist/
-!frontend/.env
-
 # Keep frontend source lib files versioned.
 !frontend/src/lib/
 !frontend/src/lib/**

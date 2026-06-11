@@ -9,6 +9,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -97,6 +98,34 @@ def _validate_correction_times(
         raise ValueError("check_out must be after check_in.")
 
 
+def _insert_sync_suppressions_idempotent(
+    db: Session,
+    *,
+    device_id: str,
+    employee_code: str,
+    timestamps: list[datetime],
+    correction_id: int,
+) -> None:
+    """Record suppressed punch times; skip rows already suppressed (re-edit safe)."""
+    seen: set[datetime] = set()
+    for ts in timestamps:
+        if ts in seen:
+            continue
+        seen.add(ts)
+        stmt = (
+            pg_insert(AttendanceSyncSuppression)
+            .values(
+                device_id=device_id,
+                employee_code=employee_code,
+                suppressed_timestamp=ts,
+                reason="correction",
+                correction_id=correction_id,
+            )
+            .on_conflict_do_nothing(constraint="uq_suppression_device_employee_ts")
+        )
+        db.execute(stmt)
+
+
 def _device_supports_attlog_write(device: DeviceService) -> bool:
     try:
         caps = device.probe_attlog_capabilities()
@@ -122,16 +151,13 @@ def _apply_db_correction(
     if delete_log_ids:
         db.execute(delete(AttendanceLog).where(AttendanceLog.id.in_(delete_log_ids)))
 
-    for ts in delete_timestamps:
-        db.add(
-            AttendanceSyncSuppression(
-                device_id=settings.zk_device_id,
-                employee_code=str(employee.device_user_id),
-                suppressed_timestamp=ts,
-                reason="correction",
-                correction_id=correction.id,
-            )
-        )
+    _insert_sync_suppressions_idempotent(
+        db,
+        device_id=settings.zk_device_id,
+        employee_code=str(employee.device_user_id),
+        timestamps=delete_timestamps,
+        correction_id=correction.id,
+    )
 
     mapping = None
     for punch_type, ts in ((PUNCH_IN, new_check_in), (PUNCH_OUT, new_check_out)):
@@ -156,7 +182,7 @@ def _apply_db_correction(
             )
         )
 
-    rebuild_sessions_for_local_date(db, local_date, settings=settings)
+    rebuild_sessions_for_local_date(db, local_date, settings=settings, commit=False)
 
     try:
         from app.ai.cache.redis_cache import AIResponseCache

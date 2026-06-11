@@ -8,10 +8,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(({ className, type
     <input
       type={type}
       className={cn(
-        "flex h-10 w-full rounded-xl border border-line bg-surface-card px-3.5 py-2 text-sm text-ink shadow-sm transition-shadow duration-200",
+        "flex h-10 w-full rounded-xl border border-line bg-surface-card px-3.5 py-2 text-sm text-ink caret-ink shadow-sm transition-shadow duration-200",
         "placeholder:text-ink-subtle",
         "hover:border-line focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary/15",
         "disabled:cursor-not-allowed disabled:opacity-50",
+        type === "number" && "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
         className
       )}
       ref={ref}

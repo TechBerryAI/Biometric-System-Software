@@ -51,11 +51,29 @@ class AttendanceAdjustmentRead(BaseModel):
     new_check_in: datetime | None
     new_check_out: datetime | None
     status: str
+    device_updated: bool = False
     device_command_uuid: str | None
     error_message: str | None
     applied_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+def _adjustment_read(correction: AttendanceCorrection) -> AttendanceAdjustmentRead:
+    return AttendanceAdjustmentRead(
+        correction_uuid=correction.correction_uuid,
+        employee_id=correction.employee_id,
+        local_date=correction.local_date,
+        previous_check_in=correction.previous_check_in,
+        previous_check_out=correction.previous_check_out,
+        new_check_in=correction.new_check_in,
+        new_check_out=correction.new_check_out,
+        status=correction.status,
+        device_updated=correction.status == "applied",
+        device_command_uuid=correction.device_command_uuid,
+        error_message=correction.error_message,
+        applied_at=correction.applied_at,
+    )
 
 
 @router.get("/day/{employee_id}", response_model=DayAdjustmentPreview)
@@ -84,7 +102,7 @@ def apply_attendance_adjustment(
     request: Request,
     user: User = Depends(require_privileged_account),
     db: Session = Depends(get_db),
-) -> AttendanceCorrection:
+) -> AttendanceAdjustmentRead:
     settings = get_settings()
     tz = ZoneInfo(settings.timezone)
     check_in = payload.new_check_in if payload.new_check_in.tzinfo else payload.new_check_in.replace(tzinfo=tz)
@@ -130,4 +148,4 @@ def apply_attendance_adjustment(
     )
     db.commit()
     db.refresh(correction)
-    return correction
+    return _adjustment_read(correction)

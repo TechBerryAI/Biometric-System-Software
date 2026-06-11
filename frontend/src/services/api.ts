@@ -353,6 +353,7 @@ export type AttendanceAdjustmentRead = {
   new_check_in: string | null;
   new_check_out: string | null;
   status: string;
+  device_updated: boolean;
   device_command_uuid: string | null;
   error_message: string | null;
   applied_at: string | null;
