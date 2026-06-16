@@ -18,7 +18,7 @@ from app.models.attendance_log import AttendanceLog
 from app.models.attendance_sync_suppression import AttendanceSyncSuppression
 from app.models.employee import Employee
 from app.services.attendance_service import _resolve_mapping_for_punch, rebuild_sessions_for_local_date
-from app.services.device_exceptions import AttlogCorrectionError, AttlogCorrectionNotSupported
+from app.services.device_exceptions import AttlogCorrectionError, AttlogCorrectionNotSupported, DeviceFetchError
 from app.services.device_service import DeviceService
 from app.services.employee_identity import identity_filter_for_employee
 from app.services.punch_classification import classify_punch
@@ -251,7 +251,7 @@ def apply_attendance_correction(
                 new_check_in=new_check_in,
                 new_check_out=new_check_out,
             )
-        except (AttlogCorrectionNotSupported, AttlogCorrectionError) as exc:
+        except (AttlogCorrectionNotSupported, AttlogCorrectionError, DeviceFetchError, OSError) as exc:
             logger.warning("Device attlog correction unavailable (%s); applying DB-only.", exc)
             device_write_skipped = True
     else:

@@ -23,7 +23,7 @@ import type { Permission } from "@/auth/permissions";
 import { cn } from "@/lib/cn";
 import { useUiStore } from "@/stores/ui-store";
 import { Button } from "@/components/ui/button";
-import { fetchOperationalMetrics, getApiErrorMessage, syncFromDevice } from "@/services/api";
+import { fetchOperationalMetrics, formatSyncErrorMessage, syncFromDevice } from "@/services/api";
 
 const items = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: "dashboard:view" as Permission },
@@ -52,7 +52,13 @@ export function Sidebar() {
   });
   const failingDevices = opsMetrics.data?.failing_devices ?? 0;
   const retryPressure = (opsMetrics.data?.stale_commands ?? 0) + (opsMetrics.data?.dead_letter_commands ?? 0);
-  const syncHealthy = failingDevices === 0 && retryPressure === 0;
+  const deviceHealth = opsMetrics.data?.device_health_status ?? "UNKNOWN";
+  const deviceOnline = deviceHealth === "ONLINE";
+  const syncHealthy = deviceOnline && failingDevices === 0 && retryPressure === 0;
+  const deviceTarget =
+    opsMetrics.data?.device_ip && opsMetrics.data?.device_port
+      ? `${opsMetrics.data.device_ip}:${opsMetrics.data.device_port}`
+      : null;
 
   const refreshWorkforceViews = async () => {
     await Promise.all([
@@ -79,7 +85,7 @@ export function Sidebar() {
     } catch (error: unknown) {
       setSyncState({
         tone: "warn",
-        message: getApiErrorMessage(error) || "Sync failed. Check device connectivity and retry.",
+        message: formatSyncErrorMessage(error) || "Sync failed. Check device connectivity and retry.",
       });
     } finally {
       setSyncing(false);
@@ -214,16 +220,18 @@ export function Sidebar() {
             <div className="rounded-2xl border border-line/70 bg-surface px-3 py-2.5 text-[11px] leading-snug text-ink-muted shadow-sm">
               <p className="flex items-center justify-between font-medium text-ink/80">
                 <span>Device sync health</span>
-                <span className={cn("inline-flex items-center gap-1", syncHealthy ? "text-emerald-600" : "text-amber-600")}>
-                  <span className={cn("h-2 w-2 animate-pulse rounded-full", syncHealthy ? "bg-emerald-500" : "bg-amber-500")} />
-                  {syncHealthy ? "Healthy" : "Degraded"}
+                <span className={cn("inline-flex items-center gap-1", syncHealthy ? "text-emerald-600" : deviceOnline ? "text-amber-600" : "text-red-600")}>
+                  <span className={cn("h-2 w-2 animate-pulse rounded-full", syncHealthy ? "bg-emerald-500" : deviceOnline ? "bg-amber-500" : "bg-red-500")} />
+                  {syncHealthy ? "Healthy" : deviceOnline ? "Degraded" : "Offline"}
                 </span>
               </p>
               <p className="mt-1 flex items-center gap-1">
                 <Wifi className="h-3.5 w-3.5 text-primary" />
                 {opsMetrics.isLoading
                   ? "Checking live device status..."
-                  : `${failingDevices} devices failing, ${retryPressure} sync retries pending`}
+                  : deviceOnline
+                    ? `${failingDevices} devices failing, ${retryPressure} sync retries pending`
+                    : `Device offline${deviceTarget ? ` (${deviceTarget})` : ""} — use manual attendance adjust`}
               </p>
             </div>
             <div className="grid grid-cols-1 gap-2">

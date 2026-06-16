@@ -21,9 +21,10 @@ from app.models.device_state_snapshot import DeviceStateSnapshot
 from app.models.fleet_health_metric import FleetHealthMetric
 from app.models.reconciliation_job import ReconciliationJob
 from app.services.attendance_service import run_device_sync, run_user_sync
-from app.services.device_command_service import claim_pending_commands, process_command
+from app.services.device_command_service import claim_pending_commands, device_session_lock, process_command
 from app.services.device_service import DeviceService
-from app.services.device_registry_service import reconcile_device_mappings
+from app.services.device_exceptions import DeviceFetchError, DeviceLockContentionError
+from app.services.device_registry_service import reconcile_device_mappings, update_device_health
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -31,12 +32,18 @@ settings = get_settings()
 
 
 @celery_app.task(name="app.workers.tasks.sync_attendance_from_device", bind=True, max_retries=3)
-def sync_attendance_from_device(self) -> dict[str, int]:
+def sync_attendance_from_device(self) -> dict[str, int | bool]:
     """Fetch users + attendance from terminal, then rebuild sessions."""
+    if not settings.device_auto_sync_enabled:
+        logger.info("Attendance sync skipped (DEVICE_AUTO_SYNC_ENABLED=false)")
+        return {"skipped": True}
     db = SessionLocal()
     try:
-        users_fetched, users_upserted = run_user_sync(db)
-        fetched, inserted, backfilled = run_device_sync(db)
+        with device_session_lock(settings.zk_device_id, settings):
+            users_fetched, users_upserted = run_user_sync(db, settings=settings)
+            fetched, inserted, backfilled = run_device_sync(db, settings=settings)
+        update_device_health(db, status="ONLINE", detail="auto_sync_ok", settings=settings)
+        db.commit()
         logger.info(
             "Attendance sync: users_fetched=%s users_upserted=%s fetched=%s new_rows=%s placeholder_employees=%s",
             users_fetched,
@@ -52,9 +59,33 @@ def sync_attendance_from_device(self) -> dict[str, int]:
             "inserted": inserted,
             "placeholder_employees": backfilled,
         }
+    except DeviceLockContentionError as exc:
+        logger.warning("Attendance sync skipped (device lock busy): %s", exc)
+        return {"skipped": True, "reason": "lock_contention"}
     except Exception as exc:  # noqa: BLE001
+        update_device_health(db, status="OFFLINE", detail=str(exc), settings=settings)
+        db.commit()
         logger.exception("Attendance sync failed: %s", exc)
         raise self.retry(exc=exc, countdown=60) from exc
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.workers.tasks.probe_device_connectivity", bind=True, max_retries=0)
+def probe_device_connectivity(self) -> dict[str, str | bool]:
+    """TCP + pyzk handshake probe; keeps devices.health_status accurate for the UI."""
+    db = SessionLocal()
+    try:
+        device = DeviceService(settings=settings)
+        ok, detail = device.check_connection()
+        update_device_health(db, status="ONLINE" if ok else "OFFLINE", detail=detail, settings=settings)
+        db.commit()
+        return {"online": ok, "detail": detail}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Device connectivity probe failed: %s", exc)
+        update_device_health(db, status="OFFLINE", detail=str(exc), settings=settings)
+        db.commit()
+        return {"online": False, "detail": str(exc)}
     finally:
         db.close()
 
@@ -86,11 +117,22 @@ def process_device_commands(self) -> dict[str, int]:
 @celery_app.task(name="app.workers.tasks.reconcile_devices", bind=True, max_retries=1)
 def reconcile_devices(self) -> dict[str, int]:
     """Detect device-vs-mapping drift and persist reconciliation events."""
+    if not settings.device_auto_sync_enabled:
+        return {"skipped": True}  # type: ignore[return-value]
     db = SessionLocal()
     try:
-        counts = reconcile_device_mappings(db, settings=settings)
+        with device_session_lock(settings.zk_device_id, settings):
+            counts = reconcile_device_mappings(db, settings=settings)
         db.commit()
         return counts
+    except DeviceLockContentionError as exc:
+        logger.warning("Device reconciliation skipped (device lock busy): %s", exc)
+        return {"skipped": 1}  # type: ignore[return-value]
+    except (DeviceFetchError, OSError) as exc:
+        update_device_health(db, status="OFFLINE", detail=str(exc), settings=settings)
+        db.commit()
+        logger.warning("Device reconciliation skipped (device offline): %s", exc)
+        return {"offline": 1}  # type: ignore[return-value]
     except Exception as exc:  # noqa: BLE001
         logger.exception("Device reconciliation failed: %s", exc)
         raise self.retry(exc=exc, countdown=60) from exc
@@ -151,13 +193,16 @@ def process_reconciliation_jobs(self) -> dict[str, int]:
 
 
 @celery_app.task(name="app.workers.tasks.capture_device_snapshot", bind=True, max_retries=1)
-def capture_device_snapshot(self) -> dict[str, int | str]:
+def capture_device_snapshot(self) -> dict[str, int | str | bool]:
     """Capture periodic read-only snapshot for drift forensics."""
+    if not settings.device_snapshot_enabled:
+        return {"skipped": True}
     db = SessionLocal()
     try:
         service = DeviceService(settings=settings)
-        firmware = service.detect_firmware_fingerprint().get("firmware_version")
-        users = service.fetch_users()
+        with device_session_lock(settings.zk_device_id, settings):
+            firmware = service.detect_firmware_fingerprint().get("firmware_version")
+            users = service.fetch_users()
         metadata = {
             "users": [
                 {
@@ -183,6 +228,14 @@ def capture_device_snapshot(self) -> dict[str, int | str]:
         db.add(row)
         db.commit()
         return {"user_count": len(users), "snapshot_hash": hash_value}
+    except DeviceLockContentionError as exc:
+        logger.warning("Device snapshot skipped (device lock busy): %s", exc)
+        return {"skipped": True, "reason": "lock_contention"}
+    except (DeviceFetchError, OSError) as exc:
+        update_device_health(db, status="OFFLINE", detail=str(exc), settings=settings)
+        db.commit()
+        logger.warning("Device snapshot skipped (device offline): %s", exc)
+        return {"skipped": True, "reason": "offline"}
     except Exception as exc:  # noqa: BLE001
         logger.exception("Device snapshot capture failed: %s", exc)
         raise self.retry(exc=exc, countdown=60) from exc

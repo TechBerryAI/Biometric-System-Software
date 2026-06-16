@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import errno
 import logging
+import socket
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -19,6 +21,43 @@ from app.services.device_exceptions import AttlogCorrectionError, AttlogCorrecti
 from app.services.pyzk_adapter import PyZKAdapter
 
 logger = logging.getLogger(__name__)
+
+
+def format_device_connection_error(exc: BaseException, *, settings: Settings | None = None) -> str:
+    """Map low-level socket/pyzk failures to operator-facing sync messages."""
+    cfg = settings or get_settings()
+    target = f"{cfg.zk_device_ip}:{cfg.zk_device_port}"
+    if isinstance(exc, OSError):
+        if exc.errno == errno.EHOSTUNREACH:
+            return (
+                f"Device unreachable at {target} (no route to host). "
+                "Confirm ZK_DEVICE_IP and ZK_DEVICE_PORT in backend/.env, then ensure nothing else is blocking TCP."
+            )
+        if exc.errno == errno.ECONNREFUSED:
+            return (
+                f"Device refused TCP connection at {target}. "
+                "The terminal may have comm disabled or be using a different port."
+            )
+        if exc.errno == errno.ETIMEDOUT:
+            return (
+                f"Timed out connecting to {target}. "
+                f"Try increasing ZK_DEVICE_TIMEOUT_SECONDS (currently {cfg.zk_device_timeout_seconds})."
+            )
+        if exc.errno == errno.EPIPE:
+            return (
+                f"Device dropped the connection at {target} during data transfer. "
+                "Stop background Celery sync and close other ZK software, then retry."
+            )
+        return f"Device connection failed at {target}: {exc}"
+    message = str(exc)
+    if "Broken pipe" in message or "EPIPE" in message:
+        return (
+            f"Device dropped the connection at {target} during data transfer. "
+            "Stop background Celery sync and close other ZK software, then retry."
+        )
+    if isinstance(exc, DeviceFetchError):
+        return f"Device communication error: {exc}"
+    return f"Device communication error: {exc}"
 
 DANGEROUS_PYZK_METHODS = {
     "clear_attendance",
@@ -70,6 +109,17 @@ class DeviceService:
             force_udp=self._settings.zk_force_udp,
             ommit_ping=self._settings.zk_omit_ping,
         )
+
+    def probe_tcp_connection(self) -> tuple[bool, str]:
+        """Fast TCP reachability check without pyzk handshake."""
+        try:
+            with socket.create_connection(
+                (self._settings.zk_device_ip, self._settings.zk_device_port),
+                timeout=min(self._settings.zk_device_timeout_seconds, 15),
+            ):
+                return True, "tcp_connected"
+        except OSError as exc:
+            return False, format_device_connection_error(exc, settings=self._settings)
 
     @staticmethod
     def safe_command_allowlist() -> set[str]:
@@ -148,14 +198,17 @@ class DeviceService:
         return out
 
     def check_connection(self) -> tuple[bool, str]:
-        """Check if device is reachable and pyzk handshake succeeds."""
+        """Check TCP reachability, then verify pyzk handshake succeeds."""
+        tcp_ok, tcp_detail = self.probe_tcp_connection()
+        if not tcp_ok:
+            return False, tcp_detail
         try:
             self._adapter.run("check_connection", lambda _conn: True, max_attempts=2)
             return True, "connected"
         except (ZKError, OSError, TimeoutError) as exc:
-            return False, str(exc)
+            return False, format_device_connection_error(exc, settings=self._settings)
         except RuntimeError as exc:
-            return False, str(exc)
+            return False, format_device_connection_error(exc, settings=self._settings)
 
     def fetch_attendance(self) -> list[DeviceAttendanceRecord]:
         """Return attendance rows from device; empty list on failure."""

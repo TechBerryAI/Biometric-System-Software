@@ -49,6 +49,23 @@ class Settings(BaseSettings):
 
     timezone: str = Field(default="UTC", alias="TIMEZONE")
     device_poll_interval_seconds: int = Field(default=120, alias="DEVICE_POLL_INTERVAL_SECONDS")
+    device_auto_sync_enabled: bool = Field(
+        default=True,
+        alias="DEVICE_AUTO_SYNC_ENABLED",
+        description="When false, Celery stops polling the biometric device (manual sync still works).",
+    )
+    device_snapshot_enabled: bool = Field(
+        default=True,
+        alias="DEVICE_SNAPSHOT_ENABLED",
+        description="When false, Celery skips periodic fetch_users snapshots.",
+    )
+    device_connectivity_probe_seconds: int = Field(
+        default=60,
+        ge=15,
+        le=600,
+        alias="DEVICE_CONNECTIVITY_PROBE_SECONDS",
+        description="How often Celery TCP-probes the device and updates health_status in the DB.",
+    )
     device_sync_overlap_minutes: int = Field(default=15, ge=1, le=720, alias="DEVICE_SYNC_OVERLAP_MINUTES")
     duplicate_punch_window_seconds: int = Field(default=30, ge=0, le=300, alias="DUPLICATE_PUNCH_WINDOW_SECONDS")
     attendance_api_default_limit: int = Field(default=1000, ge=100, le=10000, alias="ATTENDANCE_API_DEFAULT_LIMIT")

@@ -8,8 +8,9 @@ import logging
 import os
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Iterator
 from zoneinfo import ZoneInfo
 
 from redis import Redis
@@ -33,6 +34,7 @@ from app.models.user import User
 from app.models.verification_result import VerificationResult
 from app.services.audit_service import append_audit_log
 from app.services.device_service import DeviceService
+from app.services.device_exceptions import DeviceLockContentionError
 from app.services.system_governance_service import assert_device_write_allowed
 
 logger = logging.getLogger(__name__)
@@ -268,9 +270,14 @@ def _record_sync_event(
     )
 
 
-def _acquire_lock(device_id: str, settings: Settings) -> tuple[Redis | None, Any, str]:
+def _acquire_lock(
+    device_id: str,
+    settings: Settings,
+    *,
+    blocking_timeout: float | None = None,
+) -> tuple[Redis | None, Any, str]:
     key = _lock_key(device_id, settings)
-    lock_wait_seconds = max(settings.command_lock_blocking_seconds, 15)
+    lock_wait_seconds = blocking_timeout if blocking_timeout is not None else max(settings.command_lock_blocking_seconds, 15)
     try:
         client = Redis.from_url(str(settings.redis_url), socket_timeout=2, socket_connect_timeout=2)
         lock_timeout = settings.zk_device_timeout_seconds + settings.command_heartbeat_seconds + 10
@@ -288,6 +295,45 @@ def _acquire_lock(device_id: str, settings: Settings) -> tuple[Redis | None, Any
         if local is not None:
             return None, local, key
     return None, None, key
+
+
+@contextmanager
+def device_session_lock(
+    device_id: str,
+    settings: Settings | None = None,
+    *,
+    blocking_timeout: float | None = None,
+) -> Iterator[None]:
+    """
+    Serialize all device I/O (sync reads and command writes) for a single terminal.
+    ZKTeco devices typically accept only one TCP client at a time.
+    """
+    settings = settings or get_settings()
+    wait_seconds = blocking_timeout if blocking_timeout is not None else max(settings.command_lock_blocking_seconds, 30)
+    client, lock, lock_key = _acquire_lock(device_id, settings, blocking_timeout=wait_seconds)
+    if lock is None:
+        raise DeviceLockContentionError(
+            f"Device '{device_id}' is busy (another sync or write is in progress). Wait a few seconds and retry."
+        )
+    lock_heartbeat = _LockHeartbeat(
+        lock,
+        period_seconds=settings.command_heartbeat_seconds,
+        extension_seconds=settings.zk_device_timeout_seconds + settings.command_heartbeat_seconds + 10,
+    )
+    lock_heartbeat.start()
+    try:
+        yield
+    finally:
+        lock_heartbeat.stop()
+        try:
+            lock.release()
+        except Exception:  # noqa: BLE001
+            pass
+        if client is not None:
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001
+                logger.debug("redis client close failed for device lock key=%s", lock_key)
 
 
 def _record_reconciliation_job(

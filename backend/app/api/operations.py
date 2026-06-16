@@ -11,6 +11,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.config import get_settings
 from app.core.privileged_account import is_privileged_account
 from app.core.security import Permission, get_current_user, require_permissions
 from app.models.audit_log import AuditLog
@@ -28,6 +29,7 @@ from app.schemas.audit import AuditLogRead
 from app.schemas.device_command import DeviceCommandRead
 from app.services.attendance_correction_service import finalize_pending_correction_for_command
 from app.services.device_command_service import INTERNAL_AUDIT_ACTIONS, INTERNAL_COMMAND_TYPES, reprocess_device_command
+from app.services.device_registry_service import ensure_default_device
 
 router = APIRouter(prefix="/ops", tags=["operations"])
 
@@ -290,6 +292,10 @@ def operational_metrics(db: Session = Depends(get_db)) -> dict[str, int]:
         ).scalar_one()
         or 0
     )
+    settings = get_settings()
+    registered_device = db.execute(select(Device).where(Device.name == settings.zk_device_id)).scalar_one_or_none()
+    if registered_device is None:
+        registered_device = ensure_default_device(db, settings=settings)
     return {
         "queue_depth": int(queue_depth),
         "stale_commands": int(stale_commands),
@@ -304,4 +310,8 @@ def operational_metrics(db: Session = Depends(get_db)) -> dict[str, int]:
         "snapshot_events_last_24h": int(recent_drift),
         "quarantined_devices": int(quarantined_devices),
         "emergency_freeze_active": int(emergency_freeze),
+        "device_health_status": registered_device.health_status,
+        "device_ip": registered_device.ip_address,
+        "device_port": registered_device.port,
+        "device_auto_sync_enabled": settings.device_auto_sync_enabled,
     }

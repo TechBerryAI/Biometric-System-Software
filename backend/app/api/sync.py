@@ -14,7 +14,10 @@ from app.core.security import Permission, require_permissions
 from app.models.user import User
 from app.services.attendance_service import run_device_sync, run_user_sync
 from app.services.audit_service import append_audit_log
-from app.services.device_exceptions import DeviceFetchError
+from app.services.device_command_service import device_session_lock
+from app.services.device_exceptions import DeviceFetchError, DeviceLockContentionError
+from app.services.device_registry_service import update_device_health
+from app.services.device_service import format_device_connection_error
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -42,20 +45,34 @@ def sync_from_device(
     punch codes, and rebuild sessions for SESSION_REBUILD_LOOKBACK_DAYS trailing local days.
     Same effective steps as ``scripts/sync_from_device.py``.
     """
+    settings = get_settings()
     try:
-        u_total, u_ins = run_user_sync(db)
-        a_fetch, a_ins, placeholders = run_device_sync(db, full_resync=full)
+        with device_session_lock(settings.zk_device_id, settings):
+            u_total, u_ins = run_user_sync(db, settings=settings)
+            a_fetch, a_ins, placeholders = run_device_sync(db, full_resync=full, settings=settings)
+    except DeviceLockContentionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
     except (ZKError, DeviceFetchError) as exc:
+        detail = format_device_connection_error(exc, settings=settings)
+        update_device_health(db, status="OFFLINE", detail=detail, settings=settings)
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Device communication error: {exc}",
+            detail=detail,
         ) from exc
     except OSError as exc:
+        detail = format_device_connection_error(exc, settings=settings)
+        update_device_health(db, status="OFFLINE", detail=detail, settings=settings)
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Device connection failed: {exc}",
+            detail=detail,
         ) from exc
-    settings = get_settings()
+
+    update_device_health(db, status="ONLINE", detail="sync_ok", settings=settings)
     cache = AIResponseCache(settings)
     cache.delete_prefix("ai:management:")
     cache.delete_prefix("ai:report:")

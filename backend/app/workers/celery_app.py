@@ -26,6 +26,10 @@ celery_app.conf.update(
 )
 
 celery_app.conf.beat_schedule = {
+    "probe-device-connectivity": {
+        "task": "app.workers.tasks.probe_device_connectivity",
+        "schedule": timedelta(seconds=settings.device_connectivity_probe_seconds),
+    },
     "sync-attendance-from-device": {
         "task": "app.workers.tasks.sync_attendance_from_device",
         "schedule": timedelta(seconds=settings.device_poll_interval_seconds),

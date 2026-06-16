@@ -382,6 +382,10 @@ export type OperationalMetrics = {
   dead_letter_commands: number;
   failing_devices: number;
   sync_drift_events: number;
+  device_health_status?: string;
+  device_ip?: string;
+  device_port?: number;
+  device_auto_sync_enabled?: boolean;
 };
 
 export type DeviceCommandRow = {
@@ -434,8 +438,22 @@ export function getApiErrorMessage(err: unknown): string {
         .map((x) => (typeof x === "object" && x && "msg" in x ? String((x as { msg: unknown }).msg) : String(x)))
         .join("; ");
     }
+    if (err.response?.status === 409) {
+      return "Device is busy with another sync. Wait a few seconds and try again.";
+    }
     return err.message;
   }
   if (err instanceof Error) return err.message;
   return "Request failed";
+}
+
+export function formatSyncErrorMessage(err: unknown): string {
+  const message = getApiErrorMessage(err);
+  if (message.includes("no route to host")) {
+    return `${message} You can still enter attendance manually via privileged account adjustment while the device is offline.`;
+  }
+  if (message.includes("busy") || message.includes("lock")) {
+    return message;
+  }
+  return message;
 }
