@@ -73,7 +73,9 @@ def sync_attendance_from_device(self) -> dict[str, int | bool]:
 
 @celery_app.task(name="app.workers.tasks.probe_device_connectivity", bind=True, max_retries=0)
 def probe_device_connectivity(self) -> dict[str, str | bool]:
-    """TCP + pyzk handshake probe; keeps devices.health_status accurate for the UI."""
+    """TCP + pyzk handshake probe; only runs when auto-sync is enabled."""
+    if not settings.device_auto_sync_enabled:
+        return {"skipped": True, "reason": "manual_sync_mode"}
     db = SessionLocal()
     try:
         device = DeviceService(settings=settings)

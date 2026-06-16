@@ -25,15 +25,7 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
-celery_app.conf.beat_schedule = {
-    "probe-device-connectivity": {
-        "task": "app.workers.tasks.probe_device_connectivity",
-        "schedule": timedelta(seconds=settings.device_connectivity_probe_seconds),
-    },
-    "sync-attendance-from-device": {
-        "task": "app.workers.tasks.sync_attendance_from_device",
-        "schedule": timedelta(seconds=settings.device_poll_interval_seconds),
-    },
+_beat_schedule: dict[str, dict[str, object]] = {
     "process-device-commands": {
         "task": "app.workers.tasks.process_device_commands",
         "schedule": timedelta(seconds=15),
@@ -49,10 +41,6 @@ celery_app.conf.beat_schedule = {
     "process-reconciliation-jobs": {
         "task": "app.workers.tasks.process_reconciliation_jobs",
         "schedule": timedelta(seconds=settings.reconciliation_interval_seconds),
-    },
-    "capture-device-snapshot": {
-        "task": "app.workers.tasks.capture_device_snapshot",
-        "schedule": timedelta(seconds=settings.snapshot_interval_seconds),
     },
     "flag-stale-reconciliation-jobs": {
         "task": "app.workers.tasks.flag_stale_reconciliation_jobs",
@@ -72,5 +60,22 @@ celery_app.conf.beat_schedule = {
     },
 }
 
-import app.workers.tasks  # noqa: E402, F401 — register task definitions
+if settings.device_auto_sync_enabled:
+    _beat_schedule["probe-device-connectivity"] = {
+        "task": "app.workers.tasks.probe_device_connectivity",
+        "schedule": timedelta(seconds=settings.device_connectivity_probe_seconds),
+    }
+    _beat_schedule["sync-attendance-from-device"] = {
+        "task": "app.workers.tasks.sync_attendance_from_device",
+        "schedule": timedelta(seconds=settings.device_poll_interval_seconds),
+    }
 
+if settings.device_snapshot_enabled:
+    _beat_schedule["capture-device-snapshot"] = {
+        "task": "app.workers.tasks.capture_device_snapshot",
+        "schedule": timedelta(seconds=settings.snapshot_interval_seconds),
+    }
+
+celery_app.conf.beat_schedule = _beat_schedule
+
+import app.workers.tasks  # noqa: E402, F401 — register task definitions

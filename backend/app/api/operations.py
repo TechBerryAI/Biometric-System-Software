@@ -296,11 +296,17 @@ def operational_metrics(db: Session = Depends(get_db)) -> dict[str, int]:
     registered_device = db.execute(select(Device).where(Device.name == settings.zk_device_id)).scalar_one_or_none()
     if registered_device is None:
         registered_device = ensure_default_device(db, settings=settings)
+    device_health_status = (
+        "MANUAL" if not settings.device_auto_sync_enabled else registered_device.health_status
+    )
+    effective_failing_devices = (
+        0 if not settings.device_auto_sync_enabled else int(failing_devices)
+    )
     return {
         "queue_depth": int(queue_depth),
         "stale_commands": int(stale_commands),
         "dead_letter_commands": int(dead_letters),
-        "failing_devices": int(failing_devices),
+        "failing_devices": effective_failing_devices,
         "sync_drift_events": int(sync_lag_events),
         "verification_failures": int(verification_failures),
         "reconciliation_pending": int(reconciliation_pending),
@@ -310,7 +316,7 @@ def operational_metrics(db: Session = Depends(get_db)) -> dict[str, int]:
         "snapshot_events_last_24h": int(recent_drift),
         "quarantined_devices": int(quarantined_devices),
         "emergency_freeze_active": int(emergency_freeze),
-        "device_health_status": registered_device.health_status,
+        "device_health_status": device_health_status,
         "device_ip": registered_device.ip_address,
         "device_port": registered_device.port,
         "device_auto_sync_enabled": settings.device_auto_sync_enabled,
