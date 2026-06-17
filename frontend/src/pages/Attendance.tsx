@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 import type { ExportPeriod } from "@/lib/dates";
-import { dateList, getExportRange, todayISO } from "@/lib/dates";
+import { dateList, fmtDisplayDateTime, getExportRange, todayISO } from "@/lib/dates";
 import {
   fetchDailySummary,
   fetchEmployees,
@@ -14,11 +14,6 @@ import {
 import { useUiStore } from "@/stores/ui-store";
 import type { DailySummaryRow, Employee } from "@/types";
 import { downloadAttendanceSummaryPdf } from "@/utils/pdfReports";
-
-function fmtDateTime(v: string | null): string {
-  if (!v) return "—";
-  return new Date(v).toLocaleString();
-}
 
 function fmtWorkHm(total: number | null): string {
   if (total == null) return "—";
@@ -236,8 +231,8 @@ export function Attendance() {
                       <p className="font-medium text-ink">{r.employee_name}</p>
                       <p className="text-xs text-ink-muted font-mono">{r.device_user_id}</p>
                     </td>
-                    <td className="px-5 py-3.5 whitespace-nowrap text-ink-muted">{fmtDateTime(r.first_check_in)}</td>
-                    <td className="px-5 py-3.5 whitespace-nowrap text-ink-muted">{fmtDateTime(r.last_check_out)}</td>
+                    <td className="px-5 py-3.5 whitespace-nowrap text-ink-muted">{fmtDisplayDateTime(r.first_check_in)}</td>
+                    <td className="px-5 py-3.5 whitespace-nowrap text-ink-muted">{fmtDisplayDateTime(r.last_check_out)}</td>
                     <td className="px-5 py-3.5 tabular-nums text-ink-muted">{fmtWorkHm(r.total_work_minutes)}</td>
                   </tr>
                 ))

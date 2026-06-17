@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { fmtDisplayDate, fmtDisplayDateTime } from "@/lib/dates";
 import {
   applyAttendanceAdjustment,
   fetchAttendanceDayPreview,
@@ -52,17 +53,6 @@ function buildLocalDateTime(localDate: string, parts: TimeParts): Date {
   );
 }
 
-function fmtDateTime(v: string | null): string {
-  if (!v) return "—";
-  return new Date(v).toLocaleString(undefined, {
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
 type TimePartsEditorProps = {
   label: string;
   value: TimeParts | null;
@@ -224,15 +214,15 @@ export function AttendanceAdjustmentModal({
     }
   };
 
-  const previewCheckIn = date ? fmtDateTime(buildLocalDateTime(date, checkInParts).toISOString()) : "—";
+  const previewCheckIn = date ? fmtDisplayDateTime(buildLocalDateTime(date, checkInParts).toISOString()) : "—";
   const previewCheckOut =
-    date && checkOutParts ? fmtDateTime(buildLocalDateTime(date, checkOutParts).toISOString()) : "—";
+    date && checkOutParts ? fmtDisplayDateTime(buildLocalDateTime(date, checkOutParts).toISOString()) : "—";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Edit attendance — {date ? new Date(`${date}T12:00:00`).toLocaleDateString() : ""}</DialogTitle>
+          <DialogTitle>Edit attendance — {date ? fmtDisplayDate(date) : ""}</DialogTitle>
           <DialogDescription>
             Set check-in and check-out to the exact second. Times apply to this calendar day only.
           </DialogDescription>
@@ -246,7 +236,7 @@ export function AttendanceAdjustmentModal({
                 <div className="rounded-xl border border-line/60 bg-surface/60 p-4 text-sm">
                   <p className="font-medium text-ink">Current on record</p>
                   <p className="mt-1 text-ink-muted">
-                    In: {fmtDateTime(preview.current_check_in)} · Out: {fmtDateTime(preview.current_check_out)} ·
+                    In: {fmtDisplayDateTime(preview.current_check_in)} · Out: {fmtDisplayDateTime(preview.current_check_out)} ·
                     Punches: {preview.punch_count}
                   </p>
                   <p className="mt-3 font-medium text-ink">After update</p>

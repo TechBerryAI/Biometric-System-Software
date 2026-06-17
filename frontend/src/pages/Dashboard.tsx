@@ -64,6 +64,7 @@ import {
 } from "@/lib/dashboardAnalytics";
 import { fetchAttendanceAnomalies, fetchManagementInsights, fetchOperationalMetrics } from "@/services/api";
 import { cn } from "@/lib/cn";
+import { fmtDisplayDate } from "@/lib/dates";
 
 function toDeltaLabel(delta: number | null, suffix = "pts"): string {
   if (delta == null) return "No baseline";
@@ -598,7 +599,7 @@ export function Dashboard() {
       id: `anomaly-${anomaly.id}`,
       title: "Attendance anomaly detected",
       subtitle: anomaly.description,
-      timestamp: new Date(anomaly.anomaly_date).toLocaleDateString(),
+      timestamp: fmtDisplayDate(anomaly.anomaly_date),
       severity: (anomaly.severity === "critical" || anomaly.severity === "high" ? "high" : anomaly.severity === "medium" ? "medium" : "low") as InsightSeverity,
       icon: AlertTriangle,
     }));

@@ -4,14 +4,10 @@ import type { AttendanceLog } from "@/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
+import { fmtDisplayDateTimeShort } from "@/lib/dates";
 
 function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return fmtDisplayDateTimeShort(iso);
 }
 
 export function ActivityFeed({

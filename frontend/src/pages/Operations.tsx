@@ -4,6 +4,7 @@ import { useAuth } from "@/auth/AuthContext";
 import { accountTierFromUser } from "@/auth/privilegedAccess";
 import { fetchAuditLogs, fetchDeviceCommands, fetchOperationalMetrics } from "@/services/api";
 import { cn } from "@/lib/cn";
+import { fmtDisplayDateTime } from "@/lib/dates";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function Operations() {
@@ -96,7 +97,7 @@ export function Operations() {
                     <td className="py-2 pr-3">{row.command_type}</td>
                     <td className="py-2 pr-3">{row.status}</td>
                     <td className="py-2 pr-3">{row.retries}</td>
-                    <td className="py-2 pr-3">{new Date(row.created_at).toLocaleString()}</td>
+                    <td className="py-2 pr-3">{fmtDisplayDateTime(row.created_at)}</td>
                     <td className="py-2 pr-3 text-xs text-ink-muted">{row.last_error ?? "-"}</td>
                   </tr>
                 ))}
@@ -116,7 +117,7 @@ export function Operations() {
               <tbody>
                 {(audits.data ?? []).slice(0, 40).map((row) => (
                   <tr key={row.id} className="border-b border-line/40">
-                    <td className="py-2 pr-3">{new Date(row.timestamp).toLocaleString()}</td>
+                    <td className="py-2 pr-3">{fmtDisplayDateTime(row.timestamp)}</td>
                     <td className="py-2 pr-3">{row.action_type}</td>
                     <td className="py-2 pr-3">
                       {row.entity_type}:{row.entity_id}

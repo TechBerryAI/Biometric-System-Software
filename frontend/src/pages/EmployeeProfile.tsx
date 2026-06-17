@@ -15,27 +15,17 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
 import {
+  fmtDayOfWeek,
+  fmtDisplayDate,
+  fmtDisplayDateTime,
+  todayISO,
+} from "@/lib/dates";
+import {
   fetchEmployeeById,
   fetchEmployeeDailyAttendance,
 } from "@/services/api";
 import type { EmployeeDailyAttendance, EmployeeDetail } from "@/types";
 import { downloadEmployeeReportPdf } from "@/utils/pdfReports";
-
-function fmtDateTime(v: string | null): string {
-  if (!v) return "—";
-  return new Date(v).toLocaleString(undefined, {
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function fmtDate(v: string): string {
-  return new Date(`${v}T12:00:00`).toLocaleDateString();
-}
 
 function fmtMinutes(total: number | null): string {
   if (total == null) return "—";
@@ -47,14 +37,6 @@ function fmtMinutes(total: number | null): string {
 function defaultFromDate(): string {
   const d = new Date();
   d.setDate(d.getDate() - 30);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function todayISO(): string {
-  const d = new Date();
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
@@ -243,7 +225,7 @@ export function EmployeeProfile() {
               <CardContent className="p-5">
                 <p className="text-xs font-medium uppercase tracking-wider text-ink-muted">First punch</p>
                 <p className="mt-2 text-sm font-medium text-ink leading-snug">
-                  {fmtDateTime(employee?.first_punch_at ?? null)}
+                  {fmtDisplayDateTime(employee?.first_punch_at ?? null)}
                 </p>
               </CardContent>
             </Card>
@@ -251,7 +233,7 @@ export function EmployeeProfile() {
               <CardContent className="p-5">
                 <p className="text-xs font-medium uppercase tracking-wider text-ink-muted">Last punch</p>
                 <p className="mt-2 text-sm font-medium text-ink leading-snug">
-                  {fmtDateTime(employee?.last_punch_at ?? null)}
+                  {fmtDisplayDateTime(employee?.last_punch_at ?? null)}
                 </p>
               </CardContent>
             </Card>
@@ -333,6 +315,7 @@ export function EmployeeProfile() {
                 <thead className="sticky top-0 z-[1] bg-surface/95 backdrop-blur-sm">
                   <tr className="text-xs font-medium uppercase tracking-wider text-ink-muted shadow-[inset_0_-1px_0_#E2E8F0]">
                     <th className="px-5 py-3.5">Date</th>
+                    <th className="px-5 py-3.5">Day</th>
                     <th className="px-5 py-3.5">In</th>
                     <th className="px-5 py-3.5">Out</th>
                     <th className="px-5 py-3.5">Work</th>
@@ -343,7 +326,7 @@ export function EmployeeProfile() {
                 <tbody>
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={canAdjustAttendance ? 6 : 5} className="px-5 py-14 text-center text-ink-muted">
+                      <td colSpan={canAdjustAttendance ? 7 : 6} className="px-5 py-14 text-center text-ink-muted">
                         No rows in this range.
                       </td>
                     </tr>
@@ -369,12 +352,13 @@ export function EmployeeProfile() {
                             "cursor-pointer hover:bg-primary-soft/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
                         )}
                       >
-                        <td className="px-5 py-3.5">{fmtDate(r.summary_date)}</td>
+                        <td className="px-5 py-3.5">{fmtDisplayDate(r.summary_date)}</td>
+                        <td className="px-5 py-3.5 text-ink-muted">{fmtDayOfWeek(r.summary_date)}</td>
                         <td className="px-5 py-3.5 whitespace-nowrap text-ink-muted">
-                          {fmtDateTime(r.first_check_in)}
+                          {fmtDisplayDateTime(r.first_check_in)}
                         </td>
                         <td className="px-5 py-3.5 whitespace-nowrap text-ink-muted">
-                          {fmtDateTime(r.last_check_out)}
+                          {fmtDisplayDateTime(r.last_check_out)}
                         </td>
                         <td className="px-5 py-3.5 tabular-nums text-ink-muted">
                           {fmtMinutes(r.total_work_minutes)}

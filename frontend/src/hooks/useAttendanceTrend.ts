@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchDailySummary } from "@/services/api";
-import { trailingDayISOs } from "@/lib/dates";
+import { trailingDayISOs, fmtChartDayLabel } from "@/lib/dates";
 
 export type TrendPoint = {
   date: string;
@@ -34,7 +34,7 @@ export function useAttendanceTrend(days = 14) {
         const avgWorkMinutes = withSpan.length > 0 ? sumWorkMinutes / withSpan.length : null;
         return {
           date,
-          label: date.slice(5).replace("-", "/"),
+          label: fmtChartDayLabel(date),
           present,
           absent,
           headcount,

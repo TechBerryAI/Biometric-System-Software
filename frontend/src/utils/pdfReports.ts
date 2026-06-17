@@ -1,6 +1,12 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { DailySummaryRow, EmployeeDailyAttendance, EmployeeDetail } from "@/types";
+import {
+  fmtDayOfWeek,
+  fmtDisplayDate,
+  fmtDisplayDateTime,
+  fmtGeneratedTimestamp,
+} from "@/lib/dates";
 
 /** Brand teal (matches Tailwind accent) */
 const ACCENT: [number, number, number] = [13, 148, 136];
@@ -8,28 +14,6 @@ const ACCENT_DARK: [number, number, number] = [15, 118, 110];
 const SLATE_HEADER: [number, number, number] = [26, 34, 48];
 const SLATE_MUTED: [number, number, number] = [61, 79, 102];
 const ROW_ALT: [number, number, number] = [248, 250, 252];
-
-function fmtDateTime(value: string | null): string {
-  if (!value) return "—";
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(value));
-  } catch {
-    return new Date(value).toLocaleString();
-  }
-}
-
-function fmtDate(value: string): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
-      new Date(`${value}T12:00:00`)
-    );
-  } catch {
-    return new Date(`${value}T00:00:00`).toLocaleDateString();
-  }
-}
 
 function fmtMinutes(total: number | null): string {
   if (total == null) return "—";
@@ -101,8 +85,8 @@ export function downloadEmployeeReportPdf(args: {
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
 
   const startY = drawReportBanner(doc, "Employee attendance report", [
-    `Generated · ${new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "short" }).format(new Date())}`,
-    `Period · ${fmtDate(fromDate)} → ${fmtDate(toDate)} · ${employee.name} (${employee.device_user_id})`,
+    `Generated · ${fmtGeneratedTimestamp()}`,
+    `Period · ${fmtDisplayDate(fromDate)} → ${fmtDisplayDate(toDate)} · ${employee.name} (${employee.device_user_id})`,
   ]);
 
   autoTable(doc, {
@@ -115,8 +99,8 @@ export function downloadEmployeeReportPdf(args: {
       ["Privilege", String(employee.device_privilege ?? "—"), "Device group", employee.device_group_id ?? "—"],
       ["Card", employee.device_card ?? "—", "Shift", `${employee.shift_start ?? "—"} → ${employee.shift_end ?? "—"}`],
       ["Total logs", String(employee.total_logs), "Attendance days", String(employee.total_attendance_days)],
-      ["Complete days", String(employee.total_complete_days), "First punch", fmtDateTime(employee.first_punch_at)],
-      ["Last punch", fmtDateTime(employee.last_punch_at), "", ""],
+      ["Complete days", String(employee.total_complete_days), "First punch", fmtDisplayDateTime(employee.first_punch_at)],
+      ["Last punch", fmtDisplayDateTime(employee.last_punch_at), "", ""],
     ],
     styles: {
       fontSize: 9.5,
@@ -149,11 +133,12 @@ export function downloadEmployeeReportPdf(args: {
   autoTable(doc, {
     startY: yAfter + 8,
     theme: "striped",
-    head: [["Date", "In time", "Out time", "Total work (HH:mm)", "Absent", "Punches"]],
+    head: [["Date", "Day", "In time", "Out time", "Total work (HH:mm)", "Absent", "Punches"]],
     body: rows.map((r) => [
-      fmtDate(r.summary_date),
-      fmtDateTime(r.first_check_in),
-      fmtDateTime(r.last_check_out),
+      fmtDisplayDate(r.summary_date),
+      fmtDayOfWeek(r.summary_date),
+      fmtDisplayDateTime(r.first_check_in),
+      fmtDisplayDateTime(r.last_check_out),
       fmtMinutes(r.total_work_minutes),
       r.absent ? "Yes" : "No",
       String(r.punch_count),
@@ -172,9 +157,9 @@ export function downloadEmployeeReportPdf(args: {
     alternateRowStyles: { fillColor: ROW_ALT },
     columnStyles: {
       0: { cellWidth: 72 },
-      3: { halign: "center" },
       4: { halign: "center" },
-      5: { halign: "center", cellWidth: 52 },
+      5: { halign: "center" },
+      6: { halign: "center", cellWidth: 52 },
     },
     margin: { left: 40, right: 40 },
   });
@@ -192,20 +177,21 @@ export function downloadAttendanceSummaryPdf(args: {
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
 
   const startY = drawReportBanner(doc, "Attendance summary · all employees", [
-    `Generated · ${new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "short" }).format(new Date())}`,
+    `Generated · ${fmtGeneratedTimestamp()}`,
     `Coverage · ${periodLabel} · ${rows.length} row(s)`,
   ]);
 
   autoTable(doc, {
     startY,
     theme: "striped",
-    head: [["Date", "Employee", "Device ID", "In time", "Out time", "Total work", "Absent"]],
+    head: [["Date", "Day", "Employee", "Device ID", "In time", "Out time", "Total work", "Absent"]],
     body: rows.map((r) => [
-      fmtDate(r.summary_date),
+      fmtDisplayDate(r.summary_date),
+      fmtDayOfWeek(r.summary_date),
       r.employee_name,
       r.device_user_id,
-      fmtDateTime(r.first_check_in),
-      fmtDateTime(r.last_check_out),
+      fmtDisplayDateTime(r.first_check_in),
+      fmtDisplayDateTime(r.last_check_out),
       fmtMinutes(r.total_work_minutes),
       r.first_check_in ? "No" : "Yes",
     ]),
@@ -222,10 +208,10 @@ export function downloadAttendanceSummaryPdf(args: {
     },
     alternateRowStyles: { fillColor: ROW_ALT },
     columnStyles: {
-      0: { cellWidth: 86 },
-      2: { cellWidth: 72 },
-      5: { halign: "center", cellWidth: 64 },
-      6: { halign: "center", cellWidth: 52 },
+      0: { cellWidth: 72 },
+      3: { cellWidth: 72 },
+      6: { halign: "center", cellWidth: 64 },
+      7: { halign: "center", cellWidth: 52 },
     },
     margin: { left: 40, right: 40 },
   });
