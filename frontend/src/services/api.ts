@@ -140,6 +140,16 @@ export async function updateMyProfile(payload: { full_name: string }): Promise<C
   return data;
 }
 
+export async function changeMyPassword(payload: {
+  current_password: string;
+  new_password: string;
+  confirm_password: string;
+}): Promise<AuthTokens> {
+  const { data } = await api.post<AuthTokens>("/auth/me/password", payload);
+  configureApiAuth(data.access_token);
+  return data;
+}
+
 export async function fetchEmployees(): Promise<Employee[]> {
   const { data } = await api.get<Employee[]>("/employees");
   return data;

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 class LoginRequest(BaseModel):
@@ -46,3 +46,17 @@ class UserCreateRequest(BaseModel):
 
 class ProfileUpdateRequest(BaseModel):
     full_name: str = Field(min_length=1, max_length=160)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_passwords(self) -> PasswordChangeRequest:
+        if self.new_password != self.confirm_password:
+            raise ValueError("New password and confirmation do not match")
+        if self.new_password == self.current_password:
+            raise ValueError("New password must differ from current password")
+        return self

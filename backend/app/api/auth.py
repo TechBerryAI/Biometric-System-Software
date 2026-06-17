@@ -14,6 +14,7 @@ from app.schemas.auth import (
     CurrentUserResponse,
     LoginRequest,
     LogoutRequest,
+    PasswordChangeRequest,
     ProfileUpdateRequest,
     RefreshRequest,
     UserCreateRequest,
@@ -22,6 +23,7 @@ from app.services.audit_service import append_audit_log
 from app.services.auth_service import (
     LoginRateLimiter,
     authenticate_user,
+    change_user_password,
     create_or_update_user,
     ensure_bootstrap_admin,
     issue_session_tokens,
@@ -176,6 +178,45 @@ def update_me(payload: ProfileUpdateRequest, user: User = Depends(get_current_us
         full_name=user.full_name,
         role=user.role,
         active=user.active,
+    )
+
+
+@router.post("/me/password", response_model=AuthTokens)
+def change_my_password(
+    payload: PasswordChangeRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AuthTokens:
+    if not change_user_password(db, user, payload.current_password, payload.new_password):
+        append_audit_log(
+            db,
+            actor_user_uuid=user.user_uuid,
+            action_type="AUTH_PASSWORD_CHANGE_FAILED",
+            entity_type="user",
+            entity_id=user.user_uuid,
+            ip_address=request.client.host if request.client else None,
+            request_id=getattr(request.state, "request_id", None),
+        )
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
+
+    access_token, refresh_token, refresh_expiry = issue_session_tokens(db, user)
+    append_audit_log(
+        db,
+        actor_user_uuid=user.user_uuid,
+        action_type="AUTH_PASSWORD_CHANGED",
+        entity_type="user",
+        entity_id=user.user_uuid,
+        ip_address=request.client.host if request.client else None,
+        request_id=getattr(request.state, "request_id", None),
+    )
+    db.commit()
+    return AuthTokens(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        refresh_expires_at=refresh_expiry,
+        role=user.role,
     )
 
 

@@ -8,6 +8,7 @@ import {
   logoutSession,
   refreshSession,
   registerTokenRefreshHandler,
+  type AuthTokens,
 } from "@/services/api";
 
 type SessionUser = {
@@ -30,6 +31,7 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  applyAuthTokens: (tokens: AuthTokens) => void;
   can: (permission: Permission) => boolean;
 };
 
@@ -154,6 +156,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(me as SessionUser);
   }, []);
 
+  const applyAuthTokens = useCallback(
+    (tokens: AuthTokens) => {
+      applySession({
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        refreshExpiresAt: tokens.refresh_expires_at,
+      });
+    },
+    [applySession]
+  );
+
   const can = useCallback(
     (permission: Permission) => {
       if (!user) return false;
@@ -169,9 +182,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       refreshUser,
+      applyAuthTokens,
       can,
     }),
-    [user, loading, login, logout, refreshUser, can]
+    [user, loading, login, logout, refreshUser, applyAuthTokens, can]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

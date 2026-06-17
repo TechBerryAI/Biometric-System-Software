@@ -136,6 +136,25 @@ def revoke_refresh_token(db: Session, raw_refresh_token: str) -> bool:
     return True
 
 
+def revoke_all_user_refresh_tokens(db: Session, user_id: int) -> int:
+    tokens = db.execute(
+        select(RefreshToken).where(RefreshToken.user_id == user_id, RefreshToken.revoked.is_(False))
+    ).scalars()
+    count = 0
+    for token in tokens:
+        token.revoked = True
+        count += 1
+    return count
+
+
+def change_user_password(db: Session, user: User, current_password: str, new_password: str) -> bool:
+    if not verify_password(current_password, user.password_hash):
+        return False
+    user.password_hash = hash_password(new_password)
+    revoke_all_user_refresh_tokens(db, user.id)
+    return True
+
+
 def ensure_bootstrap_admin(db: Session) -> User | None:
     settings = get_settings()
     if not settings.auth_bootstrap_admin_email or not settings.auth_bootstrap_admin_password:

@@ -44,6 +44,26 @@ class CertifiedFirmwareUpsert(BaseModel):
     operational_notes: str | None = None
 
 
+class OperationalMetricsRead(BaseModel):
+    queue_depth: int
+    stale_commands: int
+    dead_letter_commands: int
+    failing_devices: int
+    sync_drift_events: int
+    verification_failures: int
+    reconciliation_pending: int
+    replay_recovered_success: int
+    lock_contention_events: int
+    commands_currently_verifying: int
+    snapshot_events_last_24h: int
+    quarantined_devices: int
+    emergency_freeze_active: int
+    device_health_status: str
+    device_ip: str
+    device_port: int
+    device_auto_sync_enabled: bool
+
+
 @router.get("/audit-logs", response_model=list[AuditLogRead], dependencies=[Depends(require_permissions(Permission.AUDIT_READ))])
 def list_audit_logs(
     limit: int = Query(100, ge=1, le=500),
@@ -198,8 +218,12 @@ def list_reconciliation_jobs(
     ]
 
 
-@router.get("/metrics", dependencies=[Depends(require_permissions(Permission.METRICS_READ))])
-def operational_metrics(db: Session = Depends(get_db)) -> dict[str, int]:
+@router.get(
+    "/metrics",
+    response_model=OperationalMetricsRead,
+    dependencies=[Depends(require_permissions(Permission.METRICS_READ))],
+)
+def operational_metrics(db: Session = Depends(get_db)) -> OperationalMetricsRead:
     stale_cutoff = datetime.now(ZoneInfo("UTC")) - timedelta(minutes=15)
     queue_depth = (
         db.execute(
@@ -302,22 +326,22 @@ def operational_metrics(db: Session = Depends(get_db)) -> dict[str, int]:
     effective_failing_devices = (
         0 if not settings.device_auto_sync_enabled else int(failing_devices)
     )
-    return {
-        "queue_depth": int(queue_depth),
-        "stale_commands": int(stale_commands),
-        "dead_letter_commands": int(dead_letters),
-        "failing_devices": effective_failing_devices,
-        "sync_drift_events": int(sync_lag_events),
-        "verification_failures": int(verification_failures),
-        "reconciliation_pending": int(reconciliation_pending),
-        "replay_recovered_success": int(replay_recovered),
-        "lock_contention_events": int(lock_contention),
-        "commands_currently_verifying": int(verification_latency_events),
-        "snapshot_events_last_24h": int(recent_drift),
-        "quarantined_devices": int(quarantined_devices),
-        "emergency_freeze_active": int(emergency_freeze),
-        "device_health_status": device_health_status,
-        "device_ip": registered_device.ip_address,
-        "device_port": registered_device.port,
-        "device_auto_sync_enabled": settings.device_auto_sync_enabled,
-    }
+    return OperationalMetricsRead(
+        queue_depth=int(queue_depth),
+        stale_commands=int(stale_commands),
+        dead_letter_commands=int(dead_letters),
+        failing_devices=effective_failing_devices,
+        sync_drift_events=int(sync_lag_events),
+        verification_failures=int(verification_failures),
+        reconciliation_pending=int(reconciliation_pending),
+        replay_recovered_success=int(replay_recovered),
+        lock_contention_events=int(lock_contention),
+        commands_currently_verifying=int(verification_latency_events),
+        snapshot_events_last_24h=int(recent_drift),
+        quarantined_devices=int(quarantined_devices),
+        emergency_freeze_active=int(emergency_freeze),
+        device_health_status=device_health_status,
+        device_ip=registered_device.ip_address,
+        device_port=registered_device.port,
+        device_auto_sync_enabled=settings.device_auto_sync_enabled,
+    )

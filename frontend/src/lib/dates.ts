@@ -64,6 +64,12 @@ export function fmtChartDayLabel(isoDate: string): string {
   }).format(parseISODate(isoDate));
 }
 
+/** Ensure from <= to; swaps bounds when the user picks an inverted range. */
+export function clampDateRange(fromISO: string, toISO: string): { from: string; to: string } {
+  if (fromISO <= toISO) return { from: fromISO, to: toISO };
+  return { from: toISO, to: fromISO };
+}
+
 export function todayISO(): string {
   const d = new Date();
   const y = d.getFullYear();

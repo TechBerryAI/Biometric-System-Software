@@ -18,7 +18,7 @@ export function Operations() {
       ? "bg-status-late shadow-[0_8px_22px_rgba(202,138,4,0.32)]"
       : "bg-primary shadow-[0_8px_22px_rgba(79,70,229,0.32)]";
   const activeTextClass = accountTier === "ceo" ? "text-amber-950" : "text-white";
-  const metrics = useQuery({ queryKey: ["ops-metrics"], queryFn: fetchOperationalMetrics, refetchInterval: 30000 });
+  const metrics = useQuery({ queryKey: ["operational-metrics"], queryFn: fetchOperationalMetrics, refetchInterval: 30000 });
   const commands = useQuery({ queryKey: ["ops-commands"], queryFn: () => fetchDeviceCommands(), refetchInterval: 30000 });
   const audits = useQuery({ queryKey: ["ops-audits"], queryFn: fetchAuditLogs, refetchInterval: 30000 });
 

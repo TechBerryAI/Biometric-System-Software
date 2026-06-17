@@ -1,4 +1,5 @@
 import { Clock3, Cpu, Globe2, Moon, ShieldCheck, Sparkles, Sun, Timer } from "lucide-react";
+import { ChangePasswordCard } from "@/components/settings/ChangePasswordCard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +13,7 @@ export function Settings() {
             <div>
               <h1 className="font-display text-display-xl text-ink">Settings</h1>
               <p className="mt-2 max-w-2xl text-sm text-ink-muted leading-relaxed">
-                Manage device connectivity, shift behavior, and regional preferences from one place.
+                Manage device connectivity, shift behavior, account security, and regional preferences from one place.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -109,6 +110,8 @@ export function Settings() {
             </p>
           </CardContent>
         </Card>
+
+        <ChangePasswordCard />
 
         <Card className="border-line/70 bg-surface-card/95 shadow-card transition-shadow duration-300 hover:shadow-card-hover">
           <CardHeader className="pb-3">

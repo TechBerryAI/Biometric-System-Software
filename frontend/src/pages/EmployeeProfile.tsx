@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
 import {
+  clampDateRange,
   fmtDayOfWeek,
   fmtDisplayDate,
   fmtDisplayDateTime,
@@ -83,6 +84,10 @@ export function EmployeeProfile() {
 
   const loadAttendance = useCallback(async () => {
     if (!Number.isFinite(numericEmployeeId)) return;
+    if (fromDate > toDate) {
+      setError("'From' date must be on or before 'To' date.");
+      return;
+    }
     setLoadingAttendance(true);
     setError(null);
     try {
@@ -272,11 +277,27 @@ export function EmployeeProfile() {
             <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:flex-wrap sm:items-end">
               <label className="flex flex-col gap-1.5 text-sm">
                 <span className="text-xs font-medium text-ink-muted">From</span>
-                <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+                <Input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => {
+                    const next = clampDateRange(e.target.value, toDate);
+                    setFromDate(next.from);
+                    setToDate(next.to);
+                  }}
+                />
               </label>
               <label className="flex flex-col gap-1.5 text-sm">
                 <span className="text-xs font-medium text-ink-muted">To</span>
-                <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+                <Input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => {
+                    const next = clampDateRange(fromDate, e.target.value);
+                    setFromDate(next.from);
+                    setToDate(next.to);
+                  }}
+                />
               </label>
               <Button
                 type="button"
