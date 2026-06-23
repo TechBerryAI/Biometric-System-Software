@@ -38,6 +38,10 @@ _beat_schedule: dict[str, dict[str, object]] = {
         "task": "app.workers.tasks.recover_stale_commands",
         "schedule": timedelta(seconds=60),
     },
+    "recover-stale-attendance-corrections": {
+        "task": "app.workers.tasks.recover_stale_attendance_corrections",
+        "schedule": timedelta(seconds=60),
+    },
     "process-reconciliation-jobs": {
         "task": "app.workers.tasks.process_reconciliation_jobs",
         "schedule": timedelta(seconds=settings.reconciliation_interval_seconds),

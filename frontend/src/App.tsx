@@ -10,7 +10,9 @@ import { Login } from "@/pages/Login";
 import { Operations } from "@/pages/Operations";
 import { Profile } from "@/pages/Profile";
 import { Reports } from "@/pages/Reports";
+import { Audit } from "@/pages/Audit";
 import { Settings } from "@/pages/Settings";
+import { isPrivilegedAccount } from "@/auth/privilegedAccess";
 
 function HomeRoute() {
   const { can } = useAuth();
@@ -18,6 +20,14 @@ function HomeRoute() {
   if (can("employee:view")) return <Navigate to="/employees" replace />;
   if (can("reports:read")) return <Navigate to="/attendance" replace />;
   return <Navigate to="/profile" replace />;
+}
+
+function PrivilegedRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!isPrivilegedAccount(user)) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
 }
 
 export default function App() {
@@ -86,6 +96,18 @@ export default function App() {
                     </RequireAuth>
                   }
                 />
+                <Route
+                  path="/audit"
+                  element={
+                    <PrivilegedRoute>
+                      <Audit />
+                    </PrivilegedRoute>
+                  }
+                />
+                <Route path="/corrections" element={<Navigate to="/audit" replace />} />
+                <Route path="/raw-attendance" element={<Navigate to="/audit" replace />} />
+                <Route path="/forensics" element={<Navigate to="/audit" replace />} />
+                <Route path="/device-history" element={<Navigate to="/audit" replace />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </AppLayout>

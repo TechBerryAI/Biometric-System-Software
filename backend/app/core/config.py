@@ -131,6 +131,16 @@ class Settings(BaseSettings):
     allow_device_card_rewrite: bool = Field(default=False, alias="ALLOW_DEVICE_CARD_REWRITE")
     allow_device_admin_override: bool = Field(default=False, alias="ALLOW_DEVICE_ADMIN_OVERRIDE")
     device_read_only: bool = Field(default=False, alias="DEVICE_READ_ONLY")
+    strict_device_authority: bool = Field(
+        default=False,
+        alias="STRICT_DEVICE_AUTHORITY",
+        description="When true, DB attendance is updated only after verified device write (Tier A).",
+    )
+    correction_allow_db_only_fallback: bool = Field(
+        default=True,
+        alias="CORRECTION_ALLOW_DB_ONLY_FALLBACK",
+        description="When strict mode is on but firmware cannot write attlog, allow applied_db_only if true.",
+    )
 
     @model_validator(mode="after")
     def _compose_database_url(self) -> "Settings":

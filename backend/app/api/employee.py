@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import Permission, require_permissions
-from app.models.attendance_log import AttendanceLog
+from app.models.attendance_effective_punch import AttendanceEffectivePunch
 from app.models.attendance_session import AttendanceSession
 from app.models.device_user_mapping import DeviceUserMapping
 from app.models.employee import Employee
@@ -117,24 +117,26 @@ def get_employee(employee_id: int, db: Session = Depends(get_db)) -> EmployeeDet
         emp.employee_uuid = str(uuid4())
         db.commit()
         db.refresh(emp)
-    identity_filter = _identity_filter_for_employee(emp, db)
 
     total_logs = (
         db.execute(
             select(func.count())
-            .select_from(AttendanceLog)
-            .where(identity_filter)
+            .select_from(AttendanceEffectivePunch)
+            .where(AttendanceEffectivePunch.employee_id == emp.id, AttendanceEffectivePunch.is_active.is_(True))
         ).scalar_one()
         or 0
     )
     first_punch_at, last_punch_at = db.execute(
-        select(func.min(AttendanceLog.timestamp), func.max(AttendanceLog.timestamp)).where(identity_filter)
+        select(func.min(AttendanceEffectivePunch.timestamp), func.max(AttendanceEffectivePunch.timestamp)).where(
+            AttendanceEffectivePunch.employee_id == emp.id,
+            AttendanceEffectivePunch.is_active.is_(True),
+        )
     ).one()
     log_rows = list(
         db.execute(
-            select(AttendanceLog.timestamp, AttendanceLog.punch_type)
-            .where(identity_filter)
-            .order_by(AttendanceLog.timestamp)
+            select(AttendanceEffectivePunch.timestamp, AttendanceEffectivePunch.punch_type)
+            .where(AttendanceEffectivePunch.employee_id == emp.id, AttendanceEffectivePunch.is_active.is_(True))
+            .order_by(AttendanceEffectivePunch.timestamp)
         )
     )
     tz = ZoneInfo(get_settings().timezone)
@@ -180,7 +182,6 @@ def get_employee_daily_attendance(
         emp.employee_uuid = str(uuid4())
         db.commit()
         db.refresh(emp)
-    identity_filter = _identity_filter_for_employee(emp, db)
 
     settings = get_settings()
     tz = ZoneInfo(settings.timezone)
@@ -199,20 +200,20 @@ def get_employee_daily_attendance(
 
     logs = list(
         db.execute(
-            select(AttendanceLog)
+            select(AttendanceEffectivePunch)
             .where(
-                identity_filter,
-                AttendanceLog.timestamp >= start_utc,
-                AttendanceLog.timestamp < end_utc,
+                AttendanceEffectivePunch.employee_id == employee_id,
+                AttendanceEffectivePunch.is_active.is_(True),
+                AttendanceEffectivePunch.local_date >= start_date,
+                AttendanceEffectivePunch.local_date <= end_date,
             )
-            .order_by(AttendanceLog.timestamp)
+            .order_by(AttendanceEffectivePunch.timestamp)
         ).scalars()
     )
 
-    by_day: dict[date, list[AttendanceLog]] = {}
+    by_day: dict[date, list[AttendanceEffectivePunch]] = {}
     for lg in logs:
-        local_day = lg.timestamp.astimezone(tz).date()
-        by_day.setdefault(local_day, []).append(lg)
+        by_day.setdefault(lg.local_date, []).append(lg)
 
     rows: list[EmployeeDailyAttendanceRead] = []
     d = start_date

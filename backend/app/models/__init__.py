@@ -1,8 +1,13 @@
 """ORM models."""
 
-from app.models.attendance_log import AttendanceLog
 from app.models.attendance_anomaly import AttendanceAnomaly
+from app.models.attendance_correction import AttendanceCorrection
+from app.models.attendance_correction_event import AttendanceCorrectionEvent
+from app.models.attendance_effective_punch import AttendanceEffectivePunch
+from app.models.attendance_event import AttendanceEvent
+from app.models.attendance_log import AttendanceLog
 from app.models.attendance_session import AttendanceSession
+from app.models.attendance_sync_suppression import AttendanceSyncSuppression
 from app.models.audit_log import AuditLog
 from app.models.certified_firmware_profile import CertifiedFirmwareProfile
 from app.models.command_execution_history import CommandExecutionHistory
@@ -25,6 +30,11 @@ from app.models.verification_result import VerificationResult
 
 __all__ = [
     "AttendanceLog",
+    "AttendanceEvent",
+    "AttendanceEffectivePunch",
+    "AttendanceCorrection",
+    "AttendanceCorrectionEvent",
+    "AttendanceSyncSuppression",
     "AttendanceSession",
     "AttendanceAnomaly",
     "DeviceUserMapping",

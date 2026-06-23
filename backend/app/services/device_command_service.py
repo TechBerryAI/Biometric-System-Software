@@ -620,7 +620,7 @@ def _execute_correct_attendance_command(
     new_check_out = _parse_iso_datetime(new_out_raw) if new_out_raw else None
     if new_check_in is None:
         raise ValueError("new_check_in is required for CORRECT_ATTENDANCE.")
-    device_service.correct_attendance(
+    result = device_service.correct_attendance(
         user_id=str(payload["user_id"]),
         uid=payload.get("uid"),
         delete_timestamps=delete_ts,
@@ -630,6 +630,7 @@ def _execute_correct_attendance_command(
     command.status = DeviceCommandStatus.SUCCESS.value
     command.completed_at = _utcnow()
     command.verification_status = "SUCCESS"
+    command.verification_details = result
     command.last_error = None
     _finish_execution_attempt(execution_row, final_status="SUCCESS", verification_result="SUCCESS")
     runtime_health.connection_stability_score = min(100, runtime_health.connection_stability_score + 1)
@@ -857,6 +858,22 @@ def process_command(
                 execution_row=execution_row,
                 runtime_health=runtime_health,
             )
+            if command.status == DeviceCommandStatus.SUCCESS.value:
+                from app.services.attendance_correction_service import finalize_pending_correction_for_command
+
+                finalize_pending_correction_for_command(db, command.command_uuid)
+            elif command.status in (
+                DeviceCommandStatus.FAILED.value,
+                DeviceCommandStatus.DEAD_LETTER.value,
+                DeviceCommandStatus.RECONCILIATION_REQUIRED.value,
+            ):
+                from app.services.attendance_correction_service import mark_correction_failed_for_command
+
+                mark_correction_failed_for_command(
+                    db,
+                    command_uuid=command.command_uuid,
+                    error_message=command.last_error or "CORRECT_ATTENDANCE command failed.",
+                )
             return
         if command.retries > 0:
             recovered = _recover_if_already_applied(

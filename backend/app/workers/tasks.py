@@ -20,6 +20,11 @@ from app.models.device_runtime_health import DeviceRuntimeHealth
 from app.models.device_state_snapshot import DeviceStateSnapshot
 from app.models.fleet_health_metric import FleetHealthMetric
 from app.models.reconciliation_job import ReconciliationJob
+from app.services.attendance_correction_service import (
+    CORRECTION_STATUS_APPLIED,
+    CORRECTION_STATUS_DEVICE_PENDING,
+    finalize_pending_correction_for_command,
+)
 from app.services.attendance_service import run_device_sync, run_user_sync
 from app.services.device_command_service import claim_pending_commands, device_session_lock, process_command
 from app.services.device_service import DeviceService
@@ -170,6 +175,42 @@ def recover_stale_commands(self) -> dict[str, int]:
             command.retry_backoff_seconds = 0
         db.commit()
         return {"recovered": len(stale)}
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.workers.tasks.recover_stale_attendance_corrections", bind=True, max_retries=0)
+def recover_stale_attendance_corrections(self) -> dict[str, int]:
+    """Finalize corrections whose device command succeeded but DB was not updated (idempotent)."""
+    from app.models.attendance_correction import AttendanceCorrection
+    from app.services.correction_event_service import correction_event_exists
+
+    db = SessionLocal()
+    finalized = 0
+    skipped = 0
+    try:
+        rows = (
+            db.query(AttendanceCorrection)
+            .filter(AttendanceCorrection.status == CORRECTION_STATUS_DEVICE_PENDING)
+            .limit(50)
+            .all()
+        )
+        for correction in rows:
+            if not correction.device_command_uuid:
+                continue
+            if correction_event_exists(db, correction_uuid=correction.correction_uuid, event_type="finalized"):
+                skipped += 1
+                continue
+            command = db.execute(
+                select(DeviceCommand).where(DeviceCommand.command_uuid == correction.device_command_uuid)
+            ).scalar_one_or_none()
+            if command is None or command.status != DeviceCommandStatus.SUCCESS.value:
+                continue
+            result = finalize_pending_correction_for_command(db, correction.device_command_uuid)
+            if result is not None and result.status == CORRECTION_STATUS_APPLIED:
+                finalized += 1
+        db.commit()
+        return {"finalized": finalized, "skipped_idempotent": skipped}
     finally:
         db.close()
 
