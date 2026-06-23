@@ -15,9 +15,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.models.attendance_correction import AttendanceCorrection
 from app.models.attendance_effective_punch import AttendanceEffectivePunch
 from app.models.attendance_event import AttendanceEvent
 from app.models.attendance_session import AttendanceSession
+from app.models.attendance_log import AttendanceLog
 from app.models.attendance_sync_suppression import AttendanceSyncSuppression
 from app.models.employee import Employee
 from app.services.attendance_helpers import (
@@ -27,12 +29,20 @@ from app.services.attendance_helpers import (
 )
 from app.services.device_attlog_protocol import _ts_match
 from app.services.device_service import DeviceAttendanceRecord
-from app.services.punch_classification import classify_punch
+from app.services.punch_classification import (
+    classify_punch,
+    device_attendance_punch_type,
+    is_legacy_verify_punch_type,
+    resolve_punch_types_for_day,
+    summarize_day_punches,
+)
 
 logger = logging.getLogger(__name__)
 
 PUNCH_IN = "0"
 PUNCH_OUT = "1"
+
+_APPLIED_CORRECTION_STATUSES = frozenset({"applied", "applied_db_only"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,19 +61,26 @@ def _day_bounds_utc(d: date, tz_name: str) -> tuple[datetime, datetime]:
     return start_local.astimezone(ZoneInfo("UTC")), end_local.astimezone(ZoneInfo("UTC"))
 
 
-def _dedupe_events_for_effective(
-    events: Sequence[AttendanceEvent],
+@dataclass(frozen=True, slots=True)
+class _PunchRow:
+    timestamp: datetime
+    punch_type: str
+
+
+def _dedupe_punch_rows(
+    punches: Sequence[_PunchRow],
     *,
+    employee_code: str,
     settings: Settings,
-) -> list[AttendanceEvent]:
-    """Collapse near-duplicate events without deleting stored events."""
+) -> list[_PunchRow]:
+    """Collapse near-duplicate punches (double-tap) without dropping distinct check-in/out pairs."""
     window = timedelta(seconds=settings.duplicate_punch_window_seconds)
     if window.total_seconds() <= 0:
-        return list(events)
-    out: list[AttendanceEvent] = []
+        return list(punches)
+    out: list[_PunchRow] = []
     last_seen: dict[tuple[str, str], datetime] = {}
-    for row in sorted(events, key=lambda e: e.timestamp):
-        key = (row.punch_type, row.employee_code)
+    for row in sorted(punches, key=lambda p: p.timestamp):
+        key = (row.punch_type, employee_code)
         prev = last_seen.get(key)
         if prev is not None and row.timestamp - prev <= window:
             continue
@@ -72,13 +89,94 @@ def _dedupe_events_for_effective(
     return out
 
 
-def _events_for_employee_day(
+def _merge_punch_rows(events: Sequence[AttendanceEvent], logs: Sequence[AttendanceLog]) -> list[_PunchRow]:
+    """Union events and logs; merge only exact near-duplicate timestamps (±2s), never drop distinct punches."""
+    candidates: list[_PunchRow] = [
+        _PunchRow(timestamp=row.timestamp, punch_type=str(row.punch_type))
+        for row in list(events) + list(logs)
+    ]
+    candidates.sort(key=lambda p: p.timestamp)
+    merged: list[_PunchRow] = []
+    for candidate in candidates:
+        replaced = False
+        for idx, existing in enumerate(merged):
+            if abs((candidate.timestamp - existing.timestamp).total_seconds()) > 2:
+                continue
+            if is_legacy_verify_punch_type(existing.punch_type) and not is_legacy_verify_punch_type(
+                candidate.punch_type
+            ):
+                merged[idx] = candidate
+            elif classify_punch(candidate.punch_type) is not None and classify_punch(existing.punch_type) is None:
+                merged[idx] = candidate
+            replaced = True
+            break
+        if not replaced:
+            merged.append(candidate)
+    return merged
+
+
+def _logs_for_employee_day(
     db: Session,
     *,
     employee: Employee,
     local_date: date,
     settings: Settings,
-) -> list[AttendanceEvent]:
+    apply_suppression: bool = False,
+) -> list[AttendanceLog]:
+    start_utc, end_utc = _day_bounds_utc(local_date, settings.timezone)
+    employee_code = str(employee.device_user_id)
+    q = select(AttendanceLog).where(
+        AttendanceLog.timestamp >= start_utc,
+        AttendanceLog.timestamp < end_utc,
+        AttendanceLog.employee_code == employee_code,
+    )
+    if employee.employee_uuid:
+        q = q.where(
+            (AttendanceLog.employee_uuid == employee.employee_uuid) | (AttendanceLog.employee_uuid.is_(None))
+        )
+    rows = list(db.execute(q.order_by(AttendanceLog.timestamp)).scalars().all())
+    filtered: list[AttendanceLog] = []
+    for log in rows:
+        if apply_suppression and is_suppressed_timestamp(
+            db,
+            device_id=log.device_id,
+            employee_code=log.employee_code,
+            timestamp=log.timestamp,
+            settings=settings,
+        ):
+            continue
+        filtered.append(log)
+    return filtered
+
+
+def _latest_applied_correction(
+    db: Session,
+    *,
+    employee_id: int,
+    local_date: date,
+) -> AttendanceCorrection | None:
+    return db.execute(
+        select(AttendanceCorrection)
+        .where(
+            AttendanceCorrection.employee_id == employee_id,
+            AttendanceCorrection.local_date == local_date,
+            AttendanceCorrection.status.in_(_APPLIED_CORRECTION_STATUSES),
+            AttendanceCorrection.new_check_in.is_not(None),
+        )
+        .order_by(AttendanceCorrection.applied_at.desc().nullslast(), AttendanceCorrection.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _punches_for_employee_day(
+    db: Session,
+    *,
+    employee: Employee,
+    local_date: date,
+    settings: Settings,
+    apply_suppression: bool = False,
+) -> list[_PunchRow]:
+    """Merged, deduped punch rows for one employee-day from events and logs."""
     start_utc, end_utc = _day_bounds_utc(local_date, settings.timezone)
     employee_code = str(employee.device_user_id)
     q = select(AttendanceEvent).where(
@@ -90,10 +188,10 @@ def _events_for_employee_day(
         q = q.where(
             (AttendanceEvent.employee_uuid == employee.employee_uuid) | (AttendanceEvent.employee_uuid.is_(None))
         )
-    rows = list(db.execute(q.order_by(AttendanceEvent.timestamp)).scalars().all())
-    filtered: list[AttendanceEvent] = []
-    for ev in rows:
-        if is_suppressed_timestamp(
+    events_raw = list(db.execute(q.order_by(AttendanceEvent.timestamp)).scalars().all())
+    events: list[AttendanceEvent] = []
+    for ev in events_raw:
+        if apply_suppression and is_suppressed_timestamp(
             db,
             device_id=ev.device_id,
             employee_code=ev.employee_code,
@@ -101,8 +199,49 @@ def _events_for_employee_day(
             settings=settings,
         ):
             continue
-        filtered.append(ev)
-    return _dedupe_events_for_effective(filtered, settings=settings)
+        events.append(ev)
+    logs = _logs_for_employee_day(
+        db, employee=employee, local_date=local_date, settings=settings, apply_suppression=apply_suppression
+    )
+    merged = _merge_punch_rows(events, logs)
+    return _dedupe_punch_rows(merged, employee_code=employee_code, settings=settings)
+
+
+def repair_punch_types_from_device_records(
+    db: Session,
+    records: Sequence[DeviceAttendanceRecord],
+    device_id: str,
+) -> int:
+    """
+    Fix legacy rows that stored verify mode instead of check direction.
+
+    Runs on every device sync so existing misclassified punches are corrected in place.
+    """
+    repaired = 0
+    match_window = timedelta(seconds=2)
+    for r in records:
+        canonical = device_attendance_punch_type(status=r.status, punch=r.punch)
+        employee_code = r.user_id
+        for model in (AttendanceEvent, AttendanceLog):
+            row = db.execute(
+                select(model).where(
+                    model.device_id == device_id,
+                    model.employee_code == employee_code,
+                    model.timestamp >= r.timestamp - match_window,
+                    model.timestamp <= r.timestamp + match_window,
+                ).limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                continue
+            stored = str(row.punch_type)
+            if stored == canonical:
+                continue
+            if is_legacy_verify_punch_type(stored) or classify_punch(stored) is None or stored != canonical:
+                row.punch_type = canonical
+                repaired += 1
+    if repaired:
+        db.commit()
+    return repaired
 
 
 def sync_effective_punches_from_events(
@@ -115,7 +254,9 @@ def sync_effective_punches_from_events(
 ) -> int:
     """Rebuild active effective punches for one employee-day from raw events (non-correction path)."""
     settings = settings or get_settings()
-    events = _events_for_employee_day(db, employee=employee, local_date=local_date, settings=settings)
+    punches = _punches_for_employee_day(
+        db, employee=employee, local_date=local_date, settings=settings, apply_suppression=False
+    )
 
     db.execute(
         update(AttendanceEffectivePunch)
@@ -129,13 +270,18 @@ def sync_effective_punches_from_events(
     )
 
     inserted = 0
-    for ev in events:
+    resolved = resolve_punch_types_for_day(
+        [p.punch_type for p in punches],
+        [p.timestamp for p in punches],
+        tz_name=settings.timezone,
+    )
+    for punch, direction in zip(punches, resolved, strict=True):
         db.add(
             AttendanceEffectivePunch(
                 employee_id=employee.id,
                 local_date=local_date,
-                punch_type=ev.punch_type,
-                timestamp=ev.timestamp,
+                punch_type=direction,
+                timestamp=punch.timestamp,
                 source="derived",
                 correction_uuid=None,
                 is_active=True,
@@ -188,6 +334,133 @@ def apply_correction_to_effective_punches(
     if commit:
         db.commit()
     return inserted
+
+
+def _effective_needs_correction_reapply(
+    db: Session,
+    *,
+    employee_id: int,
+    local_date: date,
+    correction: AttendanceCorrection,
+) -> bool:
+    active = load_active_effective_punches(db, employee_id=employee_id, local_date=local_date)
+    if not active:
+        return True
+    return not any(p.correction_uuid == correction.correction_uuid for p in active)
+
+
+def _correction_covers_day_better_than_raw(
+    correction: AttendanceCorrection,
+    raw_punches: Sequence[_PunchRow],
+    *,
+    tz_name: str,
+) -> bool:
+    """
+    Prefer an applied correction only when raw punches are missing or clearly less complete.
+
+    Avoids a partial manual correction (e.g. morning-only tweak) hiding a full device day.
+    """
+    if not raw_punches:
+        return True
+    raw_in, raw_out, raw_min = summarize_day_punches(raw_punches, tz_name=tz_name)
+    if raw_in is None and raw_out is None:
+        return True
+    if correction.new_check_in is None:
+        return False
+    corr_out = correction.new_check_out
+    if corr_out is None:
+        return raw_in is None and raw_out is None
+    if raw_in is None or raw_out is None:
+        return True
+    corr_min = int((corr_out - correction.new_check_in).total_seconds() // 60)
+    if raw_min is None:
+        return True
+    # Raw device day is substantially longer — keep full punches instead of a short correction.
+    if raw_min > corr_min + 60:
+        return False
+    return True
+
+
+def ensure_effective_punches_for_day(
+    db: Session,
+    *,
+    employee: Employee,
+    local_date: date,
+    settings: Settings | None = None,
+    commit: bool = True,
+) -> None:
+    """
+    Guarantee the effective layer reflects the best-known truth for one employee-day.
+
+    Applied corrections take priority; otherwise rebuild from full raw events + logs
+    (correction suppressions apply only during device re-sync, not display).
+    """
+    settings = settings or get_settings()
+    raw_punches = _punches_for_employee_day(
+        db, employee=employee, local_date=local_date, settings=settings, apply_suppression=False
+    )
+    correction = _latest_applied_correction(db, employee_id=employee.id, local_date=local_date)
+    if (
+        correction is not None
+        and correction.new_check_in is not None
+        and _correction_covers_day_better_than_raw(correction, raw_punches, tz_name=settings.timezone)
+    ):
+        if _effective_needs_correction_reapply(
+            db, employee_id=employee.id, local_date=local_date, correction=correction
+        ):
+            apply_correction_to_effective_punches(
+                db,
+                employee=employee,
+                local_date=local_date,
+                new_check_in=correction.new_check_in,
+                new_check_out=correction.new_check_out,
+                correction_uuid=correction.correction_uuid,
+                settings=settings,
+                commit=False,
+            )
+    else:
+        sync_effective_punches_from_events(
+            db, employee=employee, local_date=local_date, settings=settings, commit=False
+        )
+    rebuild_sessions_for_employee_date(
+        db, employee_id=employee.id, local_date=local_date, settings=settings, commit=False
+    )
+    if commit:
+        db.commit()
+
+
+def summarize_employee_day_from_events(
+    db: Session,
+    *,
+    employee: Employee,
+    local_date: date,
+    settings: Settings | None = None,
+) -> tuple[datetime | None, datetime | None, int | None, int]:
+    """Derive day IN/OUT/work minutes from the effective attendance layer."""
+    settings = settings or get_settings()
+    effective = load_active_effective_punches(db, employee_id=employee.id, local_date=local_date)
+    if effective:
+        first_in, last_out, total_min = summarize_day_punches(effective, tz_name=settings.timezone)
+        return first_in, last_out, total_min, len(effective)
+
+    punches = _punches_for_employee_day(
+        db, employee=employee, local_date=local_date, settings=settings, apply_suppression=False
+    )
+    if punches:
+        first_in, last_out, total_min = summarize_day_punches(punches, tz_name=settings.timezone)
+        return first_in, last_out, total_min, len(punches)
+
+    correction = _latest_applied_correction(db, employee_id=employee.id, local_date=local_date)
+    if correction is not None and correction.new_check_in is not None:
+        first_in = correction.new_check_in
+        last_out = correction.new_check_out
+        total_min: int | None = None
+        if last_out is not None and last_out > first_in:
+            total_min = int((last_out - first_in).total_seconds() // 60)
+        punch_count = 1 + (1 if last_out is not None else 0)
+        return first_in, last_out, total_min, punch_count
+
+    return None, None, None, 0
 
 
 def load_active_effective_punches(
@@ -315,7 +588,7 @@ def append_attendance_events_idempotent(
 
     for r in records:
         employee_code = r.user_id
-        punch_type = str(r.punch)
+        punch_type = device_attendance_punch_type(status=r.status, punch=r.punch)
         if is_suppressed_timestamp(
             db, device_id=device_id, employee_code=employee_code, timestamp=r.timestamp, settings=settings
         ):
@@ -416,15 +689,10 @@ def load_day_snapshot_effective(
 ) -> DayAttendanceSnapshot:
     """Build day snapshot from effective punches (what all screens display)."""
     cfg = settings or get_settings()
+    ensure_effective_punches_for_day(db, employee=employee, local_date=local_date, settings=cfg, commit=True)
     punches = load_active_effective_punches(db, employee_id=employee.id, local_date=local_date)
-    if not punches:
-        sync_effective_punches_from_events(db, employee=employee, local_date=local_date, settings=cfg, commit=True)
-        punches = load_active_effective_punches(db, employee_id=employee.id, local_date=local_date)
 
-    ins = [p.timestamp for p in punches if classify_punch(p.punch_type) is True]
-    outs = [p.timestamp for p in punches if classify_punch(p.punch_type) is False]
-    first_in = min(ins) if ins else (punches[0].timestamp if punches else None)
-    last_out = max(outs) if outs else (punches[-1].timestamp if len(punches) > 1 else None)
+    first_in, last_out, _ = summarize_day_punches(punches, tz_name=cfg.timezone) if punches else (None, None, None)
     return DayAttendanceSnapshot(
         local_date=local_date,
         first_check_in=first_in,

@@ -1,4 +1,4 @@
-"""Tests for append-only attendance architecture."""
+"""Tests for append-only attendance architecture and punch direction handling."""
 
 from __future__ import annotations
 
@@ -9,6 +9,17 @@ from zoneinfo import ZoneInfo
 from app.services.attendance_effective_service import DayAttendanceSnapshot, verify_imported_timestamps
 from app.services.attendance_service import prune_recent_duplicate_logs
 from app.core.config import get_settings
+from app.services.punch_classification import (
+    device_attendance_punch_type,
+    resolve_punch_types_for_day,
+    summarize_day_punches,
+)
+
+
+class _Punch:
+    def __init__(self, ts: datetime, punch_type: str) -> None:
+        self.timestamp = ts
+        self.punch_type = punch_type
 
 
 class AttendanceArchitectureTests(unittest.TestCase):
@@ -40,6 +51,40 @@ class AttendanceArchitectureTests(unittest.TestCase):
             log_timestamps=[],
         )
         self.assertEqual(snap.local_date.isoformat(), "2026-06-10")
+
+    def test_device_attendance_punch_type_uses_status_not_verify_mode(self) -> None:
+        self.assertEqual(device_attendance_punch_type(status=0, punch=1), "0")
+        self.assertEqual(device_attendance_punch_type(status=1, punch=1), "1")
+
+    def test_resolve_legacy_fingerprint_rows_alternates(self) -> None:
+        repaired = resolve_punch_types_for_day(["1", "1"])
+        self.assertEqual(repaired, ["0", "1"])
+
+    def test_summarize_single_evening_checkout(self) -> None:
+        ts = datetime(2026, 6, 19, 18, 30, 20, tzinfo=ZoneInfo("UTC"))
+        first_in, last_out, work = summarize_day_punches([_Punch(ts, "1")])
+        self.assertIsNone(first_in)
+        self.assertEqual(last_out, ts)
+        self.assertIsNone(work)
+
+    def test_single_morning_fingerprint_reclassified_as_check_in(self) -> None:
+        tz = ZoneInfo("Asia/Kolkata")
+        ts = datetime(2026, 6, 18, 9, 15, 0, tzinfo=tz)
+        first_in, last_out, work = summarize_day_punches([_Punch(ts, "1")], tz_name="Asia/Kolkata")
+        self.assertEqual(first_in, ts)
+        self.assertIsNone(last_out)
+        self.assertIsNone(work)
+
+    def test_summarize_pairs_legacy_in_out_day(self) -> None:
+        tz = ZoneInfo("UTC")
+        punches = [
+            _Punch(datetime(2026, 6, 18, 9, 36, 56, tzinfo=tz), "1"),
+            _Punch(datetime(2026, 6, 18, 18, 26, 54, tzinfo=tz), "1"),
+        ]
+        first_in, last_out, work = summarize_day_punches(punches)
+        self.assertEqual(first_in, punches[0].timestamp)
+        self.assertEqual(last_out, punches[1].timestamp)
+        self.assertEqual(work, 529)
 
 
 if __name__ == "__main__":

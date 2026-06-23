@@ -42,7 +42,7 @@ export function Attendance() {
     setRows(
       summary.map((r) => ({
         ...r,
-        is_absent: r.first_check_in == null,
+        is_absent: r.first_check_in == null && r.last_check_out == null,
       }))
     );
   }, [date]);
@@ -83,11 +83,18 @@ export function Attendance() {
       : rows;
 
     return [...list].sort((a, b) => {
-      if (a.first_check_in && b.first_check_in) {
-        return new Date(a.first_check_in).getTime() - new Date(b.first_check_in).getTime();
-      }
-      if (a.first_check_in && !b.first_check_in) return -1;
-      if (!a.first_check_in && b.first_check_in) return 1;
+      const aIn = a.first_check_in ? new Date(a.first_check_in).getTime() : null;
+      const bIn = b.first_check_in ? new Date(b.first_check_in).getTime() : null;
+      if (aIn != null && bIn != null) return aIn - bIn;
+      if (aIn != null) return -1;
+      if (bIn != null) return 1;
+
+      const aOut = a.last_check_out ? new Date(a.last_check_out).getTime() : null;
+      const bOut = b.last_check_out ? new Date(b.last_check_out).getTime() : null;
+      if (aOut != null && bOut != null) return aOut - bOut;
+      if (aOut != null) return -1;
+      if (bOut != null) return 1;
+
       return a.employee_name.localeCompare(b.employee_name);
     });
   }, [rows, globalSearchQuery]);
@@ -194,8 +201,8 @@ export function Attendance() {
       </div>
 
       <p className="text-xs text-ink-muted">
-        Absent today (in view): <span className="font-medium text-ink">{absentCount}</span>. Sorted by earliest
-        check-in; absent rows follow present colleagues.
+        Absent today (in view): <span className="font-medium text-ink">{absentCount}</span>. Sorted by
+        check-in time — earliest arrivals first.
       </p>
 
       <div className="overflow-hidden rounded-2xl border border-line/70 bg-surface-card shadow-card">

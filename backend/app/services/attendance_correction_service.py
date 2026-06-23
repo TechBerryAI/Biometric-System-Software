@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -35,6 +35,7 @@ from app.services.device_command_service import (
     enqueue_device_command,
     process_command,
 )
+from app.services.device_attlog_protocol import _ts_match
 from app.services.device_exceptions import AttlogCorrectionError, AttlogCorrectionNotSupported, DeviceFetchError
 from app.services.device_service import DeviceService
 
@@ -165,6 +166,25 @@ def _invalidate_ai_cache(settings: Settings) -> None:
         logger.warning("AI cache invalidation skipped: %s", exc)
 
 
+def _correction_suppression_timestamps(
+    before: DayAttendanceSnapshot,
+    *,
+    new_check_in: datetime,
+    new_check_out: datetime | None,
+    tz_name: str,
+) -> list[datetime]:
+    """Suppress only punches replaced by a correction, not the corrected IN/OUT times."""
+    keep = [new_check_in]
+    if new_check_out is not None:
+        keep.append(new_check_out)
+    suppressed: list[datetime] = []
+    for ts in before.log_timestamps:
+        if any(_ts_match(ts, kept, tz_name=tz_name) for kept in keep):
+            continue
+        suppressed.append(ts)
+    return suppressed
+
+
 def _finalize_correction(
     db: Session,
     *,
@@ -217,7 +237,12 @@ def _finalize_correction(
         db,
         device_id=settings.zk_device_id,
         employee_code=str(employee.device_user_id),
-        timestamps=before.log_timestamps,
+        timestamps=_correction_suppression_timestamps(
+            before,
+            new_check_in=new_check_in,
+            new_check_out=new_check_out,
+            tz_name=settings.timezone,
+        ),
         correction_id=correction.id,
     )
 

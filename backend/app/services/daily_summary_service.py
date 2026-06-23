@@ -12,8 +12,11 @@ from app.core.config import Settings, get_settings
 from app.models.attendance_session import AttendanceSession
 from app.models.employee import Employee
 from app.schemas.attendance import DailySummaryRow
-from app.services.attendance_effective_service import effective_punches_for_summary
-from app.services.punch_classification import classify_punch
+from app.services.attendance_effective_service import (
+    rebuild_sessions_for_employee_date,
+    summarize_employee_day_from_events,
+    ensure_effective_punches_for_day,
+)
 
 
 def day_bounds_utc(d: date, tz_name: str) -> tuple[datetime, datetime]:
@@ -23,12 +26,24 @@ def day_bounds_utc(d: date, tz_name: str) -> tuple[datetime, datetime]:
     return start_local.astimezone(ZoneInfo("UTC")), end_local.astimezone(ZoneInfo("UTC"))
 
 
+def _daily_summary_sort_key(row: DailySummaryRow) -> tuple:
+    """Present employees first by check-in time; partial/out-only next; absent last."""
+    if row.first_check_in is not None:
+        return (0, row.first_check_in, row.employee_name.lower())
+    if row.last_check_out is not None:
+        return (1, row.last_check_out, row.employee_name.lower())
+    absent_marker = datetime.min.replace(tzinfo=ZoneInfo("UTC"))
+    return (2, absent_marker, row.employee_name.lower())
+
+
 def compute_daily_summary(db: Session, summary_date: date, settings: Settings | None = None) -> list[DailySummaryRow]:
     cfg = settings or get_settings()
     start_utc, end_utc = day_bounds_utc(summary_date, cfg.timezone)
 
     employees = list(db.execute(select(Employee).order_by(Employee.id)).scalars().all())
-    effective_by_employee = effective_punches_for_summary(db, summary_date=summary_date, settings=cfg)
+    for emp in employees:
+        ensure_effective_punches_for_day(db, employee=emp, local_date=summary_date, settings=cfg, commit=False)
+    db.commit()
 
     sessions = list(
         db.execute(
@@ -44,21 +59,12 @@ def compute_daily_summary(db: Session, summary_date: date, settings: Settings | 
 
     rows: list[DailySummaryRow] = []
     for emp in employees:
-        emp_punches = effective_by_employee.get(emp.id, [])
+        first_in, last_out, total_min, punch_count = summarize_employee_day_from_events(
+            db, employee=emp, local_date=summary_date, settings=cfg
+        )
         sess = sessions_by_employee_id.get(emp.id, [])
 
-        first_in: datetime | None = None
-        last_out: datetime | None = None
-        if emp_punches:
-            ins = [x.timestamp for x in emp_punches if classify_punch(x.punch_type) is True]
-            first_in = min(ins) if ins else emp_punches[0].timestamp
-            outs = [x.timestamp for x in emp_punches if classify_punch(x.punch_type) is False]
-            if outs:
-                last_out = max(outs)
-            elif len(emp_punches) > 1:
-                last_out = emp_punches[-1].timestamp
-
-        if not emp_punches and not sess:
+        if punch_count == 0 and not sess:
             rows.append(
                 DailySummaryRow(
                     summary_date=summary_date,
@@ -73,9 +79,6 @@ def compute_daily_summary(db: Session, summary_date: date, settings: Settings | 
             )
             continue
 
-        total_min: int | None = None
-        if first_in is not None and last_out is not None and last_out > first_in:
-            total_min = int((last_out - first_in).total_seconds() // 60)
         rows.append(
             DailySummaryRow(
                 summary_date=summary_date,
@@ -89,5 +92,5 @@ def compute_daily_summary(db: Session, summary_date: date, settings: Settings | 
             )
         )
 
-    rows.sort(key=lambda r: r.employee_name.lower())
+    rows.sort(key=_daily_summary_sort_key)
     return rows

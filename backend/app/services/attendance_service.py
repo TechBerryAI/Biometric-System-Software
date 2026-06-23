@@ -24,6 +24,7 @@ from app.services.attendance_helpers import (
     resolve_mapping_for_punch as _resolve_mapping_for_punch,
 )
 from app.services.device_service import DeviceAttendanceRecord, DeviceService, DeviceUser
+from app.services.punch_classification import device_attendance_punch_type
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ def _dedupe_device_records(
 ) -> list[DeviceAttendanceRecord]:
     """
     Collapse noisy back-to-back duplicate punches produced by unstable device firmware.
-    Keeps earliest record within (employee, punch_type, window) group.
+    Keeps earliest record within (employee, check-direction, window) group.
     """
     window = timedelta(seconds=settings.duplicate_punch_window_seconds)
     if window.total_seconds() <= 0:
@@ -56,7 +57,7 @@ def _dedupe_device_records(
     out: list[DeviceAttendanceRecord] = []
     last_seen: dict[tuple[str, int], datetime] = {}
     for row in sorted(records, key=lambda r: r.timestamp):
-        key = (row.user_id, row.punch)
+        key = (row.user_id, row.status)
         prev = last_seen.get(key)
         if prev is not None and row.timestamp - prev <= window:
             continue
@@ -198,7 +199,7 @@ def insert_attendance_logs_idempotent(
     suppressed = 0
     for r in records:
         employee_code = r.user_id
-        punch_type = str(r.punch)
+        punch_type = device_attendance_punch_type(status=r.status, punch=r.punch)
         if _is_suppressed_timestamp(
             db, device_id=device_id, employee_code=employee_code, timestamp=r.timestamp, settings=settings
         ):
@@ -372,6 +373,7 @@ def run_device_sync(
     from app.services.attendance_effective_service import (
         append_attendance_events_idempotent,
         rebuild_sessions_for_employee_date,
+        repair_punch_types_from_device_records,
         sync_effective_punches_from_events,
     )
 
@@ -383,6 +385,7 @@ def run_device_sync(
         fetched_records = [row for row in fetched_records if row.timestamp >= floor]
     records = _dedupe_device_records(fetched_records, settings=settings)
     batch_uuid = str(uuid4())
+    repair_punch_types_from_device_records(db, records, settings.zk_device_id)
     n_events = append_attendance_events_idempotent(
         db, records, settings.zk_device_id, sync_batch_uuid=batch_uuid
     )
@@ -507,7 +510,7 @@ def reimport_attendance_window(
                 device_id=settings.zk_device_id,
                 employee_uuid=employee.employee_uuid,
                 device_mapping_id=mapping.id if mapping else None,
-                punch_type=str(record.punch),
+                punch_type=device_attendance_punch_type(status=record.status, punch=record.punch),
                 created_at=record.timestamp,
             )
             .on_conflict_do_nothing(constraint="uq_log_device_employee_ts")
