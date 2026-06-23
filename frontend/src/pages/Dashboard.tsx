@@ -230,13 +230,13 @@ export function Dashboard() {
     queryFn: () => fetchManagementInsights(14),
     staleTime: 5 * 60 * 1000,
     retry: false,
-    enabled: !dash.loading && !dash.error,
+    enabled: !dash.loading && !dash.error && !trend.isLoading,
   });
 
   const anomalyQuery = useQuery({
     queryKey: ["attendance-anomalies", 30],
     queryFn: () => fetchAttendanceAnomalies(30),
-    enabled: !dash.loading && !dash.error,
+    enabled: !dash.loading && !dash.error && !trend.isLoading,
     staleTime: 5 * 60 * 1000,
     retry: false,
   });
@@ -247,7 +247,6 @@ export function Dashboard() {
     enabled: !dash.loading && !dash.error,
     staleTime: 45 * 1000,
     retry: false,
-    refetchInterval: 45 * 1000,
   });
 
   const todayWork = useMemo(

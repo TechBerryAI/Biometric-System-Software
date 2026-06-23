@@ -190,6 +190,18 @@ export async function fetchDailySummary(
   return data;
 }
 
+/** Single request for a date range — avoids N parallel full-roster summary calls. */
+export async function fetchDailySummaryRange(
+  from: string,
+  to: string
+): Promise<Record<string, DailySummaryRow[]>> {
+  const { data } = await api.get<Record<string, DailySummaryRow[]>>(
+    "/attendance/daily-summary/range",
+    { params: { from, to } }
+  );
+  return data;
+}
+
 export async function fetchAttendanceLogs(params: {
   from?: string;
   to?: string;

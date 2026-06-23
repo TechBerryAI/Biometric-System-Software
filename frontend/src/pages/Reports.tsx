@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { useAttendanceTrend } from "@/hooks/useAttendanceTrend";
 import type { ExportPeriod } from "@/lib/dates";
 import { dateList, getExportRange, todayISO } from "@/lib/dates";
-import { fetchDailySummary } from "@/services/api";
+import { fetchDailySummaryRange } from "@/services/api";
 import type { DailySummaryRow } from "@/types";
 import { downloadAttendanceSummaryPdf } from "@/utils/pdfReports";
 
@@ -24,9 +24,10 @@ export function Reports() {
   const exportMutation = useMutation({
     mutationFn: async () => {
       const dates = dateList(range.from, range.to);
+      const byDay = await fetchDailySummaryRange(range.from, range.to);
       const allRows: Array<DailySummaryRow & { summary_date: string }> = [];
       for (const day of dates) {
-        const summary = await fetchDailySummary(day);
+        const summary = byDay[day] ?? [];
         for (const row of summary) {
           allRows.push({ ...row, summary_date: day });
         }

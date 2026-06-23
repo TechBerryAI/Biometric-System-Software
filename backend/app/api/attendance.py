@@ -16,7 +16,7 @@ from app.models.attendance_effective_punch import AttendanceEffectivePunch
 from app.models.attendance_session import AttendanceSession
 from app.models.employee import Employee
 from app.schemas.attendance import AttendanceLogRead, AttendanceSessionRead, DailySummaryRow
-from app.services.daily_summary_service import compute_daily_summary, day_bounds_utc
+from app.services.daily_summary_service import compute_daily_summary, compute_daily_summaries_range, day_bounds_utc
 
 router = APIRouter(
     prefix="/attendance",
@@ -104,6 +104,28 @@ def daily_summary(
     if summary_date is None:
         summary_date = datetime.now(ZoneInfo(tz_name)).date()
     return compute_daily_summary(db, summary_date, settings)
+
+
+@router.get("/daily-summary/range", response_model=dict[str, list[DailySummaryRow]])
+def daily_summary_range(
+    date_from: date = Query(..., alias="from", description="Start local date (inclusive)"),
+    date_to: date = Query(..., alias="to", description="End local date (inclusive)"),
+    db: Session = Depends(get_db),
+) -> dict[str, list[DailySummaryRow]]:
+    settings = get_settings()
+    if date_to < date_from:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'to' date must be on or after 'from' date",
+        )
+    span = (date_to - date_from).days + 1
+    if span > 93:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Date range cannot exceed 93 days",
+        )
+    summaries = compute_daily_summaries_range(db, date_from, date_to, settings)
+    return {d.isoformat(): rows for d, rows in summaries.items()}
 
 
 @router.get("/{employee_id}", response_model=list[AttendanceSessionRead])

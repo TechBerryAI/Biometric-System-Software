@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -30,8 +31,8 @@ from app.schemas.employee import (
 from app.services.audit_service import append_audit_log
 from app.services.device_command_service import enqueue_device_command, process_command
 from app.services.attendance_effective_service import (
-    ensure_effective_punches_for_day,
-    rebuild_sessions_for_employee_date,
+    load_active_effective_punches,
+    summarize_day_punches,
     summarize_employee_day_from_events,
 )
 from app.services.system_governance_service import assert_device_write_allowed
@@ -198,19 +199,28 @@ def get_employee_daily_attendance(
             detail="'to' date must be on or after 'from' date",
         )
 
-
-    d = start_date
-    while d <= end_date:
-        ensure_effective_punches_for_day(db, employee=emp, local_date=d, settings=settings, commit=False)
-        d += timedelta(days=1)
-    db.commit()
+    effective_by_day: dict[date, list[AttendanceEffectivePunch]] = defaultdict(list)
+    for punch in db.execute(
+        select(AttendanceEffectivePunch).where(
+            AttendanceEffectivePunch.employee_id == emp.id,
+            AttendanceEffectivePunch.local_date >= start_date,
+            AttendanceEffectivePunch.local_date <= end_date,
+            AttendanceEffectivePunch.is_active.is_(True),
+        ).order_by(AttendanceEffectivePunch.local_date, AttendanceEffectivePunch.timestamp)
+    ).scalars().all():
+        effective_by_day[punch.local_date].append(punch)
 
     rows: list[EmployeeDailyAttendanceRead] = []
     d = start_date
     while d <= end_date:
-        first_in, last_out, total_work_minutes, punch_count = summarize_employee_day_from_events(
-            db, employee=emp, local_date=d, settings=settings
-        )
+        punches = effective_by_day.get(d, [])
+        if punches:
+            first_in, last_out, total_work_minutes = summarize_day_punches(punches, tz_name=settings.timezone)
+            punch_count = len(punches)
+        else:
+            first_in, last_out, total_work_minutes, punch_count = summarize_employee_day_from_events(
+                db, employee=emp, local_date=d, settings=settings
+            )
         if punch_count == 0:
             rows.append(
                 EmployeeDailyAttendanceRead(

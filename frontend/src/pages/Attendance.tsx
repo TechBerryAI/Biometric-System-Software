@@ -8,6 +8,7 @@ import type { ExportPeriod } from "@/lib/dates";
 import { dateList, fmtDisplayDateTime, getExportRange, todayISO } from "@/lib/dates";
 import {
   fetchDailySummary,
+  fetchDailySummaryRange,
   fetchEmployees,
   getApiErrorMessage,
 } from "@/services/api";
@@ -107,9 +108,10 @@ export function Attendance() {
     try {
       const range = getExportRange(date, exportPeriod);
       const dates = dateList(range.from, range.to);
+      const byDay = await fetchDailySummaryRange(range.from, range.to);
       const allRows: Array<DailySummaryRow & { summary_date: string }> = [];
       for (const day of dates) {
-        const summary = await fetchDailySummary(day);
+        const summary = byDay[day] ?? [];
         for (const row of summary) {
           allRows.push({ ...row, summary_date: day });
         }

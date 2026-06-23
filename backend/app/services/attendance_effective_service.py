@@ -687,12 +687,22 @@ def load_day_snapshot_effective(
     local_date: date,
     settings: Settings | None = None,
 ) -> DayAttendanceSnapshot:
-    """Build day snapshot from effective punches (what all screens display)."""
+    """Build day snapshot from effective punches (read-only)."""
     cfg = settings or get_settings()
-    ensure_effective_punches_for_day(db, employee=employee, local_date=local_date, settings=cfg, commit=True)
     punches = load_active_effective_punches(db, employee_id=employee.id, local_date=local_date)
+    if not punches:
+        first_in, last_out, total_min, _ = summarize_employee_day_from_events(
+            db, employee=employee, local_date=local_date, settings=cfg
+        )
+        return DayAttendanceSnapshot(
+            local_date=local_date,
+            first_check_in=first_in,
+            last_check_out=last_out,
+            log_ids=[],
+            log_timestamps=[first_in, last_out] if first_in or last_out else [],
+        )
 
-    first_in, last_out, _ = summarize_day_punches(punches, tz_name=cfg.timezone) if punches else (None, None, None)
+    first_in, last_out, _ = summarize_day_punches(punches, tz_name=cfg.timezone)
     return DayAttendanceSnapshot(
         local_date=local_date,
         first_check_in=first_in,
