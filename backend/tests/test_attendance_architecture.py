@@ -60,11 +60,11 @@ class AttendanceArchitectureTests(unittest.TestCase):
         repaired = resolve_punch_types_for_day(["1", "1"])
         self.assertEqual(repaired, ["0", "1"])
 
-    def test_summarize_single_evening_checkout(self) -> None:
+    def test_summarize_single_punch_treated_as_check_in(self) -> None:
         ts = datetime(2026, 6, 19, 18, 30, 20, tzinfo=ZoneInfo("UTC"))
         first_in, last_out, work = summarize_day_punches([_Punch(ts, "1")])
-        self.assertIsNone(first_in)
-        self.assertEqual(last_out, ts)
+        self.assertEqual(first_in, ts)
+        self.assertIsNone(last_out)
         self.assertIsNone(work)
 
     def test_single_morning_fingerprint_reclassified_as_check_in(self) -> None:

@@ -115,6 +115,69 @@ def _merge_punch_rows(events: Sequence[AttendanceEvent], logs: Sequence[Attendan
     return merged
 
 
+def load_raw_punches_for_dates(
+    db: Session,
+    *,
+    start_date: date,
+    end_date: date,
+    employees: Sequence[Employee],
+    settings: Settings,
+) -> dict[date, dict[int, list[_PunchRow]]]:
+    """Bulk-load merged raw punches (events + logs, no suppression) for a date range."""
+    if not employees or end_date < start_date:
+        return {}
+    tz = ZoneInfo(settings.timezone)
+    start_utc, _ = _day_bounds_utc(start_date, settings.timezone)
+    _, end_utc = _day_bounds_utc(end_date, settings.timezone)
+    codes = [str(e.device_user_id) for e in employees]
+    code_to_id = {str(e.device_user_id): e.id for e in employees}
+
+    events = list(
+        db.execute(
+            select(AttendanceEvent)
+            .where(
+                AttendanceEvent.timestamp >= start_utc,
+                AttendanceEvent.timestamp < end_utc,
+                AttendanceEvent.employee_code.in_(codes),
+            )
+            .order_by(AttendanceEvent.timestamp)
+        ).scalars().all()
+    )
+    logs = list(
+        db.execute(
+            select(AttendanceLog)
+            .where(
+                AttendanceLog.timestamp >= start_utc,
+                AttendanceLog.timestamp < end_utc,
+                AttendanceLog.employee_code.in_(codes),
+            )
+            .order_by(AttendanceLog.timestamp)
+        ).scalars().all()
+    )
+
+    events_by_key: dict[tuple[str, date], list[AttendanceEvent]] = defaultdict(list)
+    logs_by_key: dict[tuple[str, date], list[AttendanceLog]] = defaultdict(list)
+    for ev in events:
+        events_by_key[(ev.employee_code, ev.timestamp.astimezone(tz).date())].append(ev)
+    for log in logs:
+        logs_by_key[(log.employee_code, log.timestamp.astimezone(tz).date())].append(log)
+
+    result: dict[date, dict[int, list[_PunchRow]]] = defaultdict(dict)
+    d = start_date
+    while d <= end_date:
+        for code, emp_id in code_to_id.items():
+            evs = events_by_key.get((code, d), [])
+            day_logs = logs_by_key.get((code, d), [])
+            if not evs and not day_logs:
+                continue
+            merged = _merge_punch_rows(evs, day_logs)
+            punches = _dedupe_punch_rows(merged, employee_code=code, settings=settings)
+            if punches:
+                result[d][emp_id] = punches
+        d += timedelta(days=1)
+    return result
+
+
 def _logs_for_employee_day(
     db: Session,
     *,
@@ -435,17 +498,20 @@ def summarize_employee_day_from_events(
     employee: Employee,
     local_date: date,
     settings: Settings | None = None,
+    raw_punches: list[_PunchRow] | None = None,
 ) -> tuple[datetime | None, datetime | None, int | None, int]:
-    """Derive day IN/OUT/work minutes from the effective attendance layer."""
-    settings = settings or get_settings()
-    effective = load_active_effective_punches(db, employee_id=employee.id, local_date=local_date)
-    if effective:
-        first_in, last_out, total_min = summarize_day_punches(effective, tz_name=settings.timezone)
-        return first_in, last_out, total_min, len(effective)
+    """
+    Derive day IN/OUT from full raw device data (events + logs).
 
-    punches = _punches_for_employee_day(
-        db, employee=employee, local_date=local_date, settings=settings, apply_suppression=False
-    )
+    Raw punches are always preferred over the effective layer so stale derived rows
+    never hide real check-ins. Corrections apply only when raw data is absent.
+    """
+    settings = settings or get_settings()
+    punches = raw_punches
+    if punches is None:
+        punches = _punches_for_employee_day(
+            db, employee=employee, local_date=local_date, settings=settings, apply_suppression=False
+        )
     if punches:
         first_in, last_out, total_min = summarize_day_punches(punches, tz_name=settings.timezone)
         return first_in, last_out, total_min, len(punches)

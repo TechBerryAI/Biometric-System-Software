@@ -408,6 +408,24 @@ def run_device_sync(
         if emp is not None:
             affected[(emp.id, day)] = None
 
+    # Also refresh any employee-day in the lookback window that has raw punches.
+    from app.models.attendance_event import AttendanceEvent
+    from app.models.attendance_log import AttendanceLog
+
+    start_utc = datetime.combine(window_start, time.min, tzinfo=tz).astimezone(ZoneInfo("UTC"))
+    end_utc = datetime.combine(today + timedelta(days=1), time.min, tzinfo=tz).astimezone(ZoneInfo("UTC"))
+    for model, code_col in ((AttendanceEvent, AttendanceEvent.employee_code), (AttendanceLog, AttendanceLog.employee_code)):
+        for code, ts in db.execute(
+            select(code_col, model.timestamp).where(
+                model.timestamp >= start_utc,
+                model.timestamp < end_utc,
+            )
+        ).all():
+            day = _local_date(ts, tz)
+            emp = employees.get(str(code))
+            if emp is not None:
+                affected[(emp.id, day)] = None
+
     for employee_id, day in sorted(affected.keys()):
         emp = db.get(Employee, employee_id)
         if emp is None:

@@ -31,8 +31,7 @@ from app.schemas.employee import (
 from app.services.audit_service import append_audit_log
 from app.services.device_command_service import enqueue_device_command, process_command
 from app.services.attendance_effective_service import (
-    load_active_effective_punches,
-    summarize_day_punches,
+    load_raw_punches_for_dates,
     summarize_employee_day_from_events,
 )
 from app.services.system_governance_service import assert_device_write_allowed
@@ -199,28 +198,21 @@ def get_employee_daily_attendance(
             detail="'to' date must be on or after 'from' date",
         )
 
-    effective_by_day: dict[date, list[AttendanceEffectivePunch]] = defaultdict(list)
-    for punch in db.execute(
-        select(AttendanceEffectivePunch).where(
-            AttendanceEffectivePunch.employee_id == emp.id,
-            AttendanceEffectivePunch.local_date >= start_date,
-            AttendanceEffectivePunch.local_date <= end_date,
-            AttendanceEffectivePunch.is_active.is_(True),
-        ).order_by(AttendanceEffectivePunch.local_date, AttendanceEffectivePunch.timestamp)
-    ).scalars().all():
-        effective_by_day[punch.local_date].append(punch)
+
+    raw_by_day = load_raw_punches_for_dates(
+        db, start_date=start_date, end_date=end_date, employees=[emp], settings=settings
+    )
 
     rows: list[EmployeeDailyAttendanceRead] = []
     d = start_date
     while d <= end_date:
-        punches = effective_by_day.get(d, [])
-        if punches:
-            first_in, last_out, total_work_minutes = summarize_day_punches(punches, tz_name=settings.timezone)
-            punch_count = len(punches)
-        else:
-            first_in, last_out, total_work_minutes, punch_count = summarize_employee_day_from_events(
-                db, employee=emp, local_date=d, settings=settings
-            )
+        first_in, last_out, total_work_minutes, punch_count = summarize_employee_day_from_events(
+            db,
+            employee=emp,
+            local_date=d,
+            settings=settings,
+            raw_punches=raw_by_day.get(d, {}).get(emp.id),
+        )
         if punch_count == 0:
             rows.append(
                 EmployeeDailyAttendanceRead(

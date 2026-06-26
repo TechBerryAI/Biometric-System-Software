@@ -96,17 +96,6 @@ def resolve_punch_types_for_day(
     if not punch_types:
         return []
     if len(punch_types) == 1:
-        only = punch_types[0]
-        if is_legacy_verify_punch_type(only):
-            return ["0"]
-        if classify_punch(only) is True:
-            return ["0"]
-        if classify_punch(only) is False:
-            if timestamps and tz_name:
-                local_hour = timestamps[0].astimezone(ZoneInfo(tz_name)).hour
-                if local_hour < 12:
-                    return ["0"]
-            return ["1"]
         return ["0"]
 
     classes = [classify_punch(t) for t in punch_types]
