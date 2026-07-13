@@ -38,6 +38,15 @@ class Employee(Base):
         server_default=func.now(),
         nullable=False,
     )
+    departed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
 
     sessions = relationship("AttendanceSession", back_populates="employee")
+
+    @property
+    def is_active(self) -> bool:
+        return self.departed_at is None
     device_user_mappings = relationship("DeviceUserMapping", back_populates="employee")

@@ -7,6 +7,7 @@ import {
   FileBarChart2,
   LayoutDashboard,
   RefreshCw,
+  ScrollText,
   ShieldCheck,
   Sparkles,
   Settings,
@@ -18,7 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
-import { accountTierFromUser } from "@/auth/privilegedAccess";
+import { accountTierFromUser, isPrivilegedAccount } from "@/auth/privilegedAccess";
 import type { Permission } from "@/auth/permissions";
 import { cn } from "@/lib/cn";
 import { useUiStore } from "@/stores/ui-store";
@@ -42,7 +43,9 @@ export function Sidebar() {
   const [syncing, setSyncing] = useState(false);
   const [syncState, setSyncState] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
   const accountTier = accountTierFromUser(user);
+  const privileged = isPrivilegedAccount(user);
   const visibleItems = items.filter((item) => can(item.permission));
+  const privilegedItems = privileged ? [{ to: "/audit", label: "Audit", icon: ScrollText }] : [];
   const opsMetrics = useQuery({
     queryKey: ["operational-metrics"],
     queryFn: fetchOperationalMetrics,
@@ -214,15 +217,45 @@ export function Sidebar() {
                 ) : null}
                 <Icon className="h-[18px] w-[18px] shrink-0 stroke-[1.75]" />
                 {!collapsed ? <span className="truncate">{label}</span> : null}
-                {!collapsed && label === "Operations" ? (
+                {!collapsed && label === "Operations" && retryPressure > 0 ? (
                   <span className="ml-auto rounded-full bg-status-absent-soft px-1.5 py-0.5 text-[10px] font-semibold text-status-absent">
-                    2
+                    {retryPressure}
                   </span>
                 ) : null}
               </>
             )}
           </NavLink>
         ))}
+        {privilegedItems.length > 0 ? (
+          <>
+            {!collapsed ? (
+              <p className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-muted">
+                Admin
+              </p>
+            ) : (
+              <div className="my-1 border-t border-line/60" />
+            )}
+            {privilegedItems.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            title={collapsed ? label : undefined}
+            className={({ isActive }) =>
+              cn(
+                "group flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                collapsed && "justify-center px-0",
+                isActive
+                  ? "bg-status-absent-soft/70 text-status-absent shadow-sm ring-1 ring-status-absent/15"
+                  : "text-ink-muted hover:bg-surface hover:text-ink hover:shadow-sm"
+              )
+            }
+          >
+            <Icon className="h-[18px] w-[18px] shrink-0 stroke-[1.75]" />
+            {!collapsed ? <span className="truncate">{label}</span> : null}
+          </NavLink>
+            ))}
+          </>
+        ) : null}
       </nav>
 
       <div className={cn("mt-auto border-t border-line/60 p-3", collapsed && "px-2")}>

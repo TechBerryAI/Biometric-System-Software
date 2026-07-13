@@ -2,64 +2,41 @@ import { useMutation } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Download, FileSpreadsheet } from "lucide-react";
 import { useMemo, useState } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { AttendanceTrendChart } from "@/components/dashboard/AttendanceTrendChart";
+import { WeeklyAttendanceChart } from "@/components/reports/WeeklyAttendanceChart";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAttendanceTrend } from "@/hooks/useAttendanceTrend";
 import type { ExportPeriod } from "@/lib/dates";
 import { dateList, getExportRange, todayISO } from "@/lib/dates";
-import { fetchDailySummary } from "@/services/api";
+import { ReportFormatDialog } from "@/components/reports/ReportFormatDialog";
+import { fetchDailySummaryRange } from "@/services/api";
 import type { DailySummaryRow } from "@/types";
-import { downloadAttendanceSummaryPdf } from "@/utils/pdfReports";
-
-const tooltipStyle = {
-  background: "#FFFFFF",
-  border: "1px solid #E2E8F0",
-  borderRadius: 12,
-  boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)",
-  fontSize: 12,
-};
+import { exportAttendanceSummary, type ReportFormat } from "@/utils/reportExports";
 
 export function Reports() {
   const [anchorDate, setAnchorDate] = useState(todayISO);
   const [period, setPeriod] = useState<ExportPeriod>("week");
+  const [formatDialogOpen, setFormatDialogOpen] = useState(false);
   const trend = useAttendanceTrend(14);
 
   const range = useMemo(() => getExportRange(anchorDate, period), [anchorDate, period]);
 
   const exportMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (format: ReportFormat) => {
       const dates = dateList(range.from, range.to);
+      const byDay = await fetchDailySummaryRange(range.from, range.to);
       const allRows: Array<DailySummaryRow & { summary_date: string }> = [];
       for (const day of dates) {
-        const summary = await fetchDailySummary(day);
+        const summary = byDay[day] ?? [];
         for (const row of summary) {
           allRows.push({ ...row, summary_date: day });
         }
       }
-      downloadAttendanceSummaryPdf({ periodLabel: range.label, rows: allRows });
+      await exportAttendanceSummary(format, { periodLabel: range.label, rows: allRows });
     },
   });
-
-  const barData = useMemo(() => {
-    if (!trend.data) return [];
-    const slice = trend.data.slice(-7);
-    return slice.map((d) => ({
-      name: d.label,
-      present: d.present,
-      absent: d.absent,
-    }));
-  }, [trend.data]);
 
   return (
     <div className="space-y-10">
@@ -75,7 +52,7 @@ export function Reports() {
           <CardHeader>
             <div className="flex items-center gap-2 text-primary">
               <FileSpreadsheet className="h-5 w-5" strokeWidth={1.75} />
-              <CardTitle>PDF export</CardTitle>
+              <CardTitle>Report export</CardTitle>
             </div>
             <CardDescription>Roll up every employee across your chosen window into one document.</CardDescription>
           </CardHeader>
@@ -102,11 +79,11 @@ export function Reports() {
             <Button
               type="button"
               className="w-full sm:w-auto"
-              onClick={() => exportMutation.mutate()}
+              onClick={() => setFormatDialogOpen(true)}
               disabled={exportMutation.isPending}
             >
               <Download className="h-4 w-4" />
-              {exportMutation.isPending ? "Building PDF…" : "Download PDF"}
+              {exportMutation.isPending ? "Preparing…" : "Download"}
             </Button>
             {exportMutation.isError ? (
               <p className="text-sm text-status-absent">
@@ -117,41 +94,18 @@ export function Reports() {
         </Card>
 
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
-          <Card className="h-full">
-            <CardHeader>
-              <CardTitle>Seven-day composition</CardTitle>
-              <CardDescription>Present vs absent counts — trailing week slice of the trend.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-56 w-full min-w-0">
-                {trend.isLoading ? (
-                  <div className="flex h-full items-center justify-center text-sm text-ink-muted">Loading chart…</div>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={barData} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
-                      <CartesianGrid stroke="#E2E8F0" vertical={false} strokeDasharray="3 3" />
-                      <XAxis dataKey="name" tick={{ fill: "#64748B", fontSize: 10 }} axisLine={false} tickLine={false} />
-                      <YAxis
-                        tick={{ fill: "#64748B", fontSize: 11 }}
-                        axisLine={false}
-                        tickLine={false}
-                        allowDecimals={false}
-                        width={32}
-                      />
-                      <Tooltip
-                        contentStyle={tooltipStyle}
-                        labelStyle={{ color: "#0F172A", fontWeight: 600 }}
-                      />
-                      <Bar dataKey="present" name="Present" fill="#4F46E5" radius={[6, 6, 0, 0]} />
-                      <Bar dataKey="absent" name="Absent" fill="#CBD5E1" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+          <WeeklyAttendanceChart data={trend.data} loading={trend.isLoading} />
         </motion.div>
       </div>
+
+      <ReportFormatDialog
+        open={formatDialogOpen}
+        onOpenChange={setFormatDialogOpen}
+        title="Download attendance report"
+        description="Choose a format for the all-employee attendance summary."
+        onSelect={(format) => exportMutation.mutate(format)}
+        busy={exportMutation.isPending}
+      />
 
       <AttendanceTrendChart data={trend.data} loading={trend.isLoading} />
     </div>

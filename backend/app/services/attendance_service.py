@@ -3,55 +3,39 @@
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from typing import Sequence
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, delete, exists, or_, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.models.attendance_event import AttendanceEvent
 from app.models.attendance_log import AttendanceLog
-from app.models.attendance_session import AttendanceSession
 from app.models.attendance_sync_suppression import AttendanceSyncSuppression
-from app.models.device_user_mapping import DeviceUserMapping
 from app.models.employee import Employee
-from app.services.punch_classification import classify_punch
+from app.models.device_user_mapping import DeviceUserMapping
+from app.services.attendance_helpers import (
+    is_suppressed_timestamp as _is_suppressed_timestamp,
+    local_date as _local_date,
+    resolve_mapping_for_punch as _resolve_mapping_for_punch,
+)
 from app.services.device_service import DeviceAttendanceRecord, DeviceService, DeviceUser
+from app.services.employee_offboard_service import enqueue_delete_user_command
+from app.services.punch_classification import device_attendance_punch_type
 
 logger = logging.getLogger(__name__)
-
-
-def _is_suppressed_timestamp(
-    db: Session,
-    *,
-    device_id: str,
-    employee_code: str,
-    timestamp: datetime,
-) -> bool:
-    row = db.execute(
-        select(AttendanceSyncSuppression.id).where(
-            AttendanceSyncSuppression.device_id == device_id,
-            AttendanceSyncSuppression.employee_code == employee_code,
-            AttendanceSyncSuppression.suppressed_timestamp == timestamp,
-        ).limit(1)
-    ).scalar_one_or_none()
-    return row is not None
-
-
-def _local_date(dt: datetime, tz: ZoneInfo) -> date:
-    return dt.astimezone(tz).date()
 
 
 def _incremental_sync_floor(db: Session, *, device_id: str, settings: Settings) -> datetime | None:
     """Use recent overlap window so incremental sync avoids reprocessing full history."""
     latest = db.execute(
-        select(AttendanceLog.timestamp)
-        .where(AttendanceLog.device_id == device_id)
-        .order_by(AttendanceLog.timestamp.desc())
+        select(AttendanceEvent.timestamp)
+        .where(AttendanceEvent.device_id == device_id)
+        .order_by(AttendanceEvent.timestamp.desc())
         .limit(1)
     ).scalar_one_or_none()
     if latest is None:
@@ -66,7 +50,7 @@ def _dedupe_device_records(
 ) -> list[DeviceAttendanceRecord]:
     """
     Collapse noisy back-to-back duplicate punches produced by unstable device firmware.
-    Keeps earliest record within (employee, punch_type, window) group.
+    Keeps earliest record within (employee, check-direction, window) group.
     """
     window = timedelta(seconds=settings.duplicate_punch_window_seconds)
     if window.total_seconds() <= 0:
@@ -74,7 +58,7 @@ def _dedupe_device_records(
     out: list[DeviceAttendanceRecord] = []
     last_seen: dict[tuple[str, int], datetime] = {}
     for row in sorted(records, key=lambda r: r.timestamp):
-        key = (row.user_id, row.punch)
+        key = (row.user_id, row.status)
         prev = last_seen.get(key)
         if prev is not None and row.timestamp - prev <= window:
             continue
@@ -128,26 +112,6 @@ def _ensure_active_mapping(
     return new_mapping.id
 
 
-def _resolve_mapping_for_punch(
-    db: Session,
-    *,
-    device_id: str,
-    device_user_id: str,
-    at_time: datetime,
-) -> DeviceUserMapping | None:
-    return db.execute(
-        select(DeviceUserMapping)
-        .where(
-            DeviceUserMapping.device_id == device_id,
-            DeviceUserMapping.device_user_id == device_user_id,
-            DeviceUserMapping.valid_from <= at_time,
-            or_(DeviceUserMapping.valid_to.is_(None), DeviceUserMapping.valid_to > at_time),
-        )
-        .order_by(DeviceUserMapping.valid_from.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-
-
 def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -> int:
     """
     Upsert device users into employees with ON CONFLICT DO NOTHING on device_user_id.
@@ -157,6 +121,27 @@ def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -
     now = datetime.now(ZoneInfo("UTC"))
     settings = get_settings()
     for u in users:
+        departed = db.execute(
+            select(Employee).where(
+                Employee.device_user_id == u.user_id,
+                Employee.departed_at.is_not(None),
+            )
+        ).scalar_one_or_none()
+        if departed is not None:
+            try:
+                enqueue_delete_user_command(
+                    db,
+                    device_id=settings.zk_device_id,
+                    user_id=u.user_id,
+                    uid=u.uid,
+                    initiated_from="sync:departed_cleanup",
+                    process_inline=False,
+                    settings=settings,
+                )
+            except RuntimeError:
+                pass
+            continue
+
         # Transition helper: old builds stored uid as numeric string.
         old_uid_identity = str(u.uid)
         if u.user_id != old_uid_identity:
@@ -236,8 +221,10 @@ def insert_attendance_logs_idempotent(
     suppressed = 0
     for r in records:
         employee_code = r.user_id
-        punch_type = str(r.punch)
-        if _is_suppressed_timestamp(db, device_id=device_id, employee_code=employee_code, timestamp=r.timestamp):
+        punch_type = device_attendance_punch_type(status=r.status, punch=r.punch)
+        if _is_suppressed_timestamp(
+            db, device_id=device_id, employee_code=employee_code, timestamp=r.timestamp, settings=settings
+        ):
             suppressed += 1
             continue
         if duplicate_window.total_seconds() > 0:
@@ -341,108 +328,38 @@ def backfill_employees_from_orphan_logs(db: Session) -> int:
     return inserted
 
 
-def prune_recent_duplicate_logs(db: Session, *, settings: Settings, days: int | None = None) -> int:
-    """
-    Remove near-duplicate punches (same employee/device/punch within duplicate window)
-    in the recent sync horizon. Keeps earliest row and deletes later jitter duplicates.
-    """
-    window_seconds = settings.duplicate_punch_window_seconds
-    if window_seconds <= 0:
-        return 0
-    horizon_days = days or settings.session_rebuild_lookback_days
-    since = datetime.now(ZoneInfo("UTC")) - timedelta(days=horizon_days)
-    rows = list(
-        db.execute(
-            select(AttendanceLog)
-            .where(AttendanceLog.timestamp >= since)
-            .order_by(
-                AttendanceLog.device_id.asc(),
-                AttendanceLog.employee_code.asc(),
-                AttendanceLog.punch_type.asc(),
-                AttendanceLog.timestamp.asc(),
-                AttendanceLog.id.asc(),
-            )
-        ).scalars().all()
-    )
-    to_delete: list[int] = []
-    last_seen: dict[tuple[str, str, str, str | None], datetime] = {}
-    for row in rows:
-        key = (row.device_id, row.employee_code, row.punch_type, row.employee_uuid)
-        prev = last_seen.get(key)
-        if prev is not None and (row.timestamp - prev).total_seconds() <= window_seconds:
-            to_delete.append(row.id)
-            continue
-        last_seen[key] = row.timestamp
-    if not to_delete:
-        return 0
-    deleted = (
-        db.query(AttendanceLog)
-        .filter(AttendanceLog.id.in_(to_delete))
-        .delete(synchronize_session=False)
-    )
-    db.commit()
-    logger.info("Pruned duplicate attendance logs: %s", deleted)
-    return int(deleted or 0)
-
-
-def _pair_logs_for_day(
-    logs: list[AttendanceLog],
-    _tz: ZoneInfo,
+def _insert_sync_suppressions_idempotent(
+    db: Session,
     *,
-    duplicate_window_seconds: int,
-) -> list[tuple[AttendanceLog, AttendanceLog | None, str]]:
-    """
-    Pair IN/OUT for one employee for one local calendar day.
-    Returns list of (check_in_log, check_out_log_or_none, status).
-    """
-    logs_sorted = sorted(logs, key=lambda x: x.timestamp)
-    sessions: list[tuple[AttendanceLog, AttendanceLog | None, str]] = []
-    pending_in: AttendanceLog | None = None
-    next_expects_in = True
-    duplicate_window = timedelta(seconds=duplicate_window_seconds)
+    device_id: str,
+    employee_code: str,
+    timestamps: list[datetime],
+    correction_id: int,
+) -> None:
+    """Record suppressed punch times; skip rows already suppressed (re-edit safe)."""
+    seen: set[datetime] = set()
+    for ts in timestamps:
+        if ts in seen:
+            continue
+        seen.add(ts)
+        stmt = (
+            pg_insert(AttendanceSyncSuppression)
+            .values(
+                device_id=device_id,
+                employee_code=employee_code,
+                suppressed_timestamp=ts,
+                reason="correction",
+                correction_id=correction_id,
+            )
+            .on_conflict_do_nothing(constraint="uq_suppression_device_employee_ts")
+        )
+        db.execute(stmt)
 
-    for log in logs_sorted:
-        cls = classify_punch(log.punch_type)
-        if cls is True:
-            if pending_in is not None and duplicate_window.total_seconds() > 0:
-                if log.timestamp - pending_in.timestamp <= duplicate_window:
-                    # Ignore rapid duplicate IN generated by some firmware.
-                    continue
-            if pending_in is not None:
-                sessions.append((pending_in, None, "missing_check_out"))
-            pending_in = log
-            next_expects_in = False
-        elif cls is False:
-            if pending_in is None:
-                continue
-            if log.timestamp <= pending_in.timestamp:
-                continue
-            if duplicate_window.total_seconds() > 0 and log.timestamp - pending_in.timestamp <= duplicate_window:
-                # Ignore immediate IN->OUT jitter that does not represent a real session.
-                continue
-            sessions.append((pending_in, log, "complete"))
-            pending_in = None
-            next_expects_in = True
-        else:
-            if next_expects_in:
-                if pending_in is not None:
-                    sessions.append((pending_in, None, "missing_check_out"))
-                pending_in = log
-                next_expects_in = False
-            else:
-                if pending_in is None:
-                    next_expects_in = True
-                    continue
-                if log.timestamp <= pending_in.timestamp:
-                    continue
-                sessions.append((pending_in, log, "complete"))
-                pending_in = None
-                next_expects_in = True
 
-    if pending_in is not None:
-        sessions.append((pending_in, None, "missing_check_out"))
-
-    return sessions
+def prune_recent_duplicate_logs(db: Session, *, settings: Settings, days: int | None = None) -> int:
+    """Deprecated: attendance history is never physically deleted. Dedup happens at insert time."""
+    _ = (db, settings, days)
+    return 0
 
 
 def rebuild_sessions_for_local_date(
@@ -451,83 +368,15 @@ def rebuild_sessions_for_local_date(
     settings: Settings | None = None,
     *,
     commit: bool = True,
+    employee_ids: set[int] | None = None,
 ) -> int:
     """
-    Recompute AttendanceSession rows for all employees for a given local calendar day.
-    Deletes existing sessions whose check_in falls on that local date, then rebuilds from logs.
+    Recompute sessions for a local calendar day. When employee_ids is provided, only those
+    employees are rebuilt; otherwise all employees with punches on that day are processed.
     """
-    settings = settings or get_settings()
-    tz = ZoneInfo(settings.timezone)
+    from app.services.attendance_effective_service import rebuild_sessions_for_local_date as _rebuild_all
 
-    start_local = datetime.combine(target, time.min, tzinfo=tz)
-    end_local = start_local + timedelta(days=1)
-    start_utc = start_local.astimezone(ZoneInfo("UTC"))
-    end_utc = end_local.astimezone(ZoneInfo("UTC"))
-
-    db.execute(
-        delete(AttendanceSession).where(
-            and_(
-                AttendanceSession.check_in >= start_utc,
-                AttendanceSession.check_in < end_utc,
-            )
-        )
-    )
-
-    log_rows = db.execute(
-        select(AttendanceLog).where(
-            AttendanceLog.timestamp >= start_utc,
-            AttendanceLog.timestamp < end_utc,
-        )
-    ).scalars().all()
-
-    by_employee_day: dict[tuple[int, date], list[AttendanceLog]] = defaultdict(list)
-    employees = db.execute(select(Employee)).scalars().all()
-    code_to_employee: dict[str, Employee] = {str(e.device_user_id): e for e in employees}
-    uuid_to_employee: dict[str, Employee] = {e.employee_uuid: e for e in employees if e.employee_uuid}
-    for lg in log_rows:
-        d = _local_date(lg.timestamp, tz)
-        if d == target:
-            emp: Employee | None = None
-            if lg.employee_uuid:
-                emp = uuid_to_employee.get(lg.employee_uuid)
-            if emp is None:
-                emp = code_to_employee.get(lg.employee_code)
-            if emp is None:
-                continue
-            by_employee_day[(emp.id, d)].append(lg)
-
-    created = 0
-    employee_by_id: dict[int, Employee] = {e.id: e for e in employees}
-    for (employee_id, _day), day_logs in by_employee_day.items():
-        emp = employee_by_id.get(employee_id)
-        if emp is None:
-            continue
-        pairs = _pair_logs_for_day(
-            day_logs,
-            tz,
-            duplicate_window_seconds=settings.duplicate_punch_window_seconds,
-        )
-        for cin_log, cout_log, status in pairs:
-            check_in = cin_log.timestamp
-            check_out = cout_log.timestamp if cout_log else None
-            work_min: int | None = None
-            if check_out and check_out > check_in:
-                work_min = int((check_out - check_in).total_seconds() // 60)
-
-            db.add(
-                AttendanceSession(
-                    employee_id=emp.id,
-                    check_in=check_in,
-                    check_out=check_out,
-                    work_duration=work_min,
-                    status=status,
-                )
-            )
-            created += 1
-
-    if commit:
-        db.commit()
-    return created
+    return _rebuild_all(db, target, settings=settings, commit=commit)
 
 
 def run_device_sync(
@@ -543,6 +392,13 @@ def run_device_sync(
 
     Returns (device_row_count, newly_inserted_log_rows, placeholder_employees_created).
     """
+    from app.services.attendance_effective_service import (
+        append_attendance_events_idempotent,
+        rebuild_sessions_for_employee_date,
+        repair_punch_types_from_device_records,
+        sync_effective_punches_from_events,
+    )
+
     settings = settings or get_settings()
     device = device or DeviceService(settings=settings)
     floor = None if full_resync else _incremental_sync_floor(db, device_id=settings.zk_device_id, settings=settings)
@@ -550,34 +406,58 @@ def run_device_sync(
     if floor is not None:
         fetched_records = [row for row in fetched_records if row.timestamp >= floor]
     records = _dedupe_device_records(fetched_records, settings=settings)
+    batch_uuid = str(uuid4())
+    repair_punch_types_from_device_records(db, records, settings.zk_device_id)
+    n_events = append_attendance_events_idempotent(
+        db, records, settings.zk_device_id, sync_batch_uuid=batch_uuid
+    )
     n = insert_attendance_logs_idempotent(db, records, settings.zk_device_id)
-    _ = prune_recent_duplicate_logs(db, settings=settings)
+    _ = n_events
     placeholders = backfill_employees_from_orphan_logs(db)
 
     tz = ZoneInfo(settings.timezone)
     today = datetime.now(tz).date()
     lookback = settings.session_rebuild_lookback_days
     window_start = today - timedelta(days=lookback - 1)
-    affected_dates = sorted(
-        {
-            _local_date(row.timestamp, tz)
-            for row in records
-            if window_start <= _local_date(row.timestamp, tz) <= today
-        }
-    )
-    if placeholders > 0:
-        orphan_dates = sorted(
-            {
-                _local_date(row.timestamp, tz)
-                for row in records
-                if window_start <= _local_date(row.timestamp, tz) <= today
-            }
+
+    employees = {str(e.device_user_id): e for e in db.execute(select(Employee)).scalars().all()}
+    affected: dict[tuple[int, date], None] = {}
+    for row in records:
+        day = _local_date(row.timestamp, tz)
+        if not (window_start <= day <= today):
+            continue
+        emp = employees.get(row.user_id)
+        if emp is not None:
+            affected[(emp.id, day)] = None
+
+    # Also refresh any employee-day in the lookback window that has raw punches.
+    from app.models.attendance_event import AttendanceEvent
+    from app.models.attendance_log import AttendanceLog
+
+    start_utc = datetime.combine(window_start, time.min, tzinfo=tz).astimezone(ZoneInfo("UTC"))
+    end_utc = datetime.combine(today + timedelta(days=1), time.min, tzinfo=tz).astimezone(ZoneInfo("UTC"))
+    for model, code_col in ((AttendanceEvent, AttendanceEvent.employee_code), (AttendanceLog, AttendanceLog.employee_code)):
+        for code, ts in db.execute(
+            select(code_col, model.timestamp).where(
+                model.timestamp >= start_utc,
+                model.timestamp < end_utc,
+            )
+        ).all():
+            day = _local_date(ts, tz)
+            emp = employees.get(str(code))
+            if emp is not None:
+                affected[(emp.id, day)] = None
+
+    for employee_id, day in sorted(affected.keys()):
+        emp = db.get(Employee, employee_id)
+        if emp is None:
+            continue
+        sync_effective_punches_from_events(db, employee=emp, local_date=day, settings=settings, commit=False)
+        rebuild_sessions_for_employee_date(
+            db, employee_id=employee_id, local_date=day, settings=settings, commit=False
         )
-        affected_dates = sorted(set(affected_dates) | set(orphan_dates))
-    if not affected_dates:
-        affected_dates = [today]
-    for day in affected_dates:
-        rebuild_sessions_for_local_date(db, day, settings=settings)
+    if affected:
+        db.commit()
 
     # Keep AI summaries/reporting aligned with fresh attendance syncs.
     try:
@@ -592,6 +472,92 @@ def run_device_sync(
         logger.warning("AI cache invalidation skipped: %s", exc)
 
     return len(fetched_records), n, placeholders
+
+
+def reimport_attendance_window(
+    db: Session,
+    *,
+    employee: Employee,
+    local_date: date,
+    device: DeviceService | None = None,
+    settings: Settings | None = None,
+) -> tuple[int, list[datetime]]:
+    """
+    Append device punches for one employee/local day (never deletes attendance history).
+
+    Returns (appended_event_count, device_timestamps_imported).
+    """
+    from app.services.attendance_effective_service import append_device_day_events
+
+    settings = settings or get_settings()
+    device = device or DeviceService(settings=settings)
+    tz = ZoneInfo(settings.timezone)
+    start_local = datetime.combine(local_date, time.min, tzinfo=tz)
+    end_local = start_local + timedelta(days=1)
+    start_utc = start_local.astimezone(ZoneInfo("UTC"))
+    end_utc = end_local.astimezone(ZoneInfo("UTC"))
+    employee_code = str(employee.device_user_id)
+
+    fetched = device.fetch_attendance()
+    day_records: list[DeviceAttendanceRecord] = []
+    for row in fetched:
+        if row.user_id != employee_code:
+            continue
+        ts = row.timestamp
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=tz)
+        ts_utc = ts.astimezone(ZoneInfo("UTC"))
+        if ts_utc < start_utc or ts_utc >= end_utc:
+            continue
+        day_records.append(
+            DeviceAttendanceRecord(
+                user_id=row.user_id,
+                timestamp=ts_utc,
+                punch=row.punch,
+                status=row.status,
+            )
+        )
+
+    imported_ts = append_device_day_events(
+        db,
+        employee=employee,
+        local_date=local_date,
+        device_records=day_records,
+        device_id=settings.zk_device_id,
+        source="device_verification",
+    )
+
+    for record in day_records:
+        if _is_suppressed_timestamp(
+            db,
+            device_id=settings.zk_device_id,
+            employee_code=employee_code,
+            timestamp=record.timestamp,
+            settings=settings,
+        ):
+            continue
+        mapping = _resolve_mapping_for_punch(
+            db,
+            device_id=settings.zk_device_id,
+            device_user_id=employee_code,
+            at_time=record.timestamp,
+        )
+        stmt = (
+            pg_insert(AttendanceLog)
+            .values(
+                employee_code=employee_code,
+                timestamp=record.timestamp,
+                device_id=settings.zk_device_id,
+                employee_uuid=employee.employee_uuid,
+                device_mapping_id=mapping.id if mapping else None,
+                punch_type=device_attendance_punch_type(status=record.status, punch=record.punch),
+                created_at=record.timestamp,
+            )
+            .on_conflict_do_nothing(constraint="uq_log_device_employee_ts")
+        )
+        db.execute(stmt)
+    db.commit()
+    return len(imported_ts), imported_ts
 
 
 def run_user_sync(

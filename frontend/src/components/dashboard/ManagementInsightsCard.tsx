@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Lightbulb } from "lucide-react";
+import { AlertTriangle, Lightbulb } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function ManagementInsightsCard({
@@ -8,6 +8,8 @@ export function ManagementInsightsCard({
   loading = false,
   cached = false,
   errorCode,
+  forbidden = false,
+  actionCount = 0,
 }: {
   bullets: string[];
   /** When grok, copy is generated server-side from live aggregates; charts stay code-driven. */
@@ -15,9 +17,13 @@ export function ManagementInsightsCard({
   loading?: boolean;
   cached?: boolean;
   errorCode?: string | null;
+  forbidden?: boolean;
+  actionCount?: number;
 }) {
   const sourceLabel =
-    source === "grok"
+    forbidden
+      ? "Access restricted — showing local estimates only"
+      : source === "grok"
       ? "AI source: Grok"
       : source === "cache"
       ? "AI source: Cached Grok result"
@@ -35,18 +41,28 @@ export function ManagementInsightsCard({
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-primary/15 bg-primary-soft text-primary">
               <Lightbulb className="h-5 w-5" strokeWidth={1.75} />
             </span>
-            <div>
-              <CardTitle>What this means for management</CardTitle>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle>Trends &amp; context</CardTitle>
+                {actionCount > 0 ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                    <AlertTriangle className="h-3 w-3" />
+                    {actionCount} action{actionCount === 1 ? "" : "s"} needed
+                  </span>
+                ) : null}
+              </div>
               <CardDescription className="mt-1.5 space-y-1">
                 <span className="block">
-                  {source === "grok" || source === "cache"
-                  ? "Narrative from Grok using aggregate attendance from this app (no chart generation). Visuals above are rendered in code from the same underlying data."
-                  : "Short takeaways from today's numbers and the recent trend — suitable for standups or email updates."}
+                  {forbidden
+                    ? "You do not have permission to load AI narratives. The bullets below are computed locally from today's attendance data."
+                    : source === "grok" || source === "cache"
+                    ? "Narrative from Grok using aggregate attendance from this app (no chart generation). Visuals above are rendered in code from the same underlying data."
+                    : "Short takeaways from today's numbers and the recent trend — suitable for standups or email updates."}
                 </span>
                 <span className="block text-xs">
                   {sourceLabel}
                   {cached ? " • cache hit" : ""}
-                  {errorCode ? ` • ${errorCode.replace(/_/g, " ")}` : ""}
+                  {errorCode && !forbidden ? ` • ${errorCode.replace(/_/g, " ")}` : ""}
                 </span>
               </CardDescription>
             </div>

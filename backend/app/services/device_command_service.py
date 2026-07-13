@@ -597,7 +597,46 @@ def _verify_upsert_result(
             mismatch_details=details.get("mismatch_details"),
         )
     )
-    return ok, details
+    return ok
+
+
+def _verify_delete_result(
+    db: Session,
+    *,
+    command: DeviceCommand,
+    device_service: DeviceService,
+    payload: dict[str, Any],
+) -> bool:
+    ok, details = device_service.verify_user_deleted(user_id=str(payload["user_id"]))
+    command.verification_status = "SUCCESS" if ok else "FAILED"
+    command.verification_details = details
+    db.add(
+        VerificationResult(
+            command_id=command.id,
+            verification_status=command.verification_status,
+            expected_state=details.get("expected_state") or {},
+            actual_state=details.get("actual_state"),
+            mismatch_details=details.get("mismatch_details"),
+        )
+    )
+    return ok
+
+
+def _recover_if_delete_already_applied(
+    *,
+    command: DeviceCommand,
+    device_service: DeviceService,
+    payload: dict[str, Any],
+) -> bool:
+    ok, details = device_service.verify_user_deleted(user_id=str(payload["user_id"]))
+    if not ok:
+        return False
+    command.status = DeviceCommandStatus.SUCCESS.value
+    command.completed_at = _utcnow()
+    command.last_error = None
+    command.verification_status = "SUCCESS"
+    command.verification_details = details
+    return True
 
 
 def _parse_iso_datetime(value: str) -> datetime:
@@ -620,7 +659,7 @@ def _execute_correct_attendance_command(
     new_check_out = _parse_iso_datetime(new_out_raw) if new_out_raw else None
     if new_check_in is None:
         raise ValueError("new_check_in is required for CORRECT_ATTENDANCE.")
-    device_service.correct_attendance(
+    result = device_service.correct_attendance(
         user_id=str(payload["user_id"]),
         uid=payload.get("uid"),
         delete_timestamps=delete_ts,
@@ -630,6 +669,7 @@ def _execute_correct_attendance_command(
     command.status = DeviceCommandStatus.SUCCESS.value
     command.completed_at = _utcnow()
     command.verification_status = "SUCCESS"
+    command.verification_details = result
     command.last_error = None
     _finish_execution_attempt(execution_row, final_status="SUCCESS", verification_result="SUCCESS")
     runtime_health.connection_stability_score = min(100, runtime_health.connection_stability_score + 1)
@@ -785,7 +825,7 @@ def process_command(
         certified = _resolve_certified_profile(db, firmware_version=firmware_version)
         operation_profile = _resolve_operation_profile(db, operation_type=command.command_type)
         if certified is None or certified.certification_status in {"UNCERTIFIED", "UNSTABLE"}:
-            if command.command_type != "CORRECT_ATTENDANCE":
+            if command.command_type not in ("CORRECT_ATTENDANCE", "DELETE_USER"):
                 command.status = DeviceCommandStatus.RECONCILIATION_REQUIRED.value
                 command.completed_at = _utcnow()
                 command.last_error = f"Firmware '{firmware_version}' is not certified for production writes."
@@ -829,7 +869,10 @@ def process_command(
                 correlation_id=command.correlation_id,
             )
             return
-        if profile is not None and not profile.supports_user_write and command.command_type != "CORRECT_ATTENDANCE":
+        if profile is not None and not profile.supports_user_write and command.command_type not in (
+            "CORRECT_ATTENDANCE",
+            "DELETE_USER",
+        ):
             command.status = DeviceCommandStatus.RECONCILIATION_REQUIRED.value
             command.completed_at = _utcnow()
             command.last_error = f"Firmware profile '{firmware_version}' disallows user write."
@@ -856,6 +899,113 @@ def process_command(
                 payload=payload,
                 execution_row=execution_row,
                 runtime_health=runtime_health,
+            )
+            if command.status == DeviceCommandStatus.SUCCESS.value:
+                from app.services.attendance_correction_service import finalize_pending_correction_for_command
+
+                finalize_pending_correction_for_command(db, command.command_uuid)
+            elif command.status in (
+                DeviceCommandStatus.FAILED.value,
+                DeviceCommandStatus.DEAD_LETTER.value,
+                DeviceCommandStatus.RECONCILIATION_REQUIRED.value,
+            ):
+                from app.services.attendance_correction_service import mark_correction_failed_for_command
+
+                mark_correction_failed_for_command(
+                    db,
+                    command_uuid=command.command_uuid,
+                    error_message=command.last_error or "CORRECT_ATTENDANCE command failed.",
+                )
+            return
+        if command.command_type == "DELETE_USER":
+            payload = command.payload
+            if command.retries > 0 and _recover_if_delete_already_applied(
+                command=command,
+                device_service=device_service,
+                payload=payload,
+            ):
+                _finish_execution_attempt(execution_row, final_status="RECOVERED_SUCCESS", verification_result="SUCCESS")
+                _record_sync_event(
+                    db,
+                    device_id=command.device_id,
+                    event_type="COMMAND_RECOVERED_FROM_REPLAY_CHECK",
+                    status="SUCCESS",
+                    details={"command_uuid": command.command_uuid, "retries": command.retries},
+                    correlation_id=command.correlation_id,
+                )
+                return
+
+            _record_snapshot(
+                db,
+                device_service=device_service,
+                device_id=command.device_id,
+                snapshot_type="PRE_WRITE",
+                firmware_version=firmware_version,
+            )
+            if profile is not None and profile.write_delay_ms > 0:
+                time.sleep(profile.write_delay_ms / 1000.0)
+            elif settings.command_cooldown_ms > 0:
+                time.sleep(settings.command_cooldown_ms / 1000.0)
+
+            user_id = str(payload["user_id"]).strip()
+            uid_raw = payload.get("uid")
+            uid = int(uid_raw) if uid_raw is not None else None
+            already_absent, _ = device_service.verify_user_deleted(user_id=user_id)
+            if not already_absent:
+                device_service.delete_user(uid=uid, user_id=user_id)
+
+            command.heartbeat_at = _utcnow()
+            _record_snapshot(
+                db,
+                device_service=device_service,
+                device_id=command.device_id,
+                snapshot_type="POST_WRITE",
+                firmware_version=firmware_version,
+            )
+            command.status = DeviceCommandStatus.VERIFYING.value
+            verified = _verify_delete_result(
+                db, command=command, device_service=device_service, payload=payload
+            )
+            if not verified:
+                command.status = DeviceCommandStatus.FAILED.value
+                command.completed_at = _utcnow()
+                command.last_error = "Delete verification failed: user still present on device."
+                _record_reconciliation_job(
+                    db,
+                    job_type="DELETE_VERIFICATION",
+                    target_entity=f"device:{command.device_id}",
+                    findings={
+                        "command_uuid": command.command_uuid,
+                        "verification": command.verification_details,
+                    },
+                    correlation_id=command.correlation_id,
+                )
+                _finish_execution_attempt(execution_row, final_status="VERIFICATION_FAILED", verification_result="FAILED")
+                runtime_health.verification_failure_rate += 1
+                runtime_health.connection_stability_score = max(0, runtime_health.connection_stability_score - 10)
+                _update_runtime_risk_level(runtime_health)
+                _apply_device_mode_transitions(
+                    db,
+                    device_id=command.device_id,
+                    runtime=runtime_health,
+                    reason="delete verification failure",
+                )
+                return
+
+            command.status = DeviceCommandStatus.SUCCESS.value
+            command.completed_at = _utcnow()
+            command.last_error = None
+            _finish_execution_attempt(execution_row, final_status="SUCCESS", verification_result=command.verification_status)
+            runtime_health.connection_stability_score = min(100, runtime_health.connection_stability_score + 1)
+            _update_runtime_risk_level(runtime_health)
+            _apply_device_mode_transitions(db, device_id=command.device_id, runtime=runtime_health)
+            _record_sync_event(
+                db,
+                device_id=command.device_id,
+                event_type="COMMAND_EXECUTED",
+                status="SUCCESS",
+                details={"command_uuid": command.command_uuid, "command_type": command.command_type},
+                correlation_id=command.correlation_id,
             )
             return
         if command.retries > 0:

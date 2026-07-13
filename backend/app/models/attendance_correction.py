@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -31,3 +32,8 @@ class AttendanceCorrection(Base):
         nullable=False,
     )
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    device_tier: Mapped[str | None] = mapped_column(String(1), nullable=True)
+    device_verification_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    correction_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    device_operation_uuid: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True, index=True)
+    reimport_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

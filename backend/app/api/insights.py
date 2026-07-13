@@ -33,7 +33,7 @@ router = APIRouter(prefix="/insights", tags=["insights"])
 @router.get("/management", response_model=ManagementInsightsResponse)
 def management_insights(
     days: int = Query(14, ge=3, le=62, description="Trailing calendar days in TIMEZONE (oldest first in context)."),
-    _user: User = Depends(require_permissions(Permission.AI_ADMIN)),
+    _user: User = Depends(require_permissions(Permission.REPORT_READ)),
     db: Session = Depends(get_db),
 ) -> ManagementInsightsResponse:
     settings = get_settings()
@@ -45,7 +45,7 @@ def management_insights(
 @router.get("/anomalies", response_model=AnomalyDetectionResponse)
 def attendance_anomalies(
     lookback_days: int = Query(30, ge=7, le=90),
-    _user: User = Depends(require_permissions(Permission.ANOMALY_MANAGE)),
+    _user: User = Depends(require_permissions(Permission.REPORT_READ)),
     db: Session = Depends(get_db),
 ) -> AnomalyDetectionResponse:
     settings = get_settings()

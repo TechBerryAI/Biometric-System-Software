@@ -152,3 +152,44 @@ export function buildManagementInsights(
 
   return out.slice(0, 5);
 }
+
+export type DeltaTone = "positive" | "negative" | "neutral";
+export type HealthTone = "healthy" | "watch" | "risk";
+export type InsightSeverity = "low" | "medium" | "high";
+
+export function toDeltaTone(delta: number | null): DeltaTone {
+  if (delta == null) return "neutral";
+  if (Math.abs(delta) < 0.1) return "neutral";
+  return delta > 0 ? "positive" : "negative";
+}
+
+/** For metrics where a decrease is good (late arrivals, missing punches, overtime). */
+export function toInvertedDeltaTone(delta: number | null): DeltaTone {
+  const tone = toDeltaTone(delta);
+  if (tone === "positive") return "negative";
+  if (tone === "negative") return "positive";
+  return "neutral";
+}
+
+export function healthToneFromThresholds(
+  value: number,
+  healthyAt: number,
+  watchAt: number,
+  higherIsBetter = true
+): HealthTone {
+  if (higherIsBetter) {
+    if (value >= healthyAt) return "healthy";
+    if (value >= watchAt) return "watch";
+    return "risk";
+  }
+  if (value <= healthyAt) return "healthy";
+  if (value <= watchAt) return "watch";
+  return "risk";
+}
+
+export function dateRangeToDays(label: string): number {
+  if (label === "Today") return 1;
+  if (label === "Last 7 days") return 7;
+  if (label === "Last 30 days") return 30;
+  return 14;
+}

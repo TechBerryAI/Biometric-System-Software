@@ -17,8 +17,11 @@ import { fmtDisplayDate, fmtDisplayDateTime } from "@/lib/dates";
 import {
   applyAttendanceAdjustment,
   fetchAttendanceDayPreview,
+  fetchCorrectionCapabilities,
+  fetchCorrectionStatus,
   getApiErrorMessage,
   type AttendanceDayPreview,
+  type CorrectionCapabilities,
 } from "@/services/api";
 import type { EmployeeDailyAttendance } from "@/types";
 
@@ -154,8 +157,10 @@ export function AttendanceAdjustmentModal({
   const [checkInParts, setCheckInParts] = useState<TimeParts>(EMPTY_TIME);
   const [checkOutParts, setCheckOutParts] = useState<TimeParts | null>(null);
   const [preview, setPreview] = useState<AttendanceDayPreview | null>(null);
+  const [capabilities, setCapabilities] = useState<CorrectionCapabilities | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [pollingUuid, setPollingUuid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -180,7 +185,38 @@ export function AttendanceAdjustmentModal({
     setSuccess(null);
     setError(null);
     void loadPreview();
+    void fetchCorrectionCapabilities()
+      .then(setCapabilities)
+      .catch(() => setCapabilities(null));
   }, [open, date, canAdjust, loadPreview]);
+
+  useEffect(() => {
+    if (!pollingUuid) return;
+    const terminal = new Set(["applied", "applied_db_only", "device_failed", "failed"]);
+    const interval = window.setInterval(() => {
+      void fetchCorrectionStatus(pollingUuid)
+        .then((result) => {
+          if (terminal.has(result.status)) {
+            setPollingUuid(null);
+            if (result.status === "applied") {
+              setSuccess("Updated on device and in the database (logs, sessions, reports).");
+            } else if (result.status === "applied_db_only") {
+              setSuccess(
+                "Updated in the database (logs, sessions, reports). Device memory was not rewritten on this firmware; old device punches are suppressed from re-sync.",
+              );
+            } else {
+              setError(result.error_message || "Device correction failed.");
+            }
+            void loadPreview();
+            onApplied();
+          }
+        })
+        .catch(() => {
+          /* keep polling */
+        });
+    }, 2000);
+    return () => window.clearInterval(interval);
+  }, [pollingUuid, loadPreview, onApplied]);
 
   if (!canAdjust) {
     return null;
@@ -200,6 +236,11 @@ export function AttendanceAdjustmentModal({
         new_check_in: newCheckIn.toISOString(),
         new_check_out: newCheckOut?.toISOString() ?? null,
       });
+      if (result.status === "device_pending") {
+        setPollingUuid(result.correction_uuid);
+        setSuccess("Device correction queued. Waiting for device write and verification…");
+        return;
+      }
       setSuccess(
         result.device_updated
           ? "Updated on device and in the database (logs, sessions, reports)."
@@ -239,6 +280,13 @@ export function AttendanceAdjustmentModal({
                     In: {fmtDisplayDateTime(preview.current_check_in)} · Out: {fmtDisplayDateTime(preview.current_check_out)} ·
                     Punches: {preview.punch_count}
                   </p>
+                  {capabilities ? (
+                    <p className="mt-2 text-xs text-ink-subtle">
+                      Device tier {capabilities.tier}
+                      {capabilities.supports_write ? " (attlog write supported)" : " (DB-only correction on this firmware)"}
+                      {capabilities.strict_device_authority ? " · strict device authority enabled" : ""}
+                    </p>
+                  ) : null}
                   <p className="mt-3 font-medium text-ink">After update</p>
                   <p className="mt-1 text-ink-muted">
                     In: {previewCheckIn} · Out: {previewCheckOut}
@@ -258,6 +306,9 @@ export function AttendanceAdjustmentModal({
           )}
           {error ? <p className="text-sm text-status-absent">{error}</p> : null}
           {success ? <p className="text-sm text-status-present">{success}</p> : null}
+          {pollingUuid ? (
+            <p className="text-xs text-ink-muted">Processing device correction…</p>
+          ) : null}
         </DialogBody>
         <DialogFooter>
           <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={applying}>

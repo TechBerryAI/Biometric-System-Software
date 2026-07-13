@@ -25,7 +25,7 @@ from app.ai.schemas.insight_models import (
 from app.core.config import Settings
 from app.models.attendance_anomaly import AttendanceAnomaly
 from app.models.attendance_session import AttendanceSession
-from app.services.daily_summary_service import compute_daily_summary
+from app.services.daily_summary_service import compute_daily_summaries_range
 
 log = logging.getLogger(__name__)
 
@@ -102,9 +102,10 @@ class AnomalyService:
     def _build_features(self, db: Session, *, start_day: date, end_day: date) -> list[_DayFeatures]:
         out: list[_DayFeatures] = []
         tz = ZoneInfo(self._settings.timezone)
+        summaries_by_day = compute_daily_summaries_range(db, start_day, end_day, self._settings)
         current = start_day
         while current <= end_day:
-            summary = compute_daily_summary(db, current, self._settings)
+            summary = summaries_by_day.get(current, [])
             headcount = len(summary)
             present = sum(1 for row in summary if row.first_check_in is not None)
             absent = max(headcount - present, 0)

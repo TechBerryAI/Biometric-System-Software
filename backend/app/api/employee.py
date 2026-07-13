@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import Permission, require_permissions
-from app.models.attendance_log import AttendanceLog
+from app.models.attendance_effective_punch import AttendanceEffectivePunch
 from app.models.attendance_session import AttendanceSession
 from app.models.device_user_mapping import DeviceUserMapping
 from app.models.employee import Employee
@@ -29,7 +30,12 @@ from app.schemas.employee import (
 )
 from app.services.audit_service import append_audit_log
 from app.services.device_command_service import enqueue_device_command, process_command
-from app.services.punch_classification import classify_punch
+from app.services.employee_offboard_service import offboard_employee
+from app.services.attendance_effective_service import (
+    employee_punch_bounds,
+    load_raw_punches_for_dates,
+    summarize_employee_day_from_events,
+)
 from app.services.system_governance_service import assert_device_write_allowed
 
 router = APIRouter(
@@ -105,36 +111,37 @@ def _ensure_device_writes_enabled(db: Session, *, device_id: str) -> None:
 
 @router.get("", response_model=list[EmployeeRead])
 def list_employees(db: Session = Depends(get_db)) -> list[Employee]:
-    return list(db.execute(select(Employee).order_by(Employee.id)).scalars().all())
+    return list(
+        db.execute(
+            select(Employee).where(Employee.departed_at.is_(None)).order_by(Employee.id)
+        ).scalars().all()
+    )
 
 
 @router.get("/{employee_id}", response_model=EmployeeDetailRead)
 def get_employee(employee_id: int, db: Session = Depends(get_db)) -> EmployeeDetailRead:
     emp = db.get(Employee, employee_id)
-    if emp is None:
+    if emp is None or emp.departed_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
     if not emp.employee_uuid:
         emp.employee_uuid = str(uuid4())
         db.commit()
         db.refresh(emp)
-    identity_filter = _identity_filter_for_employee(emp, db)
 
     total_logs = (
         db.execute(
             select(func.count())
-            .select_from(AttendanceLog)
-            .where(identity_filter)
+            .select_from(AttendanceEffectivePunch)
+            .where(AttendanceEffectivePunch.employee_id == emp.id, AttendanceEffectivePunch.is_active.is_(True))
         ).scalar_one()
         or 0
     )
-    first_punch_at, last_punch_at = db.execute(
-        select(func.min(AttendanceLog.timestamp), func.max(AttendanceLog.timestamp)).where(identity_filter)
-    ).one()
+    first_punch_at, last_punch_at = employee_punch_bounds(db, employee=emp)
     log_rows = list(
         db.execute(
-            select(AttendanceLog.timestamp, AttendanceLog.punch_type)
-            .where(identity_filter)
-            .order_by(AttendanceLog.timestamp)
+            select(AttendanceEffectivePunch.timestamp, AttendanceEffectivePunch.punch_type)
+            .where(AttendanceEffectivePunch.employee_id == emp.id, AttendanceEffectivePunch.is_active.is_(True))
+            .order_by(AttendanceEffectivePunch.timestamp)
         )
     )
     tz = ZoneInfo(get_settings().timezone)
@@ -174,13 +181,12 @@ def get_employee_daily_attendance(
     db: Session = Depends(get_db),
 ) -> list[EmployeeDailyAttendanceRead]:
     emp = db.get(Employee, employee_id)
-    if emp is None:
+    if emp is None or emp.departed_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
     if not emp.employee_uuid:
         emp.employee_uuid = str(uuid4())
         db.commit()
         db.refresh(emp)
-    identity_filter = _identity_filter_for_employee(emp, db)
 
     settings = get_settings()
     tz = ZoneInfo(settings.timezone)
@@ -193,32 +199,22 @@ def get_employee_daily_attendance(
             detail="'to' date must be on or after 'from' date",
         )
 
-    start_utc, _ = _day_bounds_utc(start_date, settings.timezone)
-    _, end_utc = _day_bounds_utc(end_date, settings.timezone)
-    end_utc = end_utc
 
-    logs = list(
-        db.execute(
-            select(AttendanceLog)
-            .where(
-                identity_filter,
-                AttendanceLog.timestamp >= start_utc,
-                AttendanceLog.timestamp < end_utc,
-            )
-            .order_by(AttendanceLog.timestamp)
-        ).scalars()
+    raw_by_day = load_raw_punches_for_dates(
+        db, start_date=start_date, end_date=end_date, employees=[emp], settings=settings
     )
-
-    by_day: dict[date, list[AttendanceLog]] = {}
-    for lg in logs:
-        local_day = lg.timestamp.astimezone(tz).date()
-        by_day.setdefault(local_day, []).append(lg)
 
     rows: list[EmployeeDailyAttendanceRead] = []
     d = start_date
     while d <= end_date:
-        day_logs = by_day.get(d, [])
-        if not day_logs:
+        first_in, last_out, total_work_minutes, punch_count = summarize_employee_day_from_events(
+            db,
+            employee=emp,
+            local_date=d,
+            settings=settings,
+            raw_punches=raw_by_day.get(d, {}).get(emp.id),
+        )
+        if punch_count == 0:
             rows.append(
                 EmployeeDailyAttendanceRead(
                     summary_date=d,
@@ -229,33 +225,17 @@ def get_employee_daily_attendance(
                     punch_count=0,
                 )
             )
-            d += timedelta(days=1)
-            continue
-
-        ins = [x.timestamp for x in day_logs if classify_punch(x.punch_type) is True]
-        first_in = min(ins) if ins else day_logs[0].timestamp
-        outs = [x.timestamp for x in day_logs if classify_punch(x.punch_type) is False]
-        if outs:
-            last_out = max(outs)
-        elif len(day_logs) > 1:
-            last_out = day_logs[-1].timestamp
         else:
-            last_out = None
-
-        total_work_minutes: int | None = None
-        if first_in is not None and last_out is not None and last_out > first_in:
-            total_work_minutes = int((last_out - first_in).total_seconds() // 60)
-
-        rows.append(
-            EmployeeDailyAttendanceRead(
-                summary_date=d,
-                first_check_in=first_in,
-                last_check_out=last_out,
-                total_work_minutes=total_work_minutes,
-                absent=False,
-                punch_count=len(day_logs),
+            rows.append(
+                EmployeeDailyAttendanceRead(
+                    summary_date=d,
+                    first_check_in=first_in,
+                    last_check_out=last_out,
+                    total_work_minutes=total_work_minutes,
+                    absent=first_in is None and last_out is None,
+                    punch_count=punch_count,
+                )
             )
-        )
         d += timedelta(days=1)
 
     rows.sort(key=lambda r: r.summary_date, reverse=True)
@@ -284,9 +264,11 @@ def upsert_employee_metadata(
             "department": existing.department,
             "shift_start": existing.shift_start.isoformat() if existing.shift_start else None,
             "shift_end": existing.shift_end.isoformat() if existing.shift_end else None,
+            "departed_at": existing.departed_at.isoformat() if existing.departed_at else None,
         }
         if not existing.employee_uuid:
             existing.employee_uuid = str(uuid4())
+        existing.departed_at = None
         existing.name = payload.name
         existing.department = payload.department
         existing.shift_start = payload.shift_start
@@ -405,7 +387,7 @@ def update_employee(
     """
     existing = db.get(Employee, employee_id)
     _ensure_device_writes_enabled(db, device_id=get_settings().zk_device_id)
-    if existing is None:
+    if existing is None or existing.departed_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
 
     new_device_user_id = (payload.device_user_id if payload.device_user_id is not None else existing.device_user_id).strip()
@@ -489,3 +471,32 @@ def update_employee(
     db.commit()
     db.refresh(existing)
     return existing
+
+
+@router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
+def offboard_employee_route(
+    employee_id: int,
+    request: Request,
+    user: User = Depends(require_permissions(Permission.EMPLOYEE_EDIT)),
+    db: Session = Depends(get_db),
+) -> None:
+    """Soft-offboard an employee: hide from directory and remove from biometric device."""
+    emp = db.get(Employee, employee_id)
+    if emp is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
+    if emp.departed_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Employee is already offboarded.")
+
+    settings = get_settings()
+    _ensure_device_writes_enabled(db, device_id=settings.zk_device_id)
+    offboard_employee(
+        db,
+        emp,
+        actor_user_uuid=user.user_uuid,
+        reason="api_offboard",
+        request_id=getattr(request.state, "request_id", None),
+        ip_address=request.client.host if request.client else None,
+        process_device_inline=True,
+        settings=settings,
+    )
+    db.commit()

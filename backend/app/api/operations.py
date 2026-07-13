@@ -27,7 +27,6 @@ from app.models.system_control_state import SystemControlState
 from app.models.user import User
 from app.schemas.audit import AuditLogRead
 from app.schemas.device_command import DeviceCommandRead
-from app.services.attendance_correction_service import finalize_pending_correction_for_command
 from app.services.device_command_service import INTERNAL_AUDIT_ACTIONS, INTERNAL_COMMAND_TYPES, reprocess_device_command
 from app.services.device_registry_service import ensure_default_device
 
@@ -116,12 +115,7 @@ def process_device_command_now(
         command = reprocess_device_command(db, command_uuid, worker_id="api-ops-reprocess")
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    if (
-        command.command_type == "CORRECT_ATTENDANCE"
-        and command.status == DeviceCommandStatus.SUCCESS.value
-    ):
-        finalize_pending_correction_for_command(db, command_uuid)
-        db.refresh(command)
+    db.refresh(command)
     return command
 
 

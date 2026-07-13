@@ -1,40 +1,43 @@
-import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { fetchDailySummary, fetchEmployees } from "@/services/api";
 import type { DailySummaryRow, Employee } from "@/types";
 
 export function useDashboard() {
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [summary, setSummary] = useState<DailySummaryRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const employeesQuery = useQuery({
+    queryKey: ["employees"],
+    queryFn: fetchEmployees,
+    staleTime: 5 * 60 * 1000,
+  });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [emps, sum] = await Promise.all([fetchEmployees(), fetchDailySummary()]);
-      setEmployees(emps);
-      setSummary(sum);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load dashboard");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const summaryQuery = useQuery({
+    queryKey: ["daily-summary", "today"],
+    queryFn: () => fetchDailySummary(),
+    staleTime: 2 * 60 * 1000,
+  });
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const employees = employeesQuery.data ?? [];
+  const summary = summaryQuery.data ?? [];
+  const loading = employeesQuery.isLoading || summaryQuery.isLoading;
+  const error =
+    employeesQuery.error instanceof Error
+      ? employeesQuery.error.message
+      : summaryQuery.error instanceof Error
+        ? summaryQuery.error.message
+        : null;
 
   const presentToday = summary.filter((r) => r.first_check_in != null).length;
   const absentToday = summary.filter((r) => r.first_check_in == null).length;
+
+  const reload = async () => {
+    await Promise.all([employeesQuery.refetch(), summaryQuery.refetch()]);
+  };
 
   return {
     employees,
     summary,
     loading,
     error,
-    reload: load,
+    reload,
     presentToday,
     absentToday,
     totalEmployees: employees.length,

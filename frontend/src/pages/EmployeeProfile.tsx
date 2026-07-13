@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Download } from "lucide-react";
-import { Link, useParams } from "react-router-dom";
+import { ArrowLeft, Download, UserMinus } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import { isPrivilegedAccount } from "@/auth/privilegedAccess";
 import {
@@ -9,6 +9,7 @@ import {
   AttendanceRowEditButton,
 } from "@/components/attendance/AttendanceAdjustmentPanel";
 import { EmployeeAvatar } from "@/components/employees/EmployeeAvatar";
+import { OffboardEmployeeDialog } from "@/components/employees/OffboardEmployeeDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -24,9 +25,11 @@ import {
 import {
   fetchEmployeeById,
   fetchEmployeeDailyAttendance,
+  offboardEmployee,
 } from "@/services/api";
+import { ReportFormatDialog } from "@/components/reports/ReportFormatDialog";
 import type { EmployeeDailyAttendance, EmployeeDetail } from "@/types";
-import { downloadEmployeeReportPdf } from "@/utils/pdfReports";
+import { exportEmployeeReport, type ReportFormat } from "@/utils/reportExports";
 
 function fmtMinutes(total: number | null): string {
   if (total == null) return "—";
@@ -48,7 +51,9 @@ type TabId = "profile" | "attendance";
 
 export function EmployeeProfile() {
   const { employeeId } = useParams<{ employeeId: string }>();
-  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { user, can } = useAuth();
+  const canEditEmployees = can("employee:edit");
   const canAdjustAttendance = isPrivilegedAccount(user);
   const numericEmployeeId = Number(employeeId);
 
@@ -62,6 +67,9 @@ export function EmployeeProfile() {
   const [error, setError] = useState<string | null>(null);
   const [correctionRow, setCorrectionRow] = useState<EmployeeDailyAttendance | null>(null);
   const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [formatDialogOpen, setFormatDialogOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [offboardOpen, setOffboardOpen] = useState(false);
 
   const openCorrection = useCallback((row: EmployeeDailyAttendance) => {
     setCorrectionRow(row);
@@ -117,10 +125,18 @@ export function EmployeeProfile() {
     return { present, absent };
   }, [rows]);
 
-  const exportReport = useCallback(() => {
-    if (!employee) return;
-    downloadEmployeeReportPdf({ employee, rows, fromDate, toDate });
-  }, [employee, rows, fromDate, toDate]);
+  const handleExport = useCallback(
+    async (format: ReportFormat) => {
+      if (!employee) return;
+      setExporting(true);
+      try {
+        await exportEmployeeReport(format, { employee, rows, fromDate, toDate });
+      } finally {
+        setExporting(false);
+      }
+    },
+    [employee, rows, fromDate, toDate]
+  );
 
   if (!Number.isFinite(numericEmployeeId)) {
     return (
@@ -174,12 +190,45 @@ export function EmployeeProfile() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="secondary" onClick={exportReport} disabled={!employee}>
+          {canEditEmployees && employee ? (
+            <Button type="button" variant="destructive" onClick={() => setOffboardOpen(true)}>
+              <UserMinus className="h-4 w-4" />
+              Offboard
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setFormatDialogOpen(true)}
+            disabled={!employee || exporting}
+          >
             <Download className="h-4 w-4" />
-            PDF report
+            {exporting ? "Preparing…" : "Download"}
           </Button>
         </div>
       </div>
+
+      <ReportFormatDialog
+        open={formatDialogOpen}
+        onOpenChange={setFormatDialogOpen}
+        title="Download employee report"
+        description="Choose a format for this employee's attendance report."
+        onSelect={(format) => void handleExport(format)}
+        busy={exporting}
+      />
+
+      {employee ? (
+        <OffboardEmployeeDialog
+          open={offboardOpen}
+          onOpenChange={setOffboardOpen}
+          employeeName={employee.name}
+          deviceUserId={employee.device_user_id}
+          onConfirm={async () => {
+            await offboardEmployee(employee.id);
+            navigate("/employees");
+          }}
+        />
+      ) : null}
 
       <div className="inline-flex rounded-2xl border border-line/80 bg-surface-card p-1 shadow-sm">
         {(

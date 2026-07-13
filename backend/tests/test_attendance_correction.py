@@ -45,10 +45,14 @@ class AttendanceCorrectionUnitTests(unittest.TestCase):
         self.assertFalse(caps.supports_full_rewrite)
 
     def test_ts_match_utc_aware_vs_device_naive(self) -> None:
-        # 4:26 pm IST == 10:56 UTC on same calendar day (example from DB vs device)
         device_local = datetime(2026, 6, 10, 16, 26, 5)
         db_utc = datetime(2026, 6, 10, 10, 56, 5, tzinfo=ZoneInfo("UTC"))
         self.assertTrue(_ts_match(device_local, db_utc, tz_name="Asia/Kolkata"))
+
+    def test_ts_match_within_suppression_window(self) -> None:
+        base = datetime(2026, 6, 10, 10, 56, 5, tzinfo=ZoneInfo("UTC"))
+        shifted = datetime(2026, 6, 10, 10, 56, 6, tzinfo=ZoneInfo("UTC"))
+        self.assertTrue(_ts_match(base, shifted, tz_name="Asia/Kolkata"))
 
 
 if __name__ == "__main__":
