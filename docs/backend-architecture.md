@@ -14,9 +14,9 @@
 - `employee` - workforce metadata + queued device metadata sync
 - `attendance` - logs, sessions, summary
 - `sync` - device pull and session rebuild
-- `ops` - operational metrics and firmware certification updates
-- `operations` - enterprise operations center endpoints
-- `governance` - maintenance/freeze/quarantine/approval workflows
+- `ops` - operational metrics, audit logs, device commands, firmware certification
+- `forensics` - correction ledger, raw events, device snapshots
+- `insights` - AI management summaries and anomaly explanations (advisory only)
 
 ## Device Command Pipeline
 
@@ -71,7 +71,7 @@ Scheduled jobs include:
 
 ## Security Boundaries
 
-- RBAC permission checks on operational and governance routes
+- RBAC permission checks on operational routes
 - audit logging for privileged actions
 - request correlation IDs propagated via middleware
 - device mutations blocked in emergency freeze/maintenance/device restricted modes

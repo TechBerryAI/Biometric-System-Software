@@ -65,7 +65,6 @@ import {
   buildManagementInsights,
   computeTodayWorkStats,
   dateRangeToDays,
-  departmentTodayRollup,
   formatDecimalHours,
   toDeltaTone,
   type HealthTone,
@@ -275,11 +274,6 @@ export function Dashboard() {
         dash.presentToday
       ),
     [dash.summary, dash.totalEmployees, dash.presentToday]
-  );
-
-  const departmentRows = useMemo(
-    () => departmentTodayRollup(dash.summary, dash.employees),
-    [dash.summary, dash.employees]
   );
 
   const employeeByCode = useMemo(() => {

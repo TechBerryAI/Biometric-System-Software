@@ -173,16 +173,16 @@ Before enabling writes in production:
   - `/health/db`
   - `/health/redis`
   - `/health/devices`
-  - `/health/queue`
-- review `/operations/alerts`
+   - `/health/queue`
+   - `/ops/metrics`
 - keep `DEVICE_READ_ONLY=true` during initial cutover until validation is complete
 
 ## Key Operational Endpoints
 
 - Health: `/health/*`
 - Operational metrics: `/ops/metrics`
-- Operations center: `/operations/*`
-- Governance controls: `/governance/*`
+- Device command queue: `/ops/device-commands`
+- Forensics: `/forensics/*`
 
 Full endpoint grouping is documented in `docs/api-overview.md`.
 
@@ -200,10 +200,7 @@ Full endpoint grouping is documented in `docs/api-overview.md`.
 - If login shows browser CORS/preflight errors on VM/LAN hosts, set `VITE_API_URL` correctly and verify backend CORS vars (`CORS_ALLOW_ORIGINS`, `CORS_ALLOW_PRIVATE_NETWORK_ORIGINS`).
 - If migrations fail, ensure PostgreSQL is running and credentials are correct.
 - If queue is stuck, inspect:
-  - `/operations/queue`
-  - `/operations/dead-letters`
-  - `/operations/alerts`
-- If device behavior is unstable, use governance controls:
-  - `/governance/maintenance`
-  - `/governance/emergency-freeze`
-  - `/governance/quarantine`
+  - `/ops/metrics`
+  - `/ops/device-commands?status=DEAD_LETTER`
+  - `/ops/reconciliation-jobs`
+- If device behavior is unstable, quarantine or freeze via PostgreSQL (see `docs/api-overview.md` and `docs/runbooks.md`).
