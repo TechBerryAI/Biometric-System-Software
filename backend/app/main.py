@@ -19,9 +19,7 @@ from app.api.attendance_correction import router as attendance_correction_router
 from app.api.auth import router as auth_router
 from app.api.employee import router as employee_router
 from app.api.forensics import router as forensics_router
-from app.api.governance import router as governance_router
 from app.api.insights import router as insights_router
-from app.api.enterprise_operations import router as enterprise_operations_router
 from app.api.operations import router as operations_router
 from app.api.sync import router as sync_router
 from app.core.config import get_settings
@@ -95,8 +93,6 @@ app.include_router(sync_router)
 app.include_router(auth_router)
 app.include_router(operations_router)
 app.include_router(forensics_router)
-app.include_router(enterprise_operations_router)
-app.include_router(governance_router)
 
 
 @app.get("/health")

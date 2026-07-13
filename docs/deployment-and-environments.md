@@ -70,7 +70,8 @@ node start.js
    - `/health/db`
    - `/health/redis`
    - `/health/devices`
-   - `/operations/alerts`
+   - `/health/queue`
+   - `/ops/metrics`
 
 ## VM/LAN CORS Notes
 

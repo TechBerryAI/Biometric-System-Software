@@ -2,7 +2,6 @@ import axios from "axios";
 import { API_BASE_URL } from "@/config/api";
 import type {
   AttendanceLog,
-  AttendanceSession,
   DailySummaryRow,
   Employee,
   EmployeeCreatePayload,
@@ -218,17 +217,6 @@ export async function fetchAttendanceLogs(params: {
   return data;
 }
 
-export async function fetchAttendanceSessions(params: {
-  from?: string;
-  to?: string;
-  employee_id?: number;
-}): Promise<AttendanceSession[]> {
-  const { data } = await api.get<AttendanceSession[]>("/attendance/sessions", {
-    params,
-  });
-  return data;
-}
-
 export type DeviceSyncResponse = {
   users_on_device: number;
   new_employees: number;
@@ -360,43 +348,6 @@ export async function fetchAttendanceAnomalies(lookback_days = 30): Promise<Anom
       error_code: "unknown_error",
     };
   }
-}
-
-export type ForecastPoint = {
-  date: string;
-  predicted_attendance_rate_percent: number;
-  predicted_absenteeism_percent: number;
-};
-
-export type ForecastResponse = {
-  generated_at: string;
-  lookback_days: number;
-  horizon_days: number;
-  points: ForecastPoint[];
-};
-
-export async function fetchAttendanceForecast(
-  lookback_days = 30,
-  horizon_days = 7
-): Promise<ForecastResponse> {
-  const { data } = await api.get<ForecastResponse>("/insights/forecast", {
-    params: { lookback_days, horizon_days },
-  });
-  return data;
-}
-
-export type CopilotQueryResponse = {
-  intent: string;
-  intent_confidence: "high" | "medium" | "low";
-  structured_result: Record<string, unknown>;
-  explanation?: { summary: string; insights: string[]; caveats: string[] } | null;
-  blocked: boolean;
-  block_reason?: string | null;
-};
-
-export async function queryInsightsCopilot(question: string): Promise<CopilotQueryResponse> {
-  const { data } = await api.post<CopilotQueryResponse>("/insights/copilot/query", { question });
-  return data;
 }
 
 /** Pull users + attendance from the terminal (read-only), then reload DB-backed views. */

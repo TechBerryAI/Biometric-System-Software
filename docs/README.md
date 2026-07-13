@@ -23,4 +23,4 @@ This folder is the single source of truth for platform architecture, operations,
   Incident response and operator workflows: freeze mode, quarantine, dead letters, and recovery drills.
 
 - `api-overview.md`  
-  API domains and endpoint groups for auth, attendance, operations, governance, and health checks.
+  API domains and endpoint groups for auth, attendance, operations, forensics, insights, and health checks.

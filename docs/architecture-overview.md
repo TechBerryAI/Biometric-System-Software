@@ -15,9 +15,9 @@ The architecture prioritizes:
 
 - **Frontend (`frontend/`)**
   - React + Vite + TypeScript
-  - Dashboard, attendance views, employee flows, operations center, governance screens
+  - Dashboard, attendance views, employee flows, operations center, and audit screens
 - **Backend API (`backend/app/main.py`)**
-  - FastAPI REST interface for business operations, health, governance, and metrics
+  - FastAPI REST interface for business operations, health, and metrics
 - **Device Orchestration**
   - `device_commands` queue in PostgreSQL
   - Celery workers and beat schedules for command processing, reconciliation, snapshots, retention

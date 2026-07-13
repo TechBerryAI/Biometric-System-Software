@@ -34,9 +34,10 @@
 ## Operational Endpoints
 
 - `/health/*` for service and subsystem checks
-- `/ops/*` for summary metrics and firmware profile management
-- `/operations/*` for queue, drift, fleet, alerts, and timeline visibility
-- `/governance/*` for freeze/maintenance/quarantine and approval workflows
+- `/ops/*` for metrics, audit logs, device commands, firmware profiles, and reconciliation jobs
+- `/forensics/*` for correction and raw-event investigation
+
+Global maintenance/freeze and per-device quarantine are enforced by `system_governance_service` and updated via PostgreSQL when HTTP toggles are not exposed.
 
 ## Alert Conditions to Monitor
 

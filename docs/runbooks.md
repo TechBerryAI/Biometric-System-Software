@@ -10,10 +10,10 @@ When to use:
 
 Actions:
 
-1. Call `/governance/emergency-freeze` with reason.
-2. Confirm queue mutations are blocked.
-3. Inspect `/operations/alerts` and `/operations/incident-timeline`.
-4. Triage root cause before unfreezing.
+1. Enable emergency freeze in PostgreSQL (see `docs/api-overview.md` for SQL).
+2. Confirm queue mutations are blocked via `/ops/metrics` (`emergency_freeze_active`).
+3. Inspect `/ops/device-commands?status=DEAD_LETTER` and `/ops/reconciliation-jobs`.
+4. Triage root cause before clearing `emergency_freeze_mode`.
 
 ## 2. Device Quarantine
 
@@ -25,22 +25,22 @@ When to use:
 
 Actions:
 
-1. Call `/governance/quarantine`.
-2. Confirm device mode is `QUARANTINED`.
-3. Review runtime and firmware status in `/operations/fleet-health` and `/operations/firmware-health`.
+1. Set device mode to `QUARANTINED` in PostgreSQL (see `docs/api-overview.md` for SQL).
+2. Confirm device mode via `/health/devices` or `/ops/metrics` (`quarantined_devices`).
+3. Review firmware profiles via `/ops/firmware-profiles` and certifications via `/ops/firmware-certifications`.
 4. Open reconciliation and remediation ticket.
 
 ## 3. Dead Letter Recovery
 
-1. Inspect `/operations/dead-letters`.
+1. Inspect `/ops/device-commands?status=DEAD_LETTER`.
 2. Group by error type and firmware.
 3. Validate firmware certification and safety profile.
-4. Only replay after cause is resolved and verification policy is intact.
+4. Replay with `/ops/device-commands/{command_uuid}/process` only after cause is resolved.
 
 ## 4. Reconciliation Backlog Escalation
 
-1. Check `/operations/reconciliation`.
-2. Prioritize `ESCALATED` and `REVIEW_REQUIRED`.
+1. Check `/ops/reconciliation-jobs` and `/ops/metrics` (`reconciliation_pending`).
+2. Prioritize `ESCALATED` and `REVIEW_REQUIRED` statuses.
 3. Resolve deterministic issues first.
 4. Keep unresolved high-risk jobs in manual review queue.
 

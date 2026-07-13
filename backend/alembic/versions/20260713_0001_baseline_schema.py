@@ -1,20 +1,26 @@
--- PostgreSQL schema for Biometric Attendance API
--- Matches Alembic head revision 0010.
---
--- Apply to an empty database, for example:
---   psql -U postgres -d your_database -f schema.sql
---
--- If you use Alembic on the same database afterward, stamp the revision so upgrades
--- do not re-run:  alembic stamp 0010
+"""Baseline schema: full platform DDL at revision 0015.
 
-BEGIN;
+Revision ID: 0015
+Revises:
+Create Date: 2026-07-13
 
+Squashed from migrations 0003-0015. Existing databases already stamped at 0015
+require no upgrade; fresh databases apply this revision once.
+"""
+
+from __future__ import annotations
+
+from typing import Sequence, Union
+
+from alembic import op
+
+revision: str = "0015"
+down_revision: Union[str, None] = None
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+_BASELINE_SQL = """
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
-CREATE TABLE alembic_version (
-    version_num VARCHAR(32) NOT NULL,
-    CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
-);
 
 CREATE TABLE employees (
     id SERIAL NOT NULL,
@@ -29,6 +35,7 @@ CREATE TABLE employees (
     shift_start TIME WITHOUT TIME ZONE,
     shift_end TIME WITHOUT TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    departed_at TIMESTAMP WITH TIME ZONE,
     PRIMARY KEY (id),
     CONSTRAINT uq_employees_device_user_id UNIQUE (device_user_id)
 );
@@ -283,6 +290,9 @@ CREATE TABLE device_firmware_profiles (
     write_delay_ms INTEGER DEFAULT 500 NOT NULL,
     verification_strategy VARCHAR(64) NOT NULL,
     known_limitations VARCHAR(2000),
+    supports_attlog_delete_by_time BOOLEAN DEFAULT false NOT NULL,
+    supports_attlog_write BOOLEAN DEFAULT false NOT NULL,
+    attlog_record_size INTEGER DEFAULT 40 NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
     PRIMARY KEY (id),
     UNIQUE (firmware_version)
@@ -460,6 +470,132 @@ CREATE TABLE system_control_state (
     UNIQUE (singleton_key)
 );
 
+
+CREATE INDEX ix_employees_departed_at ON employees (departed_at);
+
+CREATE TABLE attendance_corrections (
+    id SERIAL NOT NULL,
+    correction_uuid VARCHAR(36) NOT NULL,
+    employee_id INTEGER NOT NULL,
+    local_date DATE NOT NULL,
+    previous_check_in TIMESTAMP WITH TIME ZONE,
+    previous_check_out TIMESTAMP WITH TIME ZONE,
+    new_check_in TIMESTAMP WITH TIME ZONE,
+    new_check_out TIMESTAMP WITH TIME ZONE,
+    actor_user_uuid VARCHAR(36),
+    device_command_uuid VARCHAR(36),
+    status VARCHAR(32) DEFAULT 'pending' NOT NULL,
+    error_message VARCHAR(2000),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    applied_at TIMESTAMP WITH TIME ZONE,
+    device_tier VARCHAR(1),
+    device_verification_details JSONB,
+    correction_mode VARCHAR(32),
+    device_operation_uuid VARCHAR(36),
+    reimport_completed_at TIMESTAMP WITH TIME ZONE,
+    PRIMARY KEY (id),
+    UNIQUE (correction_uuid),
+    UNIQUE (device_operation_uuid),
+    FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_attendance_corrections_employee_id ON attendance_corrections (employee_id);
+CREATE INDEX ix_attendance_corrections_local_date ON attendance_corrections (local_date);
+CREATE INDEX ix_attendance_corrections_actor_user_uuid ON attendance_corrections (actor_user_uuid);
+CREATE INDEX ix_attendance_corrections_device_command_uuid ON attendance_corrections (device_command_uuid);
+CREATE INDEX ix_attendance_corrections_device_operation_uuid ON attendance_corrections (device_operation_uuid);
+CREATE INDEX ix_attendance_corrections_employee_date_status ON attendance_corrections (employee_id, local_date, status);
+
+CREATE TABLE attendance_sync_suppressions (
+    id SERIAL NOT NULL,
+    device_id VARCHAR(128) NOT NULL,
+    employee_code VARCHAR(64) NOT NULL,
+    suppressed_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    reason VARCHAR(32) DEFAULT 'correction' NOT NULL,
+    correction_id INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uq_suppression_device_employee_ts UNIQUE (device_id, employee_code, suppressed_timestamp),
+    FOREIGN KEY (correction_id) REFERENCES attendance_corrections (id) ON DELETE SET NULL
+);
+
+CREATE INDEX ix_attendance_sync_suppressions_device_id ON attendance_sync_suppressions (device_id);
+CREATE INDEX ix_attendance_sync_suppressions_employee_code ON attendance_sync_suppressions (employee_code);
+CREATE INDEX ix_attendance_sync_suppressions_suppressed_timestamp ON attendance_sync_suppressions (suppressed_timestamp);
+
+CREATE TABLE attendance_events (
+    id SERIAL NOT NULL,
+    event_uuid VARCHAR(36) NOT NULL,
+    employee_code VARCHAR(64) NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    device_id VARCHAR(128) NOT NULL,
+    employee_uuid VARCHAR(36),
+    device_mapping_id INTEGER,
+    punch_type VARCHAR(32) NOT NULL,
+    source VARCHAR(32) DEFAULT 'device_sync' NOT NULL,
+    sync_batch_uuid VARCHAR(36),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uq_event_device_employee_ts UNIQUE (device_id, employee_code, timestamp),
+    CONSTRAINT uq_attendance_event_uuid UNIQUE (event_uuid),
+    FOREIGN KEY (device_mapping_id) REFERENCES device_user_mappings (id) ON DELETE SET NULL,
+    FOREIGN KEY (employee_uuid) REFERENCES employees (employee_uuid) ON DELETE SET NULL
+);
+
+CREATE INDEX ix_attendance_events_employee_code ON attendance_events (employee_code);
+CREATE INDEX ix_attendance_events_timestamp ON attendance_events (timestamp);
+CREATE INDEX ix_attendance_events_employee_uuid ON attendance_events (employee_uuid);
+CREATE INDEX ix_attendance_events_sync_batch_uuid ON attendance_events (sync_batch_uuid);
+
+CREATE TABLE attendance_effective_punches (
+    id SERIAL NOT NULL,
+    employee_id INTEGER NOT NULL,
+    local_date DATE NOT NULL,
+    punch_type VARCHAR(32) NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    source VARCHAR(32) DEFAULT 'derived' NOT NULL,
+    correction_uuid VARCHAR(36),
+    is_active BOOLEAN DEFAULT true NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    PRIMARY KEY (id),
+    FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_effective_punches_employee_date ON attendance_effective_punches (employee_id, local_date);
+CREATE INDEX ix_effective_punches_timestamp ON attendance_effective_punches (timestamp);
+CREATE INDEX ix_effective_punches_active ON attendance_effective_punches (is_active);
+CREATE INDEX ix_effective_punches_correction_uuid ON attendance_effective_punches (correction_uuid);
+
+CREATE TABLE attendance_correction_events (
+    id SERIAL NOT NULL,
+    event_uuid VARCHAR(36) NOT NULL,
+    correction_uuid VARCHAR(36) NOT NULL,
+    device_operation_uuid VARCHAR(36),
+    event_type VARCHAR(64) NOT NULL,
+    payload JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uq_correction_event_uuid UNIQUE (event_uuid),
+    CONSTRAINT uq_correction_device_operation_uuid UNIQUE (device_operation_uuid)
+);
+
+CREATE INDEX ix_correction_events_correction_uuid ON attendance_correction_events (correction_uuid);
+CREATE INDEX ix_correction_events_event_type ON attendance_correction_events (event_type);
+
+INSERT INTO operation_safety_profiles (
+    operation_type, firmware_compatibility, risk_level, verification_required,
+    rollback_possible, retry_safe, requires_manual_review
+) VALUES (
+    'CORRECT_ATTENDANCE',
+    '{"supported": ["tier_a"]}'::jsonb,
+    'HIGH',
+    true,
+    false,
+    true,
+    true
+)
+ON CONFLICT (operation_type) DO NOTHING;
+
 INSERT INTO operation_safety_profiles (
     operation_type,
     firmware_compatibility,
@@ -482,7 +618,43 @@ ON CONFLICT (operation_type) DO NOTHING;
 INSERT INTO system_control_state (singleton_key, maintenance_mode, emergency_freeze_mode)
 VALUES ('global', false, false)
 ON CONFLICT (singleton_key) DO NOTHING;
+"""
 
-INSERT INTO alembic_version (version_num) VALUES ('0010');
 
-COMMIT;
+def upgrade() -> None:
+    op.execute(_BASELINE_SQL)
+
+
+def downgrade() -> None:
+    tables = [
+        "attendance_correction_events",
+        "attendance_effective_punches",
+        "attendance_events",
+        "attendance_sync_suppressions",
+        "attendance_corrections",
+        "fleet_health_metrics",
+        "system_control_state",
+        "operator_approvals",
+        "device_runtime_health",
+        "certified_firmware_profiles",
+        "operation_safety_profiles",
+        "device_state_snapshots",
+        "command_execution_history",
+        "reconciliation_jobs",
+        "device_firmware_profiles",
+        "verification_results",
+        "device_sync_events",
+        "device_commands",
+        "devices",
+        "audit_logs",
+        "refresh_tokens",
+        "users",
+        "attendance_anomalies",
+        "attendance_sessions",
+        "attendance_logs",
+        "device_user_mappings",
+        "employees",
+    ]
+    for table in tables:
+        op.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+    op.execute('DROP EXTENSION IF EXISTS "pgcrypto"')
