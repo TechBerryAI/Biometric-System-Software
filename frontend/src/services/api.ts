@@ -165,6 +165,10 @@ export async function updateEmployee(employeeId: number, payload: EmployeeCreate
   return data;
 }
 
+export async function offboardEmployee(employeeId: number): Promise<void> {
+  await api.delete(`/employees/${employeeId}`);
+}
+
 export async function fetchEmployeeById(employeeId: number): Promise<EmployeeDetail> {
   const { data } = await api.get<EmployeeDetail>(`/employees/${employeeId}`);
   return data;
@@ -269,6 +273,8 @@ export async function fetchManagementInsights(days = 14): Promise<ManagementInsi
       const code =
         err.code === "ECONNABORTED"
           ? "timeout"
+          : err.response?.status === 403
+          ? "forbidden"
           : err.response?.status === 429
           ? "rate_limited"
           : "request_failed";
@@ -305,11 +311,55 @@ export type AnomalyDetectionResponse = {
   period_end: string;
   detector: "isolation_forest" | "heuristic";
   anomalies: AttendanceAnomaly[];
+  available?: boolean;
+  error_code?: string | null;
 };
 
 export async function fetchAttendanceAnomalies(lookback_days = 30): Promise<AnomalyDetectionResponse> {
-  const { data } = await api.get<AnomalyDetectionResponse>("/insights/anomalies", { params: { lookback_days } });
-  return data;
+  try {
+    const { data } = await api.get<AnomalyDetectionResponse>("/insights/anomalies", {
+      params: { lookback_days },
+      timeout: INSIGHTS_HTTP_TIMEOUT_MS,
+    });
+    if (!data || !Array.isArray(data.anomalies)) {
+      return {
+        available: false,
+        period_start: "",
+        period_end: "",
+        detector: "heuristic",
+        anomalies: [],
+        error_code: "malformed_response",
+      };
+    }
+    return { ...data, available: true, error_code: null };
+  } catch (err) {
+    if (axios.isAxiosError(err)) {
+      const code =
+        err.code === "ECONNABORTED"
+          ? "timeout"
+          : err.response?.status === 403
+          ? "forbidden"
+          : err.response?.status === 429
+          ? "rate_limited"
+          : "request_failed";
+      return {
+        available: false,
+        period_start: "",
+        period_end: "",
+        detector: "heuristic",
+        anomalies: [],
+        error_code: code,
+      };
+    }
+    return {
+      available: false,
+      period_start: "",
+      period_end: "",
+      detector: "heuristic",
+      anomalies: [],
+      error_code: "unknown_error",
+    };
+  }
 }
 
 export type ForecastPoint = {

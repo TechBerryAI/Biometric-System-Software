@@ -10,19 +10,21 @@ import { Input } from "@/components/ui/input";
 import { useAttendanceTrend } from "@/hooks/useAttendanceTrend";
 import type { ExportPeriod } from "@/lib/dates";
 import { dateList, getExportRange, todayISO } from "@/lib/dates";
+import { ReportFormatDialog } from "@/components/reports/ReportFormatDialog";
 import { fetchDailySummaryRange } from "@/services/api";
 import type { DailySummaryRow } from "@/types";
-import { downloadAttendanceSummaryPdf } from "@/utils/pdfReports";
+import { exportAttendanceSummary, type ReportFormat } from "@/utils/reportExports";
 
 export function Reports() {
   const [anchorDate, setAnchorDate] = useState(todayISO);
   const [period, setPeriod] = useState<ExportPeriod>("week");
+  const [formatDialogOpen, setFormatDialogOpen] = useState(false);
   const trend = useAttendanceTrend(14);
 
   const range = useMemo(() => getExportRange(anchorDate, period), [anchorDate, period]);
 
   const exportMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (format: ReportFormat) => {
       const dates = dateList(range.from, range.to);
       const byDay = await fetchDailySummaryRange(range.from, range.to);
       const allRows: Array<DailySummaryRow & { summary_date: string }> = [];
@@ -32,7 +34,7 @@ export function Reports() {
           allRows.push({ ...row, summary_date: day });
         }
       }
-      downloadAttendanceSummaryPdf({ periodLabel: range.label, rows: allRows });
+      await exportAttendanceSummary(format, { periodLabel: range.label, rows: allRows });
     },
   });
 
@@ -50,7 +52,7 @@ export function Reports() {
           <CardHeader>
             <div className="flex items-center gap-2 text-primary">
               <FileSpreadsheet className="h-5 w-5" strokeWidth={1.75} />
-              <CardTitle>PDF export</CardTitle>
+              <CardTitle>Report export</CardTitle>
             </div>
             <CardDescription>Roll up every employee across your chosen window into one document.</CardDescription>
           </CardHeader>
@@ -77,11 +79,11 @@ export function Reports() {
             <Button
               type="button"
               className="w-full sm:w-auto"
-              onClick={() => exportMutation.mutate()}
+              onClick={() => setFormatDialogOpen(true)}
               disabled={exportMutation.isPending}
             >
               <Download className="h-4 w-4" />
-              {exportMutation.isPending ? "Building PDF…" : "Download PDF"}
+              {exportMutation.isPending ? "Preparing…" : "Download"}
             </Button>
             {exportMutation.isError ? (
               <p className="text-sm text-status-absent">
@@ -95,6 +97,15 @@ export function Reports() {
           <WeeklyAttendanceChart data={trend.data} loading={trend.isLoading} />
         </motion.div>
       </div>
+
+      <ReportFormatDialog
+        open={formatDialogOpen}
+        onOpenChange={setFormatDialogOpen}
+        title="Download attendance report"
+        description="Choose a format for the all-employee attendance summary."
+        onSelect={(format) => exportMutation.mutate(format)}
+        busy={exportMutation.isPending}
+      />
 
       <AttendanceTrendChart data={trend.data} loading={trend.isLoading} />
     </div>

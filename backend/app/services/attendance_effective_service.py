@@ -10,7 +10,7 @@ from typing import Sequence
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, delete, select, update
+from sqlalchemy import and_, delete, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,7 @@ from app.models.attendance_event import AttendanceEvent
 from app.models.attendance_session import AttendanceSession
 from app.models.attendance_log import AttendanceLog
 from app.models.attendance_sync_suppression import AttendanceSyncSuppression
+from app.models.device_user_mapping import DeviceUserMapping
 from app.models.employee import Employee
 from app.services.attendance_helpers import (
     is_suppressed_timestamp,
@@ -41,8 +42,124 @@ logger = logging.getLogger(__name__)
 
 PUNCH_IN = "0"
 PUNCH_OUT = "1"
+_CHECK_IN_DIRECTION_CODES = ("0", "3", "4")
+_ENROLLMENT_GAP_DAYS = 30
 
 _APPLIED_CORRECTION_STATUSES = frozenset({"applied", "applied_db_only"})
+
+
+def _first_meaningful_check_in(
+    check_ins: Sequence[tuple[datetime, date, int]],
+    all_timestamps: Sequence[datetime],
+) -> datetime | None:
+    """
+    Skip isolated device-enrollment punches: a lone check-in with no other punches
+    on that day and a long gap before the next attendance record.
+    """
+    if not check_ins:
+        return None
+    gap = timedelta(days=_ENROLLMENT_GAP_DAYS)
+    ordered_all = sorted(all_timestamps)
+
+    def _next_punch_after(ts: datetime) -> datetime | None:
+        for candidate in ordered_all:
+            if candidate > ts:
+                return candidate
+        return None
+
+    for ts, _local_date, day_count in check_ins:
+        if day_count > 1:
+            return ts
+        next_ts = _next_punch_after(ts)
+        if next_ts is None or next_ts - ts <= gap:
+            return ts
+    return check_ins[-1][0]
+
+
+def employee_punch_bounds(
+    db: Session,
+    *,
+    employee: Employee,
+) -> tuple[datetime | None, datetime | None]:
+    """
+    Return (first_check_in, last_punch) for employee profile stats.
+
+    First punch uses the earliest classified check-in, not orphan check-outs left
+    on the device before an employee's first real arrival. When identity mappings
+    exist, punches outside the employee's mapping window are ignored.
+    """
+    base_filters = (
+        AttendanceEffectivePunch.employee_id == employee.id,
+        AttendanceEffectivePunch.is_active.is_(True),
+    )
+    mapping_filters: list = []
+    if employee.employee_uuid:
+        mapping_filters.append(
+            exists(
+                select(1)
+                .select_from(DeviceUserMapping)
+                .where(
+                    DeviceUserMapping.employee_uuid == employee.employee_uuid,
+                    DeviceUserMapping.valid_from <= AttendanceEffectivePunch.timestamp,
+                    or_(
+                        DeviceUserMapping.valid_to.is_(None),
+                        DeviceUserMapping.valid_to > AttendanceEffectivePunch.timestamp,
+                    ),
+                )
+            )
+        )
+
+    day_count = (
+        func.count()
+        .over(partition_by=AttendanceEffectivePunch.local_date)
+        .label("day_count")
+    )
+    check_in_filters = (
+        *base_filters,
+        AttendanceEffectivePunch.punch_type.in_(_CHECK_IN_DIRECTION_CODES),
+        *mapping_filters,
+    )
+    check_ins = list(
+        db.execute(
+            select(
+                AttendanceEffectivePunch.timestamp,
+                AttendanceEffectivePunch.local_date,
+                day_count,
+            )
+            .where(*check_in_filters)
+            .order_by(AttendanceEffectivePunch.timestamp)
+        ).all()
+    )
+    if not check_ins and mapping_filters:
+        check_ins = list(
+            db.execute(
+                select(
+                    AttendanceEffectivePunch.timestamp,
+                    AttendanceEffectivePunch.local_date,
+                    day_count,
+                )
+                .where(
+                    *base_filters,
+                    AttendanceEffectivePunch.punch_type.in_(_CHECK_IN_DIRECTION_CODES),
+                )
+                .order_by(AttendanceEffectivePunch.timestamp)
+            ).all()
+        )
+
+    all_timestamps = list(
+        db.execute(
+            select(AttendanceEffectivePunch.timestamp)
+            .where(*base_filters)
+            .order_by(AttendanceEffectivePunch.timestamp)
+        ).scalars().all()
+    )
+
+    first_punch_at = _first_meaningful_check_in(check_ins, all_timestamps)
+    if first_punch_at is None and all_timestamps:
+        first_punch_at = all_timestamps[0]
+
+    last_punch_at = all_timestamps[-1] if all_timestamps else None
+    return first_punch_at, last_punch_at
 
 
 @dataclass(frozen=True, slots=True)
@@ -627,7 +744,9 @@ def rebuild_sessions_for_local_date(
 ) -> int:
     """Rebuild sessions for all employees on a date (sync path only)."""
     settings = settings or get_settings()
-    employees = list(db.execute(select(Employee)).scalars().all())
+    employees = list(
+        db.execute(select(Employee).where(Employee.departed_at.is_(None))).scalars().all()
+    )
     total = 0
     for emp in employees:
         sync_effective_punches_from_events(db, employee=emp, local_date=target, settings=settings, commit=False)

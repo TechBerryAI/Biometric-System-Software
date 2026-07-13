@@ -123,7 +123,7 @@ class DeviceService:
 
     @staticmethod
     def safe_command_allowlist() -> set[str]:
-        return {"UPSERT_USER", "CORRECT_ATTENDANCE"}
+        return {"UPSERT_USER", "CORRECT_ATTENDANCE", "DELETE_USER"}
 
     def detect_firmware_fingerprint(self) -> dict[str, Any]:
         """Best-effort firmware/platform fingerprint for safe profile selection."""
@@ -366,6 +366,56 @@ class DeviceService:
                 "mismatch_details": mismatch or None,
             },
         )
+
+    def resolve_uid_for_user_id(self, user_id: str) -> int | None:
+        """Return device uid for a user_id, or None if absent on device."""
+        normalized = user_id.strip()
+        if not normalized:
+            return None
+        for user in self.fetch_users():
+            if user.user_id.strip() == normalized:
+                return int(user.uid)
+        return None
+
+    def delete_user(self, *, uid: int | None = None, user_id: str | None = None) -> None:
+        """Remove a user (and biometric template) from the device."""
+        target_uid = int(uid) if uid is not None else None
+        normalized_user_id = (user_id or "").strip()
+        if (target_uid is None or target_uid <= 0) and normalized_user_id:
+            target_uid = self.resolve_uid_for_user_id(normalized_user_id)
+        if target_uid is None or target_uid <= 0:
+            raise ValueError("uid is required for device delete (user not found on device).")
+
+        try:
+            def _delete(conn: Any) -> None:
+                conn.delete_user(uid=target_uid)
+                time.sleep(0.1)
+
+            self._adapter.run("delete_user", _delete, max_attempts=2)
+        except Exception as exc:  # noqa: BLE001
+            identity = normalized_user_id or str(target_uid)
+            raise RuntimeError(f"Device user delete failed for '{identity}': {exc}") from exc
+
+    def verify_user_deleted(self, *, user_id: str) -> tuple[bool, dict[str, Any]]:
+        """Confirm user_id is absent from device after delete."""
+        normalized = user_id.strip()
+        users = self.fetch_users()
+        match = next((u for u in users if u.user_id.strip() == normalized), None)
+        if match is None:
+            return True, {
+                "expected_state": {"user_id": normalized, "present": False},
+                "actual_state": None,
+                "mismatch_details": None,
+            }
+        return False, {
+            "expected_state": {"user_id": normalized, "present": False},
+            "actual_state": {
+                "user_id": match.user_id.strip(),
+                "uid": int(match.uid),
+                "name": match.name.strip(),
+            },
+            "mismatch_details": {"reason": "user_still_present_after_delete"},
+        }
 
     def probe_attlog_capabilities(self) -> dict[str, object]:
         def _probe(conn: Any) -> dict[str, object]:

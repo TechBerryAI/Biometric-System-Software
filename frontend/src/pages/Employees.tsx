@@ -1,15 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { PenSquare, Plus } from "lucide-react";
+import { PenSquare, Plus, UserMinus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import { AddEmployeeModal } from "@/components/employees/AddEmployeeModal";
 import { EmployeeAvatar } from "@/components/employees/EmployeeAvatar";
+import { OffboardEmployeeDialog } from "@/components/employees/OffboardEmployeeDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchEmployees } from "@/services/api";
+import { fetchEmployees, offboardEmployee } from "@/services/api";
 import { cn } from "@/lib/cn";
 import { useUiStore } from "@/stores/ui-store";
 import type { Employee } from "@/types";
@@ -21,6 +22,7 @@ export function Employees() {
   const globalSearchQuery = useUiStore((s) => s.globalSearchQuery);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [offboardTarget, setOffboardTarget] = useState<Employee | null>(null);
   const canEditEmployees = can("employee:edit");
 
   useEffect(() => {
@@ -97,6 +99,22 @@ export function Employees() {
         <AddEmployeeModal open={modalOpen} onOpenChange={setModalOpen} employee={editingEmployee} />
       ) : null}
 
+      {offboardTarget ? (
+        <OffboardEmployeeDialog
+          open={offboardTarget != null}
+          onOpenChange={(open) => {
+            if (!open) setOffboardTarget(null);
+          }}
+          employeeName={offboardTarget.name}
+          deviceUserId={offboardTarget.device_user_id}
+          onConfirm={async () => {
+            await offboardEmployee(offboardTarget.id);
+            setOffboardTarget(null);
+            await refetch();
+          }}
+        />
+      ) : null}
+
       {isLoading ? (
         <div className="space-y-3">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -159,20 +177,35 @@ export function Employees() {
                       </td>
                       <td className="px-6 py-4 text-right">
                         {canEditEmployees ? (
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            className="h-8"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setEditingEmployee(e);
-                              setModalOpen(true);
-                            }}
-                          >
-                            <PenSquare className="h-3.5 w-3.5" />
-                            Edit
-                          </Button>
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              className="h-8"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setEditingEmployee(e);
+                                setModalOpen(true);
+                              }}
+                            >
+                              <PenSquare className="h-3.5 w-3.5" />
+                              Edit
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              className="h-8"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setOffboardTarget(e);
+                              }}
+                            >
+                              <UserMinus className="h-3.5 w-3.5" />
+                              Offboard
+                            </Button>
+                          </div>
                         ) : (
                           <span className="text-xs text-ink-muted">View only</span>
                         )}

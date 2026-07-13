@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
+import { Download } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,8 +14,10 @@ import {
   getApiErrorMessage,
 } from "@/services/api";
 import { useUiStore } from "@/stores/ui-store";
+import { ReportFormatDialog } from "@/components/reports/ReportFormatDialog";
 import type { DailySummaryRow, Employee } from "@/types";
-import { downloadAttendanceSummaryPdf } from "@/utils/pdfReports";
+import { exportAttendanceSummary } from "@/utils/reportExports";
+import type { ReportFormat } from "@/utils/reportExports";
 
 function fmtWorkHm(total: number | null): string {
   if (total == null) return "—";
@@ -35,6 +38,7 @@ export function Attendance() {
   const [loading, setLoading] = useState(false);
   const [exportPeriod, setExportPeriod] = useState<ExportPeriod>("day");
   const [exporting, setExporting] = useState(false);
+  const [formatDialogOpen, setFormatDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchRoster = useCallback(async () => {
@@ -103,29 +107,32 @@ export function Attendance() {
   const presentCount = filtered.filter((r) => !r.is_absent).length;
   const absentCount = filtered.filter((r) => r.is_absent).length;
 
-  const exportReport = useCallback(async () => {
-    setExporting(true);
-    try {
-      const range = getExportRange(date, exportPeriod);
-      const dates = dateList(range.from, range.to);
-      const byDay = await fetchDailySummaryRange(range.from, range.to);
-      const allRows: Array<DailySummaryRow & { summary_date: string }> = [];
-      for (const day of dates) {
-        const summary = byDay[day] ?? [];
-        for (const row of summary) {
-          allRows.push({ ...row, summary_date: day });
+  const exportReport = useCallback(
+    async (format: ReportFormat) => {
+      setExporting(true);
+      try {
+        const range = getExportRange(date, exportPeriod);
+        const dates = dateList(range.from, range.to);
+        const byDay = await fetchDailySummaryRange(range.from, range.to);
+        const allRows: Array<DailySummaryRow & { summary_date: string }> = [];
+        for (const day of dates) {
+          const summary = byDay[day] ?? [];
+          for (const row of summary) {
+            allRows.push({ ...row, summary_date: day });
+          }
         }
+        await exportAttendanceSummary(format, {
+          periodLabel: range.label,
+          rows: allRows,
+        });
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to export report");
+      } finally {
+        setExporting(false);
       }
-      downloadAttendanceSummaryPdf({
-        periodLabel: range.label,
-        rows: allRows,
-      });
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to export PDF report");
-    } finally {
-      setExporting(false);
-    }
-  }, [date, exportPeriod]);
+    },
+    [date, exportPeriod]
+  );
 
   return (
     <div className="space-y-8">
@@ -145,7 +152,7 @@ export function Attendance() {
           <div>
             <h2 className="font-display text-display-lg text-ink">Export</h2>
             <p className="mt-1 max-w-xl text-sm text-ink-muted">
-              Select date and period together, then generate a printable PDF for audits and payroll handoff.
+              Select date and period together, then download a report for audits and payroll handoff.
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -165,12 +172,27 @@ export function Attendance() {
                 <option value="month">Last 30 days</option>
               </select>
             </label>
-            <Button type="button" onClick={() => void exportReport()} disabled={exporting} className="min-w-[140px]">
-              {exporting ? "Preparing…" : "Download PDF"}
+            <Button
+              type="button"
+              onClick={() => setFormatDialogOpen(true)}
+              disabled={exporting}
+              className="min-w-[140px]"
+            >
+              <Download className="h-4 w-4" />
+              {exporting ? "Preparing…" : "Download"}
             </Button>
           </div>
         </CardContent>
       </Card>
+
+      <ReportFormatDialog
+        open={formatDialogOpen}
+        onOpenChange={setFormatDialogOpen}
+        title="Download attendance report"
+        description="Choose a format for the all-employee attendance summary."
+        onSelect={(format) => void exportReport(format)}
+        busy={exporting}
+      />
 
       {error ? (
         <Card className="border-status-absent-soft bg-status-absent-soft/25">

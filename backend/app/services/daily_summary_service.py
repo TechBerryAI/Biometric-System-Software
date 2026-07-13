@@ -71,7 +71,11 @@ def compute_daily_summaries_range(
     if end_date < start_date:
         return {}
     cfg = settings or get_settings()
-    employees = list(db.execute(select(Employee).order_by(Employee.id)).scalars().all())
+    employees = list(
+        db.execute(
+            select(Employee).where(Employee.departed_at.is_(None)).order_by(Employee.id)
+        ).scalars().all()
+    )
     raw_by_day = load_raw_punches_for_dates(
         db, start_date=start_date, end_date=end_date, employees=employees, settings=cfg
     )

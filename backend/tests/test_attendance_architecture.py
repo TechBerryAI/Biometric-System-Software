@@ -6,7 +6,12 @@ import unittest
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from app.services.attendance_effective_service import DayAttendanceSnapshot, verify_imported_timestamps
+from app.services.attendance_effective_service import (
+    DayAttendanceSnapshot,
+    _first_meaningful_check_in,
+    employee_punch_bounds,
+    verify_imported_timestamps,
+)
 from app.services.attendance_service import prune_recent_duplicate_logs
 from app.core.config import get_settings
 from app.services.punch_classification import (
@@ -85,6 +90,24 @@ class AttendanceArchitectureTests(unittest.TestCase):
         self.assertEqual(first_in, punches[0].timestamp)
         self.assertEqual(last_out, punches[1].timestamp)
         self.assertEqual(work, 529)
+
+    def test_first_meaningful_check_in_skips_enrollment_orphan(self) -> None:
+        tz = ZoneInfo("Asia/Kolkata")
+        enrollment = datetime(2025, 12, 17, 14, 57, 23, tzinfo=tz)
+        first_work = datetime(2026, 4, 28, 14, 47, 56, tzinfo=tz)
+        check_ins = [
+            (enrollment, enrollment.date(), 1),
+            (first_work, first_work.date(), 1),
+        ]
+        all_ts = [enrollment, first_work]
+        self.assertEqual(_first_meaningful_check_in(check_ins, all_ts), first_work)
+
+    def test_first_meaningful_check_in_keeps_nearby_singleton(self) -> None:
+        tz = ZoneInfo("Asia/Kolkata")
+        first = datetime(2026, 4, 28, 9, 0, 0, tzinfo=tz)
+        second = datetime(2026, 5, 3, 9, 0, 0, tzinfo=tz)
+        check_ins = [(first, first.date(), 1)]
+        self.assertEqual(_first_meaningful_check_in(check_ins, [first, second]), first)
 
 
 if __name__ == "__main__":

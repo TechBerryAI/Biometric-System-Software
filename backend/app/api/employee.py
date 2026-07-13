@@ -30,7 +30,9 @@ from app.schemas.employee import (
 )
 from app.services.audit_service import append_audit_log
 from app.services.device_command_service import enqueue_device_command, process_command
+from app.services.employee_offboard_service import offboard_employee
 from app.services.attendance_effective_service import (
+    employee_punch_bounds,
     load_raw_punches_for_dates,
     summarize_employee_day_from_events,
 )
@@ -109,13 +111,17 @@ def _ensure_device_writes_enabled(db: Session, *, device_id: str) -> None:
 
 @router.get("", response_model=list[EmployeeRead])
 def list_employees(db: Session = Depends(get_db)) -> list[Employee]:
-    return list(db.execute(select(Employee).order_by(Employee.id)).scalars().all())
+    return list(
+        db.execute(
+            select(Employee).where(Employee.departed_at.is_(None)).order_by(Employee.id)
+        ).scalars().all()
+    )
 
 
 @router.get("/{employee_id}", response_model=EmployeeDetailRead)
 def get_employee(employee_id: int, db: Session = Depends(get_db)) -> EmployeeDetailRead:
     emp = db.get(Employee, employee_id)
-    if emp is None:
+    if emp is None or emp.departed_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
     if not emp.employee_uuid:
         emp.employee_uuid = str(uuid4())
@@ -130,12 +136,7 @@ def get_employee(employee_id: int, db: Session = Depends(get_db)) -> EmployeeDet
         ).scalar_one()
         or 0
     )
-    first_punch_at, last_punch_at = db.execute(
-        select(func.min(AttendanceEffectivePunch.timestamp), func.max(AttendanceEffectivePunch.timestamp)).where(
-            AttendanceEffectivePunch.employee_id == emp.id,
-            AttendanceEffectivePunch.is_active.is_(True),
-        )
-    ).one()
+    first_punch_at, last_punch_at = employee_punch_bounds(db, employee=emp)
     log_rows = list(
         db.execute(
             select(AttendanceEffectivePunch.timestamp, AttendanceEffectivePunch.punch_type)
@@ -180,7 +181,7 @@ def get_employee_daily_attendance(
     db: Session = Depends(get_db),
 ) -> list[EmployeeDailyAttendanceRead]:
     emp = db.get(Employee, employee_id)
-    if emp is None:
+    if emp is None or emp.departed_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
     if not emp.employee_uuid:
         emp.employee_uuid = str(uuid4())
@@ -263,9 +264,11 @@ def upsert_employee_metadata(
             "department": existing.department,
             "shift_start": existing.shift_start.isoformat() if existing.shift_start else None,
             "shift_end": existing.shift_end.isoformat() if existing.shift_end else None,
+            "departed_at": existing.departed_at.isoformat() if existing.departed_at else None,
         }
         if not existing.employee_uuid:
             existing.employee_uuid = str(uuid4())
+        existing.departed_at = None
         existing.name = payload.name
         existing.department = payload.department
         existing.shift_start = payload.shift_start
@@ -384,7 +387,7 @@ def update_employee(
     """
     existing = db.get(Employee, employee_id)
     _ensure_device_writes_enabled(db, device_id=get_settings().zk_device_id)
-    if existing is None:
+    if existing is None or existing.departed_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
 
     new_device_user_id = (payload.device_user_id if payload.device_user_id is not None else existing.device_user_id).strip()
@@ -468,3 +471,32 @@ def update_employee(
     db.commit()
     db.refresh(existing)
     return existing
+
+
+@router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
+def offboard_employee_route(
+    employee_id: int,
+    request: Request,
+    user: User = Depends(require_permissions(Permission.EMPLOYEE_EDIT)),
+    db: Session = Depends(get_db),
+) -> None:
+    """Soft-offboard an employee: hide from directory and remove from biometric device."""
+    emp = db.get(Employee, employee_id)
+    if emp is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
+    if emp.departed_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Employee is already offboarded.")
+
+    settings = get_settings()
+    _ensure_device_writes_enabled(db, device_id=settings.zk_device_id)
+    offboard_employee(
+        db,
+        emp,
+        actor_user_uuid=user.user_uuid,
+        reason="api_offboard",
+        request_id=getattr(request.state, "request_id", None),
+        ip_address=request.client.host if request.client else None,
+        process_device_inline=True,
+        settings=settings,
+    )
+    db.commit()

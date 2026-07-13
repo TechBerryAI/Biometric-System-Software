@@ -24,6 +24,7 @@ from app.services.attendance_helpers import (
     resolve_mapping_for_punch as _resolve_mapping_for_punch,
 )
 from app.services.device_service import DeviceAttendanceRecord, DeviceService, DeviceUser
+from app.services.employee_offboard_service import enqueue_delete_user_command
 from app.services.punch_classification import device_attendance_punch_type
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,27 @@ def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -
     now = datetime.now(ZoneInfo("UTC"))
     settings = get_settings()
     for u in users:
+        departed = db.execute(
+            select(Employee).where(
+                Employee.device_user_id == u.user_id,
+                Employee.departed_at.is_not(None),
+            )
+        ).scalar_one_or_none()
+        if departed is not None:
+            try:
+                enqueue_delete_user_command(
+                    db,
+                    device_id=settings.zk_device_id,
+                    user_id=u.user_id,
+                    uid=u.uid,
+                    initiated_from="sync:departed_cleanup",
+                    process_inline=False,
+                    settings=settings,
+                )
+            except RuntimeError:
+                pass
+            continue
+
         # Transition helper: old builds stored uid as numeric string.
         old_uid_identity = str(u.uid)
         if u.user_id != old_uid_identity:

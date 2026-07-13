@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   Activity,
   AlertTriangle,
@@ -9,7 +9,8 @@ import {
   Brain,
   Building2,
   CalendarDays,
-  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   CircleAlert,
   Clock3,
   Cpu,
@@ -32,7 +33,11 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
+import { Link } from "react-router-dom";
+import { ReportFormatDialog } from "@/components/reports/ReportFormatDialog";
+import { ManagementInsightsCard } from "@/components/dashboard/ManagementInsightsCard";
+import { exportDashboardReport, type ReportFormat } from "@/utils/reportExports";
 import {
   Area,
   AreaChart,
@@ -59,10 +64,15 @@ import { useRecentLogs } from "@/hooks/useRecentLogs";
 import {
   buildManagementInsights,
   computeTodayWorkStats,
+  dateRangeToDays,
   departmentTodayRollup,
-  formatDecimalHours
+  formatDecimalHours,
+  toDeltaTone,
+  type HealthTone,
+  type InsightSeverity,
 } from "@/lib/dashboardAnalytics";
 import { fetchAttendanceAnomalies, fetchManagementInsights, fetchOperationalMetrics } from "@/services/api";
+import { useAuth } from "@/auth/AuthContext";
 import { cn } from "@/lib/cn";
 import { fmtDisplayDate } from "@/lib/dates";
 
@@ -71,12 +81,6 @@ function toDeltaLabel(delta: number | null, suffix = "pts"): string {
   const abs = Math.abs(delta);
   if (abs < 0.1) return "Stable";
   return `${delta > 0 ? "+" : "-"}${abs.toFixed(1)} ${suffix}`;
-}
-
-function toDeltaTone(delta: number | null): "positive" | "negative" | "neutral" {
-  if (delta == null) return "neutral";
-  if (Math.abs(delta) < 0.1) return "neutral";
-  return delta > 0 ? "positive" : "negative";
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -125,8 +129,14 @@ function toSpark(values: number[]): string {
     .join(" ");
 }
 
-type HealthTone = "healthy" | "watch" | "risk";
-type InsightSeverity = "low" | "medium" | "high";
+type ActionInsight = {
+  id: string;
+  title: string;
+  severity: InsightSeverity;
+  recommendation: string;
+  actionLabel: string;
+  actionHref: string;
+};
 
 function toneClasses(tone: HealthTone): string {
   if (tone === "healthy") return "bg-emerald-100 text-emerald-700";
@@ -137,7 +147,7 @@ function toneClasses(tone: HealthTone): string {
 function severityClasses(severity: InsightSeverity): string {
   if (severity === "high") return "border-red-200 bg-red-50 text-red-700";
   if (severity === "medium") return "border-amber-200 bg-amber-50 text-amber-700";
-  return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  return "border-slate-200 bg-slate-50 text-slate-600";
 }
 
 function Sparkline({ points }: { points: number[] }) {
@@ -214,29 +224,37 @@ function ExecutiveKpiCard({
 }
 
 export function Dashboard() {
+  const { can } = useAuth();
+  const canInsights = can("reports:read");
   const dash = useDashboard();
-  const trend = useAttendanceTrend(14);
-  const activity = useRecentLogs(20);
   const [dateRange, setDateRange] = useState("Last 14 days");
+  const trendDays = dateRangeToDays(dateRange);
+  const trend = useAttendanceTrend(trendDays);
+  const activity = useRecentLogs(20);
   const [departmentFilter, setDepartmentFilter] = useState("All departments");
   const [shiftFilter, setShiftFilter] = useState("All shifts");
   const [deviceFilter, setDeviceFilter] = useState("All devices");
   const [viewMode, setViewMode] = useState<"live" | "today" | "weekly">("live");
   const [aiEnabled, setAiEnabled] = useState(true);
-  const [expandedInsight, setExpandedInsight] = useState<number | null>(0);
+  const [expandedInsight, setExpandedInsight] = useState<string | null>(null);
+  const [showOperationalKpis, setShowOperationalKpis] = useState(false);
+  const [formatDialogOpen, setFormatDialogOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const insightsBaseReady = !dash.loading && !dash.error && !trend.isLoading;
 
   const grokInsights = useQuery({
-    queryKey: ["management-insights", 14],
-    queryFn: () => fetchManagementInsights(14),
+    queryKey: ["management-insights", trendDays],
+    queryFn: () => fetchManagementInsights(trendDays),
     staleTime: 5 * 60 * 1000,
     retry: false,
-    enabled: !dash.loading && !dash.error && !trend.isLoading,
+    enabled: canInsights && insightsBaseReady,
   });
 
   const anomalyQuery = useQuery({
     queryKey: ["attendance-anomalies", 30],
     queryFn: () => fetchAttendanceAnomalies(30),
-    enabled: !dash.loading && !dash.error && !trend.isLoading,
+    enabled: canInsights && insightsBaseReady,
     staleTime: 5 * 60 * 1000,
     retry: false,
   });
@@ -365,12 +383,16 @@ export function Dashboard() {
   );
 
   const insightBullets = useMemo(() => {
+    if (grokInsights.isLoading) return [];
     const d = grokInsights.data;
     if (d?.available && d.source === "grok" && d.bullets.length > 0) {
       return d.bullets;
     }
-    return ruleInsightBullets;
-  }, [grokInsights.data, ruleInsightBullets]);
+    if (!grokInsights.isLoading && grokInsights.data !== undefined) {
+      return ruleInsightBullets;
+    }
+    return [];
+  }, [grokInsights.isLoading, grokInsights.data, ruleInsightBullets]);
 
   const insightSource: "grok" | "rules" | "cache" | "error" | "unconfigured" = useMemo(() => {
     const d = grokInsights.data;
@@ -618,73 +640,143 @@ export function Dashboard() {
     return [...opsEvents, ...anomalyEvents, ...fromLogs].slice(0, 12);
   }, [filteredActivity, anomalyQuery.data, opsQuery.data, employeeByCode]);
 
-  const aiIntelligence = useMemo(() => {
-    const base = insightBullets.map((text, idx) => ({
-      id: idx,
-      title: text,
-      severity: idx === 0 ? "high" : idx % 2 === 0 ? "medium" : "low",
-      confidence: clamp(88 - idx * 7 + (grokInsights.data?.source === "grok" ? 6 : 0), 55, 98),
-      recommendation:
-        idx % 2 === 0
-          ? "Trigger targeted manager nudges and monitor next sync window."
-          : "Set a department-specific threshold alert and follow up in standup.",
-    }));
+  const peakOccupancyTime = useMemo(() => {
+    const checkIns = filteredActivity.filter((log) => /in/i.test(log.punch_type));
+    if (checkIns.length === 0) return "—";
+    const hourCounts = new Map<number, number>();
+    for (const log of checkIns) {
+      const hour = new Date(log.timestamp).getHours();
+      hourCounts.set(hour, (hourCounts.get(hour) ?? 0) + 1);
+    }
+    let peakHour = 0;
+    let peakCount = 0;
+    for (const [hour, count] of hourCounts) {
+      if (count > peakCount) {
+        peakCount = count;
+        peakHour = hour;
+      }
+    }
+    return new Date(2000, 0, 1, peakHour, 30).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }, [filteredActivity]);
 
-    const extra = [
-      {
-        id: 200,
-        title: `Workforce health index is ${workforceHealthIndex.toFixed(1)} and ${
-          workforceHealthIndex >= 80 ? "stable" : "needs intervention"
-        } for tomorrow's first shift.`,
-        severity: workforceHealthIndex >= 80 ? "low" : "high",
-        confidence: 83,
-        recommendation: "Shift two high-risk departments into proactive attendance monitoring mode.",
-      },
-      {
-        id: 201,
-        title: `${attendanceSignals.late} employees show late arrival behavior today; trend pressure is highest in ${
-          deptMatrix[0]?.department ?? "Operations"
-        }.`,
-        severity: attendanceSignals.late > 4 ? "high" : "medium",
-        confidence: 79,
-        recommendation: "Apply shift-aware reminders 30 minutes before start times.",
-      },
-      {
-        id: 202,
-        title: `Device sync latency is ${operationsHealth.syncLatency}; throughput currently ~${operationsHealth.throughput} events/min.`,
-        severity: operationsHealth.failingDevices > 0 ? "high" : "low",
-        confidence: 91,
-        recommendation: "Escalate unstable devices and run auto-retry plus command queue cleanup.",
-      },
-    ] as const;
+  const anomalyUnavailable = Boolean(
+    canInsights && anomalyQuery.data && anomalyQuery.data.available === false && anomalyQuery.data.error_code
+  );
+  const anomalyCount = anomalyQuery.data?.anomalies?.length ?? 0;
 
-    return [...base, ...extra].slice(0, 6);
+  const actionRequiredInsights = useMemo((): ActionInsight[] => {
+    const items: ActionInsight[] = [];
+
+    if (anomalyQuery.data?.available !== false) {
+      for (const anomaly of (anomalyQuery.data?.anomalies ?? []).slice(0, 3)) {
+        const severity: InsightSeverity =
+          anomaly.severity === "critical" || anomaly.severity === "high"
+            ? "high"
+            : anomaly.severity === "medium"
+            ? "medium"
+            : "low";
+        items.push({
+          id: `anomaly-${anomaly.id}`,
+          title: anomaly.description,
+          severity,
+          recommendation: anomaly.recommendation ?? "Review attendance records for this date and follow up with the employee.",
+          actionLabel: "View attendance",
+          actionHref: "/attendance",
+        });
+      }
+    }
+
+    if (attendanceSignals.missingPunches > 0) {
+      items.push({
+        id: "missing-punches",
+        title: `${attendanceSignals.missingPunches} employees are missing check-outs today.`,
+        severity: attendanceSignals.missingPunches > 5 ? "high" : "medium",
+        recommendation: "Correct missing punches before end of day to keep payroll and compliance accurate.",
+        actionLabel: "Review attendance",
+        actionHref: "/attendance",
+      });
+    }
+
+    if (operationsHealth.failingDevices > 0) {
+      items.push({
+        id: "device-failures",
+        title: `${operationsHealth.failingDevices} biometric device${operationsHealth.failingDevices === 1 ? "" : "s"} failing heartbeat checks.`,
+        severity: "high",
+        recommendation: "Escalate unstable devices and run command queue cleanup before the next sync window.",
+        actionLabel: "Open operations",
+        actionHref: "/operations",
+      });
+    }
+
+    if (attendanceRate < 72) {
+      items.push({
+        id: "low-attendance",
+        title: `Attendance rate is ${attendanceRate.toFixed(1)}% — below the 72% watch threshold.`,
+        severity: attendanceRate < 60 ? "high" : "medium",
+        recommendation: "Contact department leads for departments with the lowest present counts.",
+        actionLabel: "View employees",
+        actionHref: "/employees",
+      });
+    }
+
+    if (attendanceSignals.late > 4) {
+      items.push({
+        id: "late-arrivals",
+        title: `${attendanceSignals.late} late arrivals detected today (${((attendanceSignals.late / Math.max(attendanceSignals.present, 1)) * 100).toFixed(1)}% of present staff).`,
+        severity: attendanceSignals.late > 8 ? "high" : "medium",
+        recommendation: "Send shift-aware reminders 30 minutes before start times for high-risk departments.",
+        actionLabel: "View roster",
+        actionHref: "/employees",
+      });
+    }
+
+    if (workforceHealthIndex < 70) {
+      items.push({
+        id: "workforce-health",
+        title: `Workforce health index is ${workforceHealthIndex.toFixed(1)} and needs intervention before tomorrow's first shift.`,
+        severity: workforceHealthIndex < 55 ? "high" : "medium",
+        recommendation: "Shift high-risk departments into proactive attendance monitoring mode.",
+        actionLabel: "View dashboard export",
+        actionHref: "/attendance",
+      });
+    }
+
+    return items
+      .sort((a, b) => {
+        const rank = { high: 0, medium: 1, low: 2 };
+        return rank[a.severity] - rank[b.severity];
+      })
+      .slice(0, 6);
   }, [
-    insightBullets,
-    grokInsights.data?.source,
-    workforceHealthIndex,
+    anomalyQuery.data,
+    attendanceSignals.missingPunches,
     attendanceSignals.late,
-    deptMatrix,
-    operationsHealth.syncLatency,
-    operationsHealth.throughput,
+    attendanceSignals.present,
     operationsHealth.failingDevices,
+    attendanceRate,
+    workforceHealthIndex,
   ]);
 
   const kpis = useMemo(() => {
     const sparkBase = trend.data?.slice(-8).map((p) => p.attendanceRatePercent) ?? [68, 71, 72, 74, 79, 82, 78, 84];
+    const lateSpark = sparkBase.map((v, i) => clamp(25 - v / 5 + i * 0.8, 2, 35));
+    const missingSpark = sparkBase.map((v) => clamp((100 - v) / 1.9, 2, 44));
+    const overtimeSpark = sparkBase.map((v, idx) => clamp(8 + idx * 1.4 + (85 - v) / 3, 4, 42));
     return [
       {
-        title: "Total Workforce",
-        value: String(dash.totalEmployees),
-        trend: "Stable roster",
-        comparison: `${dash.totalEmployees} active contracts`,
-        insight: "Headcount remains stable with balanced departmental distribution.",
-        status: "healthy" as HealthTone,
-        sparkline: sparkBase.map((v) => v * 0.95),
-        icon: Users,
-        live: false,
+        tier: 1 as const,
+        title: "Workforce Health",
+        value: workforceHealthIndex.toFixed(1),
+        trend: workforceHealthIndex >= 80 ? "Stable execution" : workforceHealthIndex >= 65 ? "Needs attention" : "Intervention required",
+        comparison: `Composite of attendance, leave, overtime, and ${trendDays}d risk days`,
+        insight: "Single index summarizing whether today's workforce execution is on track.",
+        status: (workforceHealthIndex >= 80 ? "healthy" : workforceHealthIndex >= 65 ? "watch" : "risk") as HealthTone,
+        sparkline: sparkBase,
+        icon: HeartPulse,
+        live: true,
       },
       {
+        tier: 1 as const,
         title: "Live Present Employees",
         value: String(attendanceSignals.present),
         trend: `${attendanceRate.toFixed(1)}% present`,
@@ -696,6 +788,7 @@ export function Dashboard() {
         live: true,
       },
       {
+        tier: 1 as const,
         title: "Attendance Rate",
         value: `${attendanceRate.toFixed(1)}%`,
         trend: toDeltaLabel(trendWindow.attendanceDelta),
@@ -707,17 +800,55 @@ export function Dashboard() {
         live: true,
       },
       {
+        tier: 1 as const,
         title: "Late Arrivals",
         value: String(attendanceSignals.late),
         trend: attendanceSignals.late > 6 ? "Late risk rising" : "Within guardrail",
         comparison: `${((attendanceSignals.late / Math.max(attendanceSignals.present, 1)) * 100).toFixed(1)}% of present staff`,
-        insight: "Shift-aware late detection flags first check-ins crossing tolerance.",
+        insight: "Shift-aware late detection flags first check-ins crossing tolerance. Lower is better.",
         status: attendanceSignals.late > 6 ? "risk" : attendanceSignals.late > 3 ? "watch" : "healthy",
-        sparkline: sparkBase.map((v, i) => clamp(25 - v / 5 + i * 0.8, 2, 35)),
+        sparkline: lateSpark,
         icon: Clock3,
         live: true,
       },
       {
+        tier: 1 as const,
+        title: "Missing Punches",
+        value: String(attendanceSignals.missingPunches),
+        trend: attendanceSignals.missingPunches > 0 ? "Action needed" : "Punch pairing healthy",
+        comparison: `${((attendanceSignals.missingPunches / Math.max(attendanceSignals.present, 1)) * 100).toFixed(1)}% of present staff`,
+        insight: "Missing checkout detection ignores duplicate punches and stale logs. Lower is better.",
+        status: attendanceSignals.missingPunches > 5 ? "risk" : attendanceSignals.missingPunches > 0 ? "watch" : "healthy",
+        sparkline: missingSpark,
+        icon: CircleAlert,
+        live: true,
+      },
+      {
+        tier: 1 as const,
+        title: "Device Health",
+        value: `${operationsHealth.deviceHealth.toFixed(0)}%`,
+        trend: operationsHealth.failingDevices > 0 ? `${operationsHealth.failingDevices} devices unstable` : "All devices stable",
+        comparison: `Sync latency ${operationsHealth.syncLatency}`,
+        insight: "Device health combines heartbeat failures, dead-letter commands and drift events.",
+        status: operationsHealth.deviceHealth > 85 ? "healthy" : operationsHealth.deviceHealth > 68 ? "watch" : "risk",
+        sparkline: sparkBase.map((v, idx) => clamp(v * 0.9 + idx * 1.2, 50, 99)),
+        icon: Cpu,
+        live: true,
+      },
+      {
+        tier: 2 as const,
+        title: "Total Workforce",
+        value: String(dash.totalEmployees),
+        trend: "Stable roster",
+        comparison: `${dash.totalEmployees} active contracts`,
+        insight: "Headcount remains stable with balanced departmental distribution.",
+        status: "healthy" as HealthTone,
+        sparkline: sparkBase.map((v) => v * 0.95),
+        icon: Users,
+        live: false,
+      },
+      {
+        tier: 2 as const,
         title: "Employees Inside",
         value: String(attendanceSignals.inside),
         trend: attendanceSignals.inside > 0 ? "Live occupancy active" : "No active occupancy",
@@ -729,6 +860,7 @@ export function Dashboard() {
         live: true,
       },
       {
+        tier: 2 as const,
         title: "Avg Work Span",
         value: todayWork.avgWorkMinutesAmongPresent ? `${formatDecimalHours(todayWork.avgWorkMinutesAmongPresent)}h` : "—",
         trend: toDeltaLabel(trendWindow.hoursDelta, "h"),
@@ -739,26 +871,18 @@ export function Dashboard() {
         icon: TimerReset,
       },
       {
+        tier: 2 as const,
         title: "Overtime Risk",
         value: String(attendanceSignals.overtimeRisk),
         trend: `${overtimeBalance.toFixed(1)}% risk exposure`,
         comparison: "Shift-aware overtime detection enabled",
-        insight: "High overtime concentration can reduce long-term productivity consistency.",
+        insight: "High overtime concentration can reduce long-term productivity consistency. Lower is better.",
         status: attendanceSignals.overtimeRisk > 8 ? "risk" : attendanceSignals.overtimeRisk > 4 ? "watch" : "healthy",
-        sparkline: sparkBase.map((v, idx) => clamp(8 + idx * 1.4 + (85 - v) / 3, 4, 42)),
+        sparkline: overtimeSpark,
         icon: GitPullRequestArrow,
       },
       {
-        title: "Missing Punches",
-        value: String(attendanceSignals.missingPunches),
-        trend: attendanceSignals.missingPunches > 0 ? "Action needed" : "Punch pairing healthy",
-        comparison: `${((attendanceSignals.missingPunches / Math.max(attendanceSignals.present, 1)) * 100).toFixed(1)}% of present staff`,
-        insight: "Missing checkout detection ignores duplicate punches and stale logs.",
-        status: attendanceSignals.missingPunches > 5 ? "risk" : attendanceSignals.missingPunches > 0 ? "watch" : "healthy",
-        sparkline: sparkBase.map((v) => clamp((100 - v) / 1.9, 2, 44)),
-        icon: CircleAlert,
-      },
-      {
+        tier: 2 as const,
         title: "Leave Ratio",
         value: `${leaveRatio.toFixed(1)}%`,
         trend: leaveRatio > 18 ? "Coverage risk elevated" : "Coverage acceptable",
@@ -769,6 +893,7 @@ export function Dashboard() {
         icon: MoonStar,
       },
       {
+        tier: 2 as const,
         title: "Productivity Score",
         value: `${productivityScore.toFixed(1)}`,
         trend: productivityScore >= 80 ? "High output health" : "Monitor trend",
@@ -779,6 +904,7 @@ export function Dashboard() {
         icon: Gauge,
       },
       {
+        tier: 2 as const,
         title: "Compliance Score",
         value: `${complianceScore.toFixed(1)}`,
         trend: complianceScore >= 82 ? "Policy adherence strong" : "Control drift detected",
@@ -788,21 +914,12 @@ export function Dashboard() {
         sparkline: sparkBase.map((v) => clamp(v * 0.92 + 6, 32, 96)),
         icon: ShieldCheck,
       },
-      {
-        title: "Device Health",
-        value: `${operationsHealth.deviceHealth.toFixed(0)}%`,
-        trend: operationsHealth.failingDevices > 0 ? `${operationsHealth.failingDevices} devices unstable` : "All devices stable",
-        comparison: `Sync latency ${operationsHealth.syncLatency}`,
-        insight: "Device health combines heartbeat failures, dead-letter commands and drift events.",
-        status: operationsHealth.deviceHealth > 85 ? "healthy" : operationsHealth.deviceHealth > 68 ? "watch" : "risk",
-        sparkline: sparkBase.map((v, idx) => clamp(v * 0.9 + idx * 1.2, 50, 99)),
-        icon: Cpu,
-        live: true,
-      },
     ];
   }, [
     trend.data,
+    trendDays,
     dash.totalEmployees,
+    workforceHealthIndex,
     attendanceSignals.present,
     attendanceSignals.late,
     attendanceSignals.inside,
@@ -821,6 +938,51 @@ export function Dashboard() {
     operationsHealth.failingDevices,
     overtimeBalance,
   ]);
+
+  const primaryKpis = useMemo(() => kpis.filter((k) => k.tier === 1), [kpis]);
+  const secondaryKpis = useMemo(() => kpis.filter((k) => k.tier === 2), [kpis]);
+
+  const executiveSignals = useMemo(() => {
+    const signals = [
+      trendWindow.attendanceDelta != null
+        ? `Attendance ${trendWindow.attendanceDelta >= 0 ? "improved" : "softened"} ${Math.abs(trendWindow.attendanceDelta).toFixed(1)} points vs the prior week.`
+        : "Attendance trend baseline is still forming for this window.",
+      `${deptMatrix[0]?.department ?? "Top department"} leads productivity rank this cycle.`,
+    ];
+    if (attendanceSignals.missingPunches > 0) {
+      signals.push(`${attendanceSignals.missingPunches} missing check-outs need correction before close of day.`);
+    }
+    if (actionRequiredInsights.length > 0) {
+      signals.push(`${actionRequiredInsights.length} item${actionRequiredInsights.length === 1 ? "" : "s"} in Action Required need follow-up.`);
+    } else {
+      signals.push("No urgent attendance or device actions detected for the current shift.");
+    }
+    return signals.slice(0, 4);
+  }, [trendWindow.attendanceDelta, deptMatrix, attendanceSignals.missingPunches, actionRequiredInsights.length]);
+
+  const handleDashboardExport = useCallback(
+    async (format: ReportFormat) => {
+      setExporting(true);
+      try {
+        await exportDashboardReport(format, {
+          mode: viewMode,
+          dateRange,
+          kpis: kpis.map((k) => ({
+            title: k.title,
+            value: k.value,
+            trend: k.trend,
+            comparison: k.comparison,
+            insight: k.insight,
+          })),
+          deptMatrix,
+          radar: radarData,
+        });
+      } finally {
+        setExporting(false);
+      }
+    },
+    [viewMode, dateRange, kpis, deptMatrix, radarData]
+  );
 
   if (dash.loading) {
     return (
@@ -878,7 +1040,7 @@ export function Dashboard() {
             </div>
             <div className="rounded-2xl border border-white/70 bg-white/80 px-4 py-3">
               <p className="text-[11px] uppercase tracking-[0.14em] text-ink-muted">Trend Window</p>
-              <p className="mt-1 text-2xl font-semibold text-ink">{viewMode === "weekly" ? "7d" : "14d"}</p>
+              <p className="mt-1 text-2xl font-semibold text-ink">{trendDays}d</p>
               <p className="text-xs text-ink-muted">{toDeltaLabel(trendWindow.attendanceDelta)}</p>
             </div>
             <div className="rounded-2xl border border-white/70 bg-white/80 px-4 py-3">
@@ -968,35 +1130,50 @@ export function Dashboard() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => {
-              const payload = {
-                exported_at: new Date().toISOString(),
-                mode: viewMode,
-                date_range: dateRange,
-                kpis,
-                department_matrix: deptMatrix,
-                radar: radarData,
-              };
-              const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-              const url = URL.createObjectURL(blob);
-              const link = document.createElement("a");
-              link.href = url;
-              link.download = `workforce-intelligence-${Date.now()}.json`;
-              link.click();
-              URL.revokeObjectURL(url);
-            }}
+            onClick={() => setFormatDialogOpen(true)}
+            disabled={exporting}
             className="rounded-xl"
           >
             <Download className="h-4 w-4" />
-            Export
+            {exporting ? "Preparing…" : "Download"}
           </Button>
         </div>
       </section>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-6">
-        {kpis.map((kpi, idx) => (
+      <ReportFormatDialog
+        open={formatDialogOpen}
+        onOpenChange={setFormatDialogOpen}
+        title="Export workforce report"
+        description="Choose a format for the dashboard intelligence export."
+        onSelect={(format) => void handleDashboardExport(format)}
+        busy={exporting}
+      />
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+        {primaryKpis.map((kpi, idx) => (
           <ExecutiveKpiCard key={kpi.title} delay={idx * 0.03} {...kpi} />
         ))}
+      </section>
+
+      <section className="rounded-[20px] border border-white/60 bg-white/75 shadow-[0_6px_20px_rgba(15,23,42,0.06)] backdrop-blur-xl">
+        <button
+          type="button"
+          onClick={() => setShowOperationalKpis((v) => !v)}
+          className="flex w-full items-center justify-between px-5 py-4 text-left"
+        >
+          <div>
+            <p className="text-sm font-semibold text-ink">Operational details</p>
+            <p className="text-xs text-ink-muted">{secondaryKpis.length} secondary metrics — headcount, span, scores</p>
+          </div>
+          {showOperationalKpis ? <ChevronUp className="h-4 w-4 text-ink-muted" /> : <ChevronDown className="h-4 w-4 text-ink-muted" />}
+        </button>
+        {showOperationalKpis ? (
+          <div className="grid gap-4 border-t border-line/50 px-5 pb-5 pt-4 sm:grid-cols-2 xl:grid-cols-4">
+            {secondaryKpis.map((kpi, idx) => (
+              <ExecutiveKpiCard key={kpi.title} delay={idx * 0.02} {...kpi} />
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="grid gap-4 xl:grid-cols-6">
@@ -1005,10 +1182,10 @@ export function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-ink">Weekly Attendance Intelligence</p>
-                <p className="text-xs text-ink-muted">Present, absent, late, overtime, and work-hours trend</p>
+                <p className="text-xs text-ink-muted">Present and absent from live data; late and overtime estimated from aggregates</p>
               </div>
-              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-primary">
-                <Sparkles className="h-3.5 w-3.5" /> AI-optimized view
+              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-ink-muted">
+                <Sparkles className="h-3.5 w-3.5" /> {trendDays}d window
               </span>
             </div>
             <div className="mt-4 h-[340px]">
@@ -1047,7 +1224,7 @@ export function Dashboard() {
             <div className="mt-4 space-y-2 text-sm">
               {[
                 { label: "Employees currently inside", value: String(attendanceSignals.inside), icon: Building2 },
-                { label: "Peak occupancy time", value: "11:42 AM", icon: Activity },
+                { label: "Peak check-in hour", value: peakOccupancyTime, icon: Activity },
                 { label: "Current active departments", value: String(deptMatrix.filter((d) => d.attendance > 0).length), icon: Target },
                 { label: "Today's first punch", value: formatClock(filteredSummary.find((s) => s.first_check_in)?.first_check_in ?? null), icon: Clock3 },
                 { label: "Last activity time", value: filteredActivity[0] ? formatClock(filteredActivity[0].timestamp) : "—", icon: Zap },
@@ -1074,7 +1251,22 @@ export function Dashboard() {
                 <p className="text-sm font-semibold text-ink">Live Activity Feed</p>
                 <p className="text-xs text-ink-muted">Check-ins, sync events, anomalies, alerts</p>
               </div>
-              <Wifi className="h-4 w-4 text-primary" />
+              <div className="flex flex-col items-end gap-1">
+                <Wifi className="h-4 w-4 text-primary" />
+                {anomalyUnavailable ? (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                    Anomalies unavailable
+                  </span>
+                ) : anomalyCount > 0 ? (
+                  <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+                    {anomalyCount} anomal{anomalyCount === 1 ? "y" : "ies"}
+                  </span>
+                ) : canInsights ? (
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                    No anomalies
+                  </span>
+                ) : null}
+              </div>
             </div>
             <ul className="mt-4 space-y-2">
               {liveEvents.map((event, index) => (
@@ -1103,16 +1295,12 @@ export function Dashboard() {
         </Card>
 
         <Card className="rounded-[20px] border border-white/60 bg-gradient-to-br from-indigo-50/80 via-white to-violet-50/60 shadow-[0_8px_24px_rgba(79,70,229,0.10)] backdrop-blur-xl xl:col-span-4">
-          <CardContent className="p-5">
+          <CardContent className="p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-ink">AI Workforce Intelligence</p>
                 <p className="text-xs text-ink-muted">
-                  {insightSource === "grok" || insightSource === "cache"
-                    ? "Narratives generated from live aggregate workforce signals."
-                    : "Rule-based intelligence generated from attendance behavior patterns."}
-                  {insightCached ? " Cache-backed." : ""}
-                  {insightErrorCode ? ` (${insightErrorCode.replace(/_/g, " ")})` : ""}
+                  Urgent signals first, then narrative context from live attendance data.
                 </p>
               </div>
               <span className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-primary">
@@ -1120,53 +1308,85 @@ export function Dashboard() {
                 {aiEnabled ? "AI active" : "AI paused"}
               </span>
             </div>
+
+            {!canInsights ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-800">
+                You do not have report access. Ask an administrator for <code className="text-xs">reports:read</code> to load AI insights.
+              </div>
+            ) : null}
+
+            {insightErrorCode === "forbidden" ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-800">
+                AI narratives are restricted for this account. Showing local estimates below.
+              </div>
+            ) : null}
+
             {!aiEnabled ? (
-              <div className="mt-5 rounded-xl border border-dashed border-line/80 bg-white/60 px-4 py-6 text-sm text-ink-muted">
-                AI insight layer is paused. Enable AI Insights to view confidence-scored recommendations.
+              <div className="rounded-xl border border-dashed border-line/80 bg-white/60 px-4 py-6 text-sm text-ink-muted">
+                AI insight layer is paused. Enable AI Insights to view recommendations and narratives.
               </div>
             ) : (
-              <div className="mt-4 space-y-3">
-                <AnimatePresence mode="popLayout">
-                  {aiIntelligence.map((insight, idx) => {
-                    const expanded = expandedInsight === insight.id;
-                    return (
-                      <motion.div
-                        layout
-                        key={insight.id}
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -6 }}
-                        className="rounded-xl border border-white/70 bg-white/75 p-3 shadow-sm"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setExpandedInsight(expanded ? null : insight.id)}
-                          className="w-full text-left"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-sm font-medium leading-relaxed text-ink">{insight.title}</p>
-                            <span className={cn("shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase", severityClasses(insight.severity))}>
-                              {insight.severity}
-                            </span>
-                          </div>
-                          <div className="mt-2 flex items-center gap-3 text-[11px] text-ink-muted">
-                            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5">
-                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                              {insight.confidence}% confidence
-                            </span>
-                            <span>Recommendation ready</span>
-                          </div>
-                        </button>
-                        {expanded ? (
-                          <p className="mt-2 rounded-lg bg-indigo-50/70 px-3 py-2 text-xs leading-relaxed text-indigo-700">
-                            <span className="font-semibold">Recommended action:</span> {insight.recommendation}
-                          </p>
-                        ) : null}
-                      </motion.div>
-                    );
-                  })}
-                </AnimatePresence>
-              </div>
+              <>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-ink-muted">Action required</p>
+                  {actionRequiredInsights.length === 0 ? (
+                    <p className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-sm text-emerald-800">
+                      No urgent attendance or device issues detected right now.
+                    </p>
+                  ) : (
+                    <div className="mt-3 space-y-3">
+                      {actionRequiredInsights.map((insight) => {
+                        const expanded = expandedInsight === insight.id;
+                        return (
+                          <motion.div
+                            key={insight.id}
+                            layout
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="rounded-xl border border-white/70 bg-white/75 p-3 shadow-sm"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setExpandedInsight(expanded ? null : insight.id)}
+                              className="w-full text-left"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-sm font-medium leading-relaxed text-ink">{insight.title}</p>
+                                <span className={cn("shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase", severityClasses(insight.severity))}>
+                                  {insight.severity}
+                                </span>
+                              </div>
+                            </button>
+                            {expanded ? (
+                              <div className="mt-2 space-y-2">
+                                <p className="rounded-lg bg-indigo-50/70 px-3 py-2 text-xs leading-relaxed text-indigo-700">
+                                  <span className="font-semibold">Recommended action:</span> {insight.recommendation}
+                                </p>
+                                <Link
+                                  to={insight.actionHref}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-primary/20 bg-primary-soft px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10"
+                                >
+                                  {insight.actionLabel}
+                                </Link>
+                              </div>
+                            ) : null}
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <ManagementInsightsCard
+                  bullets={insightBullets}
+                  source={insightSource}
+                  loading={grokInsights.isLoading}
+                  cached={insightCached}
+                  errorCode={insightErrorCode}
+                  forbidden={insightErrorCode === "forbidden"}
+                  actionCount={actionRequiredInsights.length}
+                />
+              </>
             )}
           </CardContent>
         </Card>
@@ -1178,7 +1398,7 @@ export function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-ink">Workforce Heatmap</p>
-                <p className="text-xs text-ink-muted">Attendance and department activity by hour</p>
+                <p className="text-xs text-ink-muted">Modeled activity intensity by department and hour (estimated from aggregates)</p>
               </div>
               <HeartPulse className="h-4 w-4 text-primary" />
             </div>
@@ -1376,12 +1596,7 @@ export function Dashboard() {
       <section className="rounded-[20px] border border-white/60 bg-white/80 px-5 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.06)] backdrop-blur-xl">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-muted">Executive Signals</p>
         <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-          {[
-            `Attendance improved ${trendWindow.attendanceDelta != null ? `${trendWindow.attendanceDelta > 0 ? "+" : ""}${trendWindow.attendanceDelta.toFixed(1)}` : "0"} points compared to previous week.`,
-            `${deptMatrix[0]?.department ?? "Operations"} has the strongest productivity rank this cycle.`,
-            `${attendanceSignals.missingPunches} missing check-outs need correction before close of day.`,
-            `Friday attendance historically trends lower; reinforce reminders before shift start.`,
-          ].map((item) => (
+          {executiveSignals.map((item) => (
             <p key={item} className="rounded-xl border border-line/60 bg-slate-50/75 px-3 py-2 text-xs leading-relaxed text-ink">
               {item}
             </p>

@@ -92,7 +92,9 @@ def build_management_insight_context(db: Session, settings: Settings, trend_days
             }
         )
 
-    employees = list(db.execute(select(Employee).order_by(Employee.id)).scalars().all())
+    employees = list(
+        db.execute(select(Employee).where(Employee.departed_at.is_(None)).order_by(Employee.id)).scalars().all()
+    )
     if today_rows is None:
         today_rows = summaries_by_day.get(dates[-1], [])
 
