@@ -102,7 +102,6 @@ class Settings(BaseSettings):
     auth_enabled: bool = Field(default=True, alias="AUTH_ENABLED")
     auth_bootstrap_admin_email: str | None = Field(default=None, alias="AUTH_BOOTSTRAP_ADMIN_EMAIL")
     auth_bootstrap_admin_password: str | None = Field(default=None, alias="AUTH_BOOTSTRAP_ADMIN_PASSWORD")
-    privileged_account_email: str | None = Field(default=None, alias="PRIVILEGED_ACCOUNT_EMAIL")
     login_attempt_window_seconds: int = Field(default=900, ge=60, le=86400, alias="LOGIN_ATTEMPT_WINDOW_SECONDS")
     login_attempt_max: int = Field(default=5, ge=3, le=50, alias="LOGIN_ATTEMPT_MAX")
 
@@ -112,7 +111,7 @@ class Settings(BaseSettings):
     command_retry_max_seconds: int = Field(default=900, ge=30, le=86400, alias="COMMAND_RETRY_MAX_SECONDS")
     command_stale_minutes: int = Field(default=15, ge=1, le=240, alias="COMMAND_STALE_MINUTES")
     command_heartbeat_seconds: int = Field(default=10, ge=5, le=120, alias="COMMAND_HEARTBEAT_SECONDS")
-    command_lock_blocking_seconds: int = Field(default=1, ge=0, le=30, alias="COMMAND_LOCK_BLOCKING_SECONDS")
+    command_lock_blocking_seconds: int = Field(default=1, ge=0, le=120, alias="COMMAND_LOCK_BLOCKING_SECONDS")
     command_cooldown_ms: int = Field(default=250, ge=0, le=10000, alias="COMMAND_COOLDOWN_MS")
     command_max_recover_verification_lookback: int = Field(
         default=3,
@@ -140,6 +139,11 @@ class Settings(BaseSettings):
         default=True,
         alias="CORRECTION_ALLOW_DB_ONLY_FALLBACK",
         description="When strict mode is on but firmware cannot write attlog, allow applied_db_only if true.",
+    )
+    correction_tier_b_write_enabled: bool = Field(
+        default=False,
+        alias="CORRECTION_TIER_B_WRITE_ENABLED",
+        description="When true, allow guarded full attlog rewrite on Tier B firmware with readback verification.",
     )
 
     @model_validator(mode="after")

@@ -1,4 +1,4 @@
-"""Idempotent correction event ledger for privileged forensic access."""
+"""Idempotent correction event ledger for internal forensic access."""
 
 from __future__ import annotations
 

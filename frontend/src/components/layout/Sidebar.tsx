@@ -7,7 +7,6 @@ import {
   FileBarChart2,
   LayoutDashboard,
   RefreshCw,
-  ScrollText,
   ShieldCheck,
   Sparkles,
   Settings,
@@ -19,7 +18,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
-import { accountTierFromUser, isPrivilegedAccount } from "@/auth/privilegedAccess";
+import { accountTierFromUser } from "@/auth/sessionCapabilities";
 import type { Permission } from "@/auth/permissions";
 import { cn } from "@/lib/cn";
 import { useUiStore } from "@/stores/ui-store";
@@ -43,9 +42,7 @@ export function Sidebar() {
   const [syncing, setSyncing] = useState(false);
   const [syncState, setSyncState] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
   const accountTier = accountTierFromUser(user);
-  const privileged = isPrivilegedAccount(user);
   const visibleItems = items.filter((item) => can(item.permission));
-  const privilegedItems = privileged ? [{ to: "/audit", label: "Audit", icon: ScrollText }] : [];
   const opsMetrics = useQuery({
     queryKey: ["operational-metrics"],
     queryFn: fetchOperationalMetrics,
@@ -113,7 +110,8 @@ export function Sidebar() {
       transition={{ type: "spring", stiffness: 420, damping: 38 }}
       className={cn(
         "sticky top-0 z-40 flex h-screen shrink-0 flex-col overflow-hidden border-r border-line/70 bg-surface-card shadow-nav",
-        accountTier === "god" && "border-status-absent-soft/70 bg-[linear-gradient(180deg,#fff7f7_0%,#ffffff_12%,#ffffff_100%)]",
+        accountTier === "operator" &&
+          "border-red-200/80 bg-[linear-gradient(180deg,#fff5f5_0%,#ffffff_12%,#ffffff_100%)]",
         accountTier === "ceo" && "border-status-late-soft/80 bg-[linear-gradient(180deg,#fffcf1_0%,#ffffff_12%,#ffffff_100%)]",
         accountTier === "hr" && "border-primary/15 bg-[linear-gradient(180deg,#f5f7ff_0%,#ffffff_12%,#ffffff_100%)]"
       )}
@@ -123,7 +121,7 @@ export function Sidebar() {
           <div
             className={cn(
               "relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl shadow-sm",
-              accountTier === "god" &&
+              accountTier === "operator" &&
                 "bg-[radial-gradient(circle_at_30%_20%,#FCA5A5_0%,#DC2626_60%,#991B1B_100%)] text-white",
               accountTier === "ceo" &&
                 "bg-[radial-gradient(circle_at_30%_20%,#FDE68A_0%,#CA8A04_60%,#854D0E_100%)] text-white",
@@ -163,7 +161,16 @@ export function Sidebar() {
             <p className="text-[10px] uppercase tracking-[0.14em] text-ink-muted">Workspace</p>
             <div className="mt-1 flex items-center justify-between">
               <p className="text-sm font-semibold text-ink">Global HQ</p>
-              <span className="rounded-full bg-primary-soft px-2 py-0.5 text-[10px] font-semibold text-primary">Live</span>
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                  accountTier === "operator"
+                    ? "bg-red-100 text-red-700"
+                    : "bg-primary-soft text-primary"
+                )}
+              >
+                Live
+              </span>
             </div>
           </div>
         </div>
@@ -196,8 +203,8 @@ export function Sidebar() {
                 "group flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
                 collapsed && "justify-center px-0",
                 isActive
-                  ? accountTier === "god"
-                    ? "bg-status-absent-soft/70 text-status-absent shadow-sm ring-1 ring-status-absent/15"
+                  ? accountTier === "operator"
+                    ? "bg-red-50 text-red-700 shadow-sm ring-1 ring-red-200/80"
                     : accountTier === "ceo"
                     ? "bg-status-late-soft/80 text-status-late shadow-sm ring-1 ring-status-late/15"
                     : accountTier === "hr"
@@ -212,7 +219,10 @@ export function Sidebar() {
                 {isActive && !collapsed ? (
                   <motion.span
                     layoutId="sidebar-active-pill"
-                    className="absolute left-1.5 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-primary"
+                    className={cn(
+                      "absolute left-1.5 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full",
+                      accountTier === "operator" ? "bg-red-600" : "bg-primary"
+                    )}
                   />
                 ) : null}
                 <Icon className="h-[18px] w-[18px] shrink-0 stroke-[1.75]" />
@@ -226,36 +236,6 @@ export function Sidebar() {
             )}
           </NavLink>
         ))}
-        {privilegedItems.length > 0 ? (
-          <>
-            {!collapsed ? (
-              <p className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-muted">
-                Admin
-              </p>
-            ) : (
-              <div className="my-1 border-t border-line/60" />
-            )}
-            {privilegedItems.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            title={collapsed ? label : undefined}
-            className={({ isActive }) =>
-              cn(
-                "group flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
-                collapsed && "justify-center px-0",
-                isActive
-                  ? "bg-status-absent-soft/70 text-status-absent shadow-sm ring-1 ring-status-absent/15"
-                  : "text-ink-muted hover:bg-surface hover:text-ink hover:shadow-sm"
-              )
-            }
-          >
-            <Icon className="h-[18px] w-[18px] shrink-0 stroke-[1.75]" />
-            {!collapsed ? <span className="truncate">{label}</span> : null}
-          </NavLink>
-            ))}
-          </>
-        ) : null}
       </nav>
 
       <div className={cn("mt-auto border-t border-line/60 p-3", collapsed && "px-2")}>

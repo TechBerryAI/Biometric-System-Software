@@ -576,15 +576,8 @@ def ensure_effective_punches_for_day(
     (correction suppressions apply only during device re-sync, not display).
     """
     settings = settings or get_settings()
-    raw_punches = _punches_for_employee_day(
-        db, employee=employee, local_date=local_date, settings=settings, apply_suppression=False
-    )
     correction = _latest_applied_correction(db, employee_id=employee.id, local_date=local_date)
-    if (
-        correction is not None
-        and correction.new_check_in is not None
-        and _correction_covers_day_better_than_raw(correction, raw_punches, tz_name=settings.timezone)
-    ):
+    if correction is not None and correction.new_check_in is not None:
         if _effective_needs_correction_reapply(
             db, employee_id=employee.id, local_date=local_date, correction=correction
         ):
@@ -620,8 +613,8 @@ def summarize_employee_day_from_events(
     """
     Derive day IN/OUT from full raw device data (events + logs).
 
-    Raw punches are always preferred over the effective layer so stale derived rows
-    never hide real check-ins. Corrections apply only when raw data is absent.
+    Used internally for sync/rebuild paths. User-facing APIs should call
+    summarize_employee_day_for_display() so applied corrections take priority.
     """
     settings = settings or get_settings()
     punches = raw_punches
@@ -644,6 +637,45 @@ def summarize_employee_day_from_events(
         return first_in, last_out, total_min, punch_count
 
     return None, None, None, 0
+
+
+def summarize_employee_day_for_display(
+    db: Session,
+    *,
+    employee: Employee,
+    local_date: date,
+    settings: Settings | None = None,
+    raw_punches: list[_PunchRow] | None = None,
+) -> tuple[datetime | None, datetime | None, int | None, int]:
+    """
+    Return the attendance day summary shown to all users.
+
+    Applied corrections take priority over raw device punches so corrected times
+    appear consistently in profiles, dashboards, and reports.
+    """
+    settings = settings or get_settings()
+    correction = _latest_applied_correction(db, employee_id=employee.id, local_date=local_date)
+    if correction is not None and correction.new_check_in is not None:
+        effective = load_active_effective_punches(db, employee_id=employee.id, local_date=local_date)
+        correction_punches = [p for p in effective if p.correction_uuid == correction.correction_uuid]
+        if correction_punches:
+            first_in, last_out, total_min = summarize_day_punches(correction_punches, tz_name=settings.timezone)
+            return first_in, last_out, total_min, len(correction_punches)
+        first_in = correction.new_check_in
+        last_out = correction.new_check_out
+        total_min: int | None = None
+        if last_out is not None and last_out > first_in:
+            total_min = int((last_out - first_in).total_seconds() // 60)
+        punch_count = 1 + (1 if last_out is not None else 0)
+        return first_in, last_out, total_min, punch_count
+
+    return summarize_employee_day_from_events(
+        db,
+        employee=employee,
+        local_date=local_date,
+        settings=settings,
+        raw_punches=raw_punches,
+    )
 
 
 def load_active_effective_punches(

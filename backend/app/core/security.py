@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.privileged_account import is_privileged_account
+from app.core.operator_access import is_operator_account
 from app.models.user import User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -65,7 +65,6 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         Permission.SYNC_TRIGGER,
         Permission.REPORT_READ,
         Permission.ANOMALY_MANAGE,
-        Permission.DEVICE_MANAGE,
         Permission.AUDIT_READ,
         Permission.METRICS_READ,
     },
@@ -73,7 +72,6 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         Permission.SYNC_TRIGGER,
         Permission.REPORT_READ,
         Permission.EMPLOYEE_VIEW,
-        Permission.DEVICE_MANAGE,
         Permission.AUDIT_READ,
         Permission.METRICS_READ,
     },
@@ -177,8 +175,8 @@ def require_permissions(*required_permissions: str):
     return _dependency
 
 
-def require_privileged_account(user: User = Depends(get_current_user)) -> User:
-    if not is_privileged_account(user):
+def require_operator_account(user: User = Depends(get_current_user)) -> User:
+    if not is_operator_account(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied.",

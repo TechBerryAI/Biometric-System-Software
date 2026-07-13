@@ -32,7 +32,18 @@ from app.services.auth_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-from app.core.privileged_account import is_privileged_email, privileged_account_email
+from app.core.operator_access import user_capabilities
+
+
+def _current_user_response(user: User) -> CurrentUserResponse:
+    return CurrentUserResponse(
+        user_uuid=user.user_uuid,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role,
+        active=user.active,
+        capabilities=user_capabilities(user),
+    )
 
 
 @router.post("/bootstrap-admin", response_model=CurrentUserResponse)
@@ -43,13 +54,7 @@ def bootstrap_admin(db: Session = Depends(get_db)) -> CurrentUserResponse:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Bootstrap admin credentials are not configured.",
         )
-    return CurrentUserResponse(
-        user_uuid=user.user_uuid,
-        email=user.email,
-        full_name=user.full_name,
-        role=user.role,
-        active=user.active,
-    )
+    return _current_user_response(user)
 
 
 @router.post("/login", response_model=AuthTokens)
@@ -158,13 +163,7 @@ def logout(payload: LogoutRequest, request: Request, user: User = Depends(get_cu
 
 @router.get("/me", response_model=CurrentUserResponse)
 def me(user: User = Depends(get_current_user)) -> CurrentUserResponse:
-    return CurrentUserResponse(
-        user_uuid=user.user_uuid,
-        email=user.email,
-        full_name=user.full_name,
-        role=user.role,
-        active=user.active,
-    )
+    return _current_user_response(user)
 
 
 @router.put("/me", response_model=CurrentUserResponse)
@@ -172,13 +171,7 @@ def update_me(payload: ProfileUpdateRequest, user: User = Depends(get_current_us
     user.full_name = payload.full_name.strip()
     db.commit()
     db.refresh(user)
-    return CurrentUserResponse(
-        user_uuid=user.user_uuid,
-        email=user.email,
-        full_name=user.full_name,
-        role=user.role,
-        active=user.active,
-    )
+    return _current_user_response(user)
 
 
 @router.post("/me/password", response_model=AuthTokens)
@@ -235,20 +228,6 @@ def create_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This role cannot be assigned from Add Account.",
         )
-    if is_privileged_email(normalized_email):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This email address is reserved.",
-        )
-
-    settings = get_settings()
-    bootstrap_email = (settings.auth_bootstrap_admin_email or "").strip().lower()
-    reserved_email = privileged_account_email(settings)
-    if bootstrap_email and bootstrap_email != reserved_email:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="AUTH_BOOTSTRAP_ADMIN_EMAIL is misconfigured.",
-        )
 
     user = create_or_update_user(
         db,
@@ -270,10 +249,4 @@ def create_user(
     )
     db.commit()
     db.refresh(user)
-    return CurrentUserResponse(
-        user_uuid=user.user_uuid,
-        email=user.email,
-        full_name=user.full_name,
-        role=user.role,
-        active=user.active,
-    )
+    return _current_user_response(user)

@@ -18,7 +18,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.core.privileged_account import is_privileged_account
+from app.core.operator_access import is_operator_account
 from app.core.redis_keys import with_namespace
 from app.models.certified_firmware_profile import CertifiedFirmwareProfile
 from app.models.command_execution_history import CommandExecutionHistory
@@ -34,13 +34,137 @@ from app.models.user import User
 from app.models.verification_result import VerificationResult
 from app.services.audit_service import append_audit_log
 from app.services.device_service import DeviceService
-from app.services.device_exceptions import DeviceLockContentionError
+from app.services.device_exceptions import (
+    AttlogCorrectionError,
+    AttlogCorrectionNotSupported,
+    DeviceLockContentionError,
+)
 from app.services.system_governance_service import assert_device_write_allowed
 
 logger = logging.getLogger(__name__)
 
 INTERNAL_COMMAND_TYPES = frozenset({"CORRECT_ATTENDANCE"})
-INTERNAL_AUDIT_ACTIONS = frozenset({"ATTENDANCE_ADJUST", "GOD_ATTENDANCE_CORRECT"})
+INTERNAL_AUDIT_ACTIONS = frozenset({"ATTENDANCE_ADJUST"})
+_CORRECTION_ACTIVE_STATUSES = frozenset(
+    {
+        DeviceCommandStatus.PENDING.value,
+        DeviceCommandStatus.RUNNING.value,
+        DeviceCommandStatus.RETRYING.value,
+        DeviceCommandStatus.VERIFYING.value,
+    }
+)
+
+
+def device_has_active_correction_commands(db: Session, device_id: str) -> bool:
+    """True when a CORRECT_ATTENDANCE command is queued or executing for this device."""
+    row = db.execute(
+        select(DeviceCommand.id)
+        .where(
+            DeviceCommand.device_id == device_id,
+            DeviceCommand.command_type == "CORRECT_ATTENDANCE",
+            DeviceCommand.status.in_(_CORRECTION_ACTIVE_STATUSES),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    return row is not None
+
+
+def _fail_correction_command_db_fallback(
+    db: Session,
+    command: DeviceCommand,
+    *,
+    settings: Settings,
+    error_message: str,
+) -> None:
+    """Terminalize a correction command and apply DB-only fallback without reconnecting to device."""
+    from app.services.attendance_correction_service import mark_correction_failed_for_command
+
+    command.status = DeviceCommandStatus.FAILED.value
+    command.completed_at = _utcnow()
+    command.last_error = error_message[:2000]
+    mark_correction_failed_for_command(db, command_uuid=command.command_uuid, error_message=command.last_error)
+
+
+def drain_due_correction_commands(
+    db: Session,
+    device_id: str,
+    *,
+    settings: Settings | None = None,
+    worker_id: str = "inline-drain",
+) -> int:
+    """Process due PENDING/RETRYING CORRECT_ATTENDANCE commands inline (dev without Celery)."""
+    settings = settings or get_settings()
+    now = _utcnow()
+    commands = list(
+        db.execute(
+            select(DeviceCommand)
+            .where(
+                DeviceCommand.device_id == device_id,
+                DeviceCommand.command_type == "CORRECT_ATTENDANCE",
+                DeviceCommand.status.in_(
+                    [DeviceCommandStatus.PENDING.value, DeviceCommandStatus.RETRYING.value]
+                ),
+                or_(DeviceCommand.next_attempt_at.is_(None), DeviceCommand.next_attempt_at <= now),
+            )
+            .order_by(DeviceCommand.created_at.asc())
+        ).scalars().all()
+    )
+    processed = 0
+    for command in commands:
+        if (
+            settings.correction_allow_db_only_fallback
+            and command.status == DeviceCommandStatus.RETRYING.value
+        ):
+            try:
+                _fail_correction_command_db_fallback(
+                    db,
+                    command,
+                    settings=settings,
+                    error_message=command.last_error or "Device retry skipped; applying DB-only fallback.",
+                )
+                db.commit()
+                processed += 1
+                continue
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("DB fallback drain failed for %s: %s", command.command_uuid, exc)
+                db.rollback()
+        try:
+            process_command(db, command, settings=settings, worker_id=worker_id)
+            db.commit()
+            processed += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Inline correction drain failed for %s: %s", command.command_uuid, exc)
+            db.rollback()
+    return processed
+
+
+def wait_for_correction_commands_clear(
+    db: Session,
+    device_id: str,
+    *,
+    settings: Settings | None = None,
+    max_wait_seconds: float | None = None,
+) -> bool:
+    """
+    Wait until no CORRECT_ATTENDANCE commands are active for the device.
+
+    Returns True when the device is clear (or was already clear); False if still busy
+  after max_wait_seconds.
+    """
+    settings = settings or get_settings()
+    drain_due_correction_commands(db, device_id, settings=settings)
+    if not device_has_active_correction_commands(db, device_id):
+        return True
+    deadline = time.monotonic() + (
+        max_wait_seconds if max_wait_seconds is not None else float(settings.command_lock_blocking_seconds)
+    )
+    while time.monotonic() < deadline:
+        time.sleep(1.0)
+        db.expire_all()
+        drain_due_correction_commands(db, device_id, settings=settings)
+        if not device_has_active_correction_commands(db, device_id):
+            return True
+    return not device_has_active_correction_commands(db, device_id)
 
 
 def _utcnow() -> datetime:
@@ -156,10 +280,10 @@ def enqueue_device_command(
         raise RuntimeError(f"Rejected unsafe command type '{command_type}'.")
     if command_type in INTERNAL_COMMAND_TYPES:
         if not created_by:
-            raise RuntimeError("CORRECT_ATTENDANCE requires an authenticated privileged actor.")
+            raise RuntimeError("CORRECT_ATTENDANCE requires an authenticated operator.")
         actor = db.execute(select(User).where(User.user_uuid == created_by)).scalar_one_or_none()
-        if not is_privileged_account(actor):
-            raise RuntimeError("CORRECT_ATTENDANCE is restricted to privileged accounts.")
+        if not is_operator_account(actor):
+            raise RuntimeError("CORRECT_ATTENDANCE is restricted to the operator account.")
     key = _idempotency_key(device_id, command_type, payload)
     existing = db.execute(
         select(DeviceCommand).where(
@@ -234,6 +358,7 @@ def claim_pending_commands(db: Session, *, settings: Settings | None = None) -> 
         .with_for_update(skip_locked=True)
     )
     commands = list(db.execute(query).scalars().all())
+    commands.sort(key=lambda c: (0 if c.command_type == "CORRECT_ATTENDANCE" else 1, c.created_at or now))
     runnable: list[DeviceCommand] = []
     seen_devices: set[str] = set()
     for command in commands:
@@ -758,8 +883,24 @@ def process_command(
             correlation_id=command.correlation_id,
         )
         return
-    client, lock, lock_key = _acquire_lock(command.device_id, settings)
+    lock_blocking = (
+        float(settings.zk_device_timeout_seconds)
+        if command.command_type == "CORRECT_ATTENDANCE"
+        else None
+    )
+    client, lock, lock_key = _acquire_lock(command.device_id, settings, blocking_timeout=lock_blocking)
     if lock is None:
+        if (
+            command.command_type == "CORRECT_ATTENDANCE"
+            and settings.correction_allow_db_only_fallback
+        ):
+            _fail_correction_command_db_fallback(
+                db,
+                command,
+                settings=settings,
+                error_message="Device lock contention — applying DB-only fallback.",
+            )
+            return
         command.retries += 1
         command.retry_backoff_seconds = 5
         command.status = DeviceCommandStatus.RETRYING.value
@@ -781,6 +922,14 @@ def process_command(
             command.status = DeviceCommandStatus.DEAD_LETTER.value
             command.completed_at = _utcnow()
             command.last_error = "Device lock contention exceeded retry limit."
+            if command.command_type == "CORRECT_ATTENDANCE":
+                from app.services.attendance_correction_service import mark_correction_failed_for_command
+
+                mark_correction_failed_for_command(
+                    db,
+                    command_uuid=command.command_uuid,
+                    error_message=command.last_error,
+                )
         return
     device_service = DeviceService(settings=settings)
     execution_row = _start_execution_attempt(db, command=command, worker_id=worker_id)
@@ -1156,10 +1305,20 @@ def process_command(
             correlation_id=command.correlation_id,
         )
     except Exception as exc:  # noqa: BLE001
-        _mark_retry_or_terminal(command, settings=settings, error_message=str(exc))
-        if operation_profile is not None and not operation_profile.retry_safe:
-            command.status = DeviceCommandStatus.DEAD_LETTER.value
+        fail_fast_attlog = (
+            command.command_type == "CORRECT_ATTENDANCE"
+            and settings.correction_allow_db_only_fallback
+            and isinstance(exc, (AttlogCorrectionError, AttlogCorrectionNotSupported))
+        )
+        if fail_fast_attlog:
+            command.status = DeviceCommandStatus.FAILED.value
             command.completed_at = _utcnow()
+            command.last_error = str(exc)[:2000]
+        else:
+            _mark_retry_or_terminal(command, settings=settings, error_message=str(exc))
+            if operation_profile is not None and not operation_profile.retry_safe:
+                command.status = DeviceCommandStatus.DEAD_LETTER.value
+                command.completed_at = _utcnow()
         _finish_execution_attempt(execution_row, final_status=command.status, verification_result=command.verification_status)
         runtime_health.timeout_frequency += 1
         runtime_health.reconnect_frequency += 1
@@ -1174,6 +1333,17 @@ def process_command(
             details={"command_uuid": command.command_uuid, "error": command.last_error, "retries": command.retries},
             correlation_id=command.correlation_id,
         )
+        if command.command_type == "CORRECT_ATTENDANCE" and command.status in (
+            DeviceCommandStatus.FAILED.value,
+            DeviceCommandStatus.DEAD_LETTER.value,
+        ):
+            from app.services.attendance_correction_service import mark_correction_failed_for_command
+
+            mark_correction_failed_for_command(
+                db,
+                command_uuid=command.command_uuid,
+                error_message=command.last_error or str(exc),
+            )
     finally:
         lock_heartbeat.stop()
         try:

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.config import get_settings
-from app.core.privileged_account import is_privileged_account
+from app.core.operator_access import is_operator_account
 from app.core.security import Permission, get_current_user, require_permissions
 from app.models.audit_log import AuditLog
 from app.models.certified_firmware_profile import CertifiedFirmwareProfile
@@ -71,7 +71,7 @@ def list_audit_logs(
 ) -> list[AuditLog]:
     query = select(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit)
     rows = list(db.execute(query).scalars().all())
-    if not is_privileged_account(user):
+    if not is_operator_account(user):
         rows = [row for row in rows if row.action_type not in INTERNAL_AUDIT_ACTIONS]
     return rows
 
@@ -91,7 +91,7 @@ def list_device_commands(
     if status:
         query = query.where(DeviceCommand.status == status)
     rows = list(db.execute(query).scalars().all())
-    if not is_privileged_account(user):
+    if not is_operator_account(user):
         rows = [row for row in rows if row.command_type not in INTERNAL_COMMAND_TYPES]
     return rows
 
@@ -109,7 +109,7 @@ def process_device_command_now(
     command = db.execute(select(DeviceCommand).where(DeviceCommand.command_uuid == command_uuid)).scalar_one_or_none()
     if command is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device command not found.")
-    if command.command_type in INTERNAL_COMMAND_TYPES and not is_privileged_account(user):
+    if command.command_type in INTERNAL_COMMAND_TYPES and not is_operator_account(user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device command not found.")
     try:
         command = reprocess_device_command(db, command_uuid, worker_id="api-ops-reprocess")

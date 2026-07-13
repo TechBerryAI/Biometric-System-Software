@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import { RequireAuth } from "@/auth/RequireAuth";
+import { hasCapability } from "@/auth/sessionCapabilities";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Attendance } from "@/pages/Attendance";
 import { Dashboard } from "@/pages/Dashboard";
@@ -12,7 +13,6 @@ import { Profile } from "@/pages/Profile";
 import { Reports } from "@/pages/Reports";
 import { Audit } from "@/pages/Audit";
 import { Settings } from "@/pages/Settings";
-import { isPrivilegedAccount } from "@/auth/privilegedAccess";
 
 function HomeRoute() {
   const { can } = useAuth();
@@ -22,9 +22,15 @@ function HomeRoute() {
   return <Navigate to="/profile" replace />;
 }
 
-function PrivilegedRoute({ children }: { children: React.ReactNode }) {
+function CapabilityRoute({
+  capability,
+  children,
+}: {
+  capability: "forensic_audit";
+  children: React.ReactNode;
+}) {
   const { user } = useAuth();
-  if (!isPrivilegedAccount(user)) {
+  if (!hasCapability(user, capability)) {
     return <Navigate to="/" replace />;
   }
   return <>{children}</>;
@@ -99,9 +105,9 @@ export default function App() {
                 <Route
                   path="/audit"
                   element={
-                    <PrivilegedRoute>
+                    <CapabilityRoute capability="forensic_audit">
                       <Audit />
-                    </PrivilegedRoute>
+                    </CapabilityRoute>
                   }
                 />
                 <Route path="/corrections" element={<Navigate to="/audit" replace />} />

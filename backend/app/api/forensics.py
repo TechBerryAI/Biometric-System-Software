@@ -1,4 +1,4 @@
-"""Privileged forensic APIs for raw attendance events and correction history."""
+"""Internal forensic APIs for raw attendance events and correction history."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.security import require_privileged_account
+from app.core.security import require_operator_account
 from app.models.attendance_correction import AttendanceCorrection
 from app.models.attendance_correction_event import AttendanceCorrectionEvent
 from app.models.attendance_event import AttendanceEvent
@@ -25,7 +25,7 @@ from app.services.daily_summary_service import day_bounds_utc
 router = APIRouter(
     prefix="/forensics",
     tags=["forensics"],
-    dependencies=[Depends(require_privileged_account)],
+    dependencies=[Depends(require_operator_account)],
 )
 
 
@@ -101,7 +101,7 @@ def list_raw_events(
     employee_id: int | None = None,
     limit: int = Query(500, ge=1, le=5000),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_privileged_account),
+    _user: User = Depends(require_operator_account),
 ) -> list[AttendanceEvent]:
     settings = get_settings()
     q = select(AttendanceEvent).order_by(AttendanceEvent.timestamp.desc()).limit(limit)
@@ -126,7 +126,7 @@ def list_correction_ledger(
     date_to: date | None = Query(None, alias="to"),
     limit: int = Query(200, ge=1, le=2000),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_privileged_account),
+    _user: User = Depends(require_operator_account),
 ) -> list[AttendanceCorrection]:
     q = select(AttendanceCorrection).order_by(AttendanceCorrection.created_at.desc()).limit(limit)
     if employee_id is not None:
@@ -142,7 +142,7 @@ def list_correction_ledger(
 def get_correction_timeline(
     correction_uuid: UUID,
     db: Session = Depends(get_db),
-    _user: User = Depends(require_privileged_account),
+    _user: User = Depends(require_operator_account),
 ) -> CorrectionTimelineRead:
     correction = db.execute(
         select(AttendanceCorrection).where(AttendanceCorrection.correction_uuid == str(correction_uuid))
@@ -183,7 +183,7 @@ def list_device_verification_history(
     correction_uuid: UUID | None = None,
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_privileged_account),
+    _user: User = Depends(require_operator_account),
 ) -> list[DeviceVerificationRead]:
     if correction_uuid is not None:
         correction = db.execute(
@@ -228,7 +228,7 @@ def list_device_verification_history(
 def list_device_snapshots(
     limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
-    _user: User = Depends(require_privileged_account),
+    _user: User = Depends(require_operator_account),
 ) -> list[DeviceStateSnapshot]:
     return list(
         db.execute(

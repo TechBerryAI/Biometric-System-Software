@@ -15,7 +15,7 @@ from app.models.employee import Employee
 from app.schemas.attendance import DailySummaryRow
 from app.services.attendance_effective_service import (
     load_raw_punches_for_dates,
-    summarize_employee_day_from_events,
+    summarize_employee_day_for_display,
 )
 
 
@@ -88,7 +88,7 @@ def compute_daily_summaries_range(
         day_sessions = sessions.get(d, {})
         rows: list[DailySummaryRow] = []
         for emp in employees:
-            first_in, last_out, total_min, punch_count = summarize_employee_day_from_events(
+            first_in, last_out, total_min, punch_count = summarize_employee_day_for_display(
                 db,
                 employee=emp,
                 local_date=d,

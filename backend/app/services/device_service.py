@@ -419,7 +419,7 @@ class DeviceService:
 
     def probe_attlog_capabilities(self) -> dict[str, object]:
         def _probe(conn: Any) -> dict[str, object]:
-            caps = probe_attlog_capabilities(conn)
+            caps = probe_attlog_capabilities(conn, allow_tier_b_write=self._settings.correction_tier_b_write_enabled)
             return {
                 "tier": caps.tier,
                 "record_size": caps.record_size,
@@ -470,6 +470,7 @@ class DeviceService:
                 delete_timestamps=delete_timestamps,
                 new_records=new_records,
                 tz_name=self._settings.timezone,
+                allow_tier_b_write=self._settings.correction_tier_b_write_enabled,
             )
 
         try:

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pencil } from "lucide-react";
-import { isPrivilegedAccount } from "@/auth/privilegedAccess";
+import { hasCapability } from "@/auth/sessionCapabilities";
 import { useAuth } from "@/auth/AuthContext";
 import { Button } from "@/components/ui/button";
 import {
@@ -152,7 +152,7 @@ export function AttendanceAdjustmentModal({
   onApplied,
 }: ModalProps) {
   const { user } = useAuth();
-  const canAdjust = isPrivilegedAccount(user);
+  const canAdjust = hasCapability(user, "attendance_adjust");
   const date = row?.summary_date ?? "";
   const [checkInParts, setCheckInParts] = useState<TimeParts>(EMPTY_TIME);
   const [checkOutParts, setCheckOutParts] = useState<TimeParts | null>(null);
@@ -185,9 +185,7 @@ export function AttendanceAdjustmentModal({
     setSuccess(null);
     setError(null);
     void loadPreview();
-    void fetchCorrectionCapabilities()
-      .then(setCapabilities)
-      .catch(() => setCapabilities(null));
+    // Capabilities are optional; skip device probe on every modal open (slow on Tier B firmware).
   }, [open, date, canAdjust, loadPreview]);
 
   useEffect(() => {
@@ -239,6 +237,14 @@ export function AttendanceAdjustmentModal({
       if (result.status === "device_pending") {
         setPollingUuid(result.correction_uuid);
         setSuccess("Device correction queued. Waiting for device write and verification…");
+        return;
+      }
+      if (result.status === "applied_db_only") {
+        setSuccess(
+          "Updated in the database (logs, sessions, reports). Device memory was not rewritten on this firmware; old device punches are suppressed from re-sync.",
+        );
+        onApplied();
+        await loadPreview();
         return;
       }
       setSuccess(

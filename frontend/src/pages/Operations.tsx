@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useAuth } from "@/auth/AuthContext";
-import { accountTierFromUser } from "@/auth/privilegedAccess";
+import { accountTierFromUser } from "@/auth/sessionCapabilities";
 import { fetchAuditLogs, fetchDeviceCommands, fetchOperationalMetrics } from "@/services/api";
 import { cn } from "@/lib/cn";
 import { fmtDisplayDateTime } from "@/lib/dates";
@@ -12,8 +12,8 @@ export function Operations() {
   const [activeTab, setActiveTab] = useState<"commands" | "audits">("commands");
   const accountTier = accountTierFromUser(user);
   const sliderToneClass =
-    accountTier === "god"
-      ? "bg-status-absent shadow-[0_8px_22px_rgba(220,38,38,0.32)]"
+    accountTier === "operator"
+      ? "bg-red-600 shadow-[0_8px_22px_rgba(220,38,38,0.32)]"
       : accountTier === "ceo"
       ? "bg-status-late shadow-[0_8px_22px_rgba(202,138,4,0.32)]"
       : "bg-primary shadow-[0_8px_22px_rgba(79,70,229,0.32)]";

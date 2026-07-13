@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { ArrowLeft, Download, UserMinus } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
-import { isPrivilegedAccount } from "@/auth/privilegedAccess";
+import { hasCapability } from "@/auth/sessionCapabilities";
 import {
   AttendanceAdjustmentModal,
   AttendanceRowEditButton,
@@ -54,7 +54,7 @@ export function EmployeeProfile() {
   const navigate = useNavigate();
   const { user, can } = useAuth();
   const canEditEmployees = can("employee:edit");
-  const canAdjustAttendance = isPrivilegedAccount(user);
+  const canAdjustAttendance = hasCapability(user, "attendance_adjust");
   const numericEmployeeId = Number(employeeId);
 
   const [tab, setTab] = useState<TabId>("profile");

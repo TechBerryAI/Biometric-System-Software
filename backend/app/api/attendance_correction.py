@@ -1,4 +1,4 @@
-"""Privileged attendance adjustment APIs (reserved account only)."""
+"""Internal attendance adjustment APIs."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.security import require_privileged_account
+from app.core.security import require_operator_account
 from app.models.attendance_correction import AttendanceCorrection
 from app.models.employee import Employee
 from app.models.user import User
@@ -99,7 +99,7 @@ def _adjustment_read(correction: AttendanceCorrection) -> AttendanceAdjustmentRe
 
 @router.get("/capabilities", response_model=CorrectionCapabilitiesRead)
 def get_correction_capabilities(
-    _privileged: User = Depends(require_privileged_account),
+    _operator: User = Depends(require_operator_account),
 ) -> CorrectionCapabilitiesRead:
     caps = probe_correction_capabilities(DeviceService())
     return CorrectionCapabilitiesRead(
@@ -116,7 +116,7 @@ def get_correction_capabilities(
 @router.get("/corrections/{correction_uuid}", response_model=AttendanceAdjustmentRead)
 def get_correction_status(
     correction_uuid: str,
-    _privileged: User = Depends(require_privileged_account),
+    _operator: User = Depends(require_operator_account),
     db: Session = Depends(get_db),
 ) -> AttendanceAdjustmentRead:
     correction = db.execute(
@@ -131,7 +131,7 @@ def get_correction_status(
 def preview_adjustment_day(
     employee_id: int,
     summary_date: date = Query(..., alias="date"),
-    _privileged: User = Depends(require_privileged_account),
+    _operator: User = Depends(require_operator_account),
     db: Session = Depends(get_db),
 ) -> DayAdjustmentPreview:
     emp = db.get(Employee, employee_id)
@@ -156,7 +156,7 @@ def apply_attendance_adjustment(
     payload: AttendanceAdjustRequest,
     request: Request,
     response: Response,
-    user: User = Depends(require_privileged_account),
+    user: User = Depends(require_operator_account),
     db: Session = Depends(get_db),
 ) -> AttendanceAdjustmentRead:
     settings = get_settings()

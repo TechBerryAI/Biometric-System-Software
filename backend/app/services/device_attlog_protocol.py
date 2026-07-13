@@ -33,7 +33,7 @@ def _ts_match(a: datetime, b: datetime, *, tz_name: str) -> bool:
     return abs((a_local - b_local).total_seconds()) <= _TS_TOLERANCE.total_seconds()
 
 
-def probe_attlog_capabilities(conn: Any) -> AttlogCapabilities:
+def probe_attlog_capabilities(conn: Any, *, allow_tier_b_write: bool = False) -> AttlogCapabilities:
     """Detect whether selective delete or full rewrite is viable."""
     if hasattr(conn, "delete_attendance") and (
         hasattr(conn, "set_attendance") or hasattr(conn, "save_attendance")
@@ -53,6 +53,18 @@ def probe_attlog_capabilities(conn: Any) -> AttlogCapabilities:
             # Infer from device; pyzk stores rec count after read_sizes.
             record_size = 40 if getattr(conn, "user_packet_size", 28) != 28 else 8
         if hasattr(conn, "clear_attendance") and hasattr(conn, "_send_with_buffer"):
+            if allow_tier_b_write:
+                logger.warning(
+                    "Tier B attlog full rewrite enabled via CORRECTION_TIER_B_WRITE_ENABLED; "
+                    "write will be verified by readback before finalize."
+                )
+                return AttlogCapabilities(
+                    tier="B",
+                    record_size=record_size,
+                    supports_selective_delete=False,
+                    supports_full_rewrite=True,
+                    supports_write=True,
+                )
             # pyzk exposes clear_attendance + _send_with_buffer but does not commit attlog
             # uploads on real ZKTeco firmware; full rewrite would wipe device memory without
             # restoring punches. Treat as read-only until a verified write path exists.
@@ -100,6 +112,7 @@ def apply_attlog_correction(
     delete_timestamps: list[datetime],
     new_records: list[AttlogRecord],
     tz_name: str = "Asia/Kolkata",
+    allow_tier_b_write: bool = False,
 ) -> dict[str, Any]:
     """
     Replace attendance punches for one user on the device.
@@ -108,7 +121,7 @@ def apply_attlog_correction(
     Tier B: full attlog rewrite (read all → modify → clear → upload all).
     Tier C: raises AttlogCorrectionNotSupported.
     """
-    caps = probe_attlog_capabilities(conn)
+    caps = probe_attlog_capabilities(conn, allow_tier_b_write=allow_tier_b_write)
     if caps.tier == "C":
         raise AttlogCorrectionNotSupported(
             "Device firmware does not support attendance correction. "

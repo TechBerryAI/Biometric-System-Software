@@ -61,12 +61,18 @@ api.interceptors.response.use(
   }
 );
 
+export type UserCapabilities = {
+  attendance_adjust: boolean;
+  forensic_audit: boolean;
+};
+
 export type CurrentUserResponse = {
   user_uuid: string;
   email: string;
   full_name?: string | null;
   role: "SUPER_ADMIN" | "HR_ADMIN" | "IT_ADMIN" | "CEO";
   active: boolean;
+  capabilities?: UserCapabilities;
 };
 
 export type AppUserRole = "HR_ADMIN" | "IT_ADMIN";
@@ -500,7 +506,7 @@ export function getApiErrorMessage(err: unknown): string {
 export function formatSyncErrorMessage(err: unknown): string {
   const message = getApiErrorMessage(err);
   if (message.includes("no route to host")) {
-    return `${message} You can still enter attendance manually via privileged account adjustment while the device is offline.`;
+    return `${message} You can still adjust attendance manually while the device is offline.`;
   }
   if (message.includes("busy") || message.includes("lock")) {
     return message;

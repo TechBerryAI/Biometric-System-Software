@@ -394,12 +394,18 @@ def run_device_sync(
     """
     from app.services.attendance_effective_service import (
         append_attendance_events_idempotent,
-        rebuild_sessions_for_employee_date,
+        ensure_effective_punches_for_day,
         repair_punch_types_from_device_records,
-        sync_effective_punches_from_events,
     )
+    from app.services.device_command_service import wait_for_correction_commands_clear
 
     settings = settings or get_settings()
+    if not wait_for_correction_commands_clear(db, settings.zk_device_id, settings=settings):
+        logger.warning(
+            "Deferring device sync: CORRECT_ATTENDANCE still active for device %s",
+            settings.zk_device_id,
+        )
+        return 0, 0, 0
     device = device or DeviceService(settings=settings)
     floor = None if full_resync else _incremental_sync_floor(db, device_id=settings.zk_device_id, settings=settings)
     fetched_records = device.fetch_attendance()
@@ -452,10 +458,7 @@ def run_device_sync(
         emp = db.get(Employee, employee_id)
         if emp is None:
             continue
-        sync_effective_punches_from_events(db, employee=emp, local_date=day, settings=settings, commit=False)
-        rebuild_sessions_for_employee_date(
-            db, employee_id=employee_id, local_date=day, settings=settings, commit=False
-        )
+        ensure_effective_punches_for_day(db, employee=emp, local_date=day, settings=settings, commit=False)
     if affected:
         db.commit()
 

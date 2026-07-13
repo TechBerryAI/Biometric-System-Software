@@ -34,7 +34,7 @@ from app.services.employee_offboard_service import offboard_employee
 from app.services.attendance_effective_service import (
     employee_punch_bounds,
     load_raw_punches_for_dates,
-    summarize_employee_day_from_events,
+    summarize_employee_day_for_display,
 )
 from app.services.system_governance_service import assert_device_write_allowed
 
@@ -207,7 +207,7 @@ def get_employee_daily_attendance(
     rows: list[EmployeeDailyAttendanceRead] = []
     d = start_date
     while d <= end_date:
-        first_in, last_out, total_work_minutes, punch_count = summarize_employee_day_from_events(
+        first_in, last_out, total_work_minutes, punch_count = summarize_employee_day_for_display(
             db,
             employee=emp,
             local_date=d,

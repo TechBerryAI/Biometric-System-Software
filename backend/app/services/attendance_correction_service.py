@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, time, timedelta
+import time
+from datetime import date, datetime, time as dt_time, timedelta
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -41,6 +42,9 @@ from app.services.device_service import DeviceService
 
 logger = logging.getLogger(__name__)
 
+_CAPS_PROBE_CACHE: dict[str, tuple[float, dict[str, object]]] = {}
+_CAPS_PROBE_CACHE_TTL = 300.0
+
 CORRECTION_STATUS_PENDING = "pending"
 CORRECTION_STATUS_DEVICE_PENDING = "device_pending"
 CORRECTION_STATUS_DEVICE_VERIFYING = "device_verifying"
@@ -74,7 +78,7 @@ def _validate_correction_times(
     settings: Settings,
 ) -> None:
     tz = ZoneInfo(settings.timezone)
-    start_local = datetime.combine(local_date, time.min, tzinfo=tz)
+    start_local = datetime.combine(local_date, dt_time.min, tzinfo=tz)
     end_local = start_local + timedelta(days=1)
     for label, ts in (("check_in", new_check_in), ("check_out", new_check_out)):
         if ts is None:
@@ -86,12 +90,21 @@ def _validate_correction_times(
         raise ValueError("check_out must be after check_in.")
 
 
-def _probe_device_caps(device: DeviceService) -> dict[str, object]:
+def _probe_device_caps(device: DeviceService, settings: Settings | None = None) -> dict[str, object]:
+    settings = settings or get_settings()
     try:
-        return device.probe_attlog_capabilities()
+        caps = device.probe_attlog_capabilities()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Cannot probe device attlog capabilities (%s).", exc)
-        return {"tier": "C", "supports_write": False}
+        caps = {"tier": "C", "supports_write": False}
+    tier = str(caps.get("tier") or "C")
+    logger.info("Device attlog capability probe: tier=%s supports_write=%s", tier, caps.get("supports_write"))
+    if settings.correction_tier_b_write_enabled and tier == "B":
+        caps = dict(caps)
+        caps["supports_write"] = True
+        caps["supports_full_rewrite"] = True
+        logger.info("Tier B attlog write enabled via CORRECTION_TIER_B_WRITE_ENABLED")
+    return caps
 
 
 def _device_supports_attlog_write(caps: dict[str, object]) -> bool:
@@ -221,7 +234,7 @@ def _finalize_correction(
         return False
 
     imported_ts: list[datetime] = []
-    if from_device_verify and device is not None:
+    if device is not None:
         correction.status = CORRECTION_STATUS_REIMPORT_PENDING
         db.flush()
         _, imported_ts = reimport_attendance_window(
@@ -264,7 +277,7 @@ def _finalize_correction(
         commit=False,
     )
 
-    if from_device_verify:
+    if device is not None and imported_ts:
         _check_correction_drift(
             db,
             correction=correction,
@@ -384,17 +397,27 @@ def apply_attendance_correction(
 
         device = device_service or DeviceService(settings=settings)
 
-        with device_session_lock(settings.zk_device_id, settings):
-            caps = _probe_device_caps(device)
+        cache_key = settings.zk_device_id
+        cached = _CAPS_PROBE_CACHE.get(cache_key)
+        if cached is not None and time.monotonic() - cached[0] < _CAPS_PROBE_CACHE_TTL:
+            caps = dict(cached[1])
+        else:
+            with device_session_lock(settings.zk_device_id, settings):
+                caps = _probe_device_caps(device, settings)
+            _CAPS_PROBE_CACHE[cache_key] = (time.monotonic(), caps)
         tier = str(caps.get("tier") or "C")[:1]
         correction.device_tier = tier
         writable = _device_supports_attlog_write(caps)
 
         if settings.strict_device_authority:
             correction.correction_mode = "strict_device"
-            if writable:
-                db.commit()
-                db.refresh(correction)
+            # Tier B readback fails on this firmware; DB-first avoids queue deadlock and slow retries.
+            skip_device_queue = (
+                settings.correction_allow_db_only_fallback
+                and tier == "B"
+                and writable
+            )
+            if writable and not skip_device_queue:
                 return _enqueue_strict_device_correction(
                     db,
                     correction=correction,
@@ -407,42 +430,55 @@ def apply_attendance_correction(
                     settings=settings,
                     caps=caps,
                 )
-            if not settings.correction_allow_db_only_fallback:
-                correction.status = CORRECTION_STATUS_DEVICE_FAILED
-                correction.error_message = (
-                    f"Device firmware tier {tier} does not support attlog write; "
-                    "strict device authority requires a writable device."
+            if skip_device_queue:
+                correction.correction_mode = "db_fallback"
+                logger.info(
+                    "Tier B DB-first path: skipping device queue for correction %s",
+                    correction.correction_uuid,
                 )
-                db.commit()
-                db.refresh(correction)
-                return correction
-            correction.correction_mode = "db_fallback"
+            elif not writable:
+                if not settings.correction_allow_db_only_fallback:
+                    correction.status = CORRECTION_STATUS_DEVICE_FAILED
+                    correction.error_message = (
+                        f"Device firmware tier {tier} does not support attlog write; "
+                        "strict device authority requires a writable device."
+                    )
+                    db.commit()
+                    db.refresh(correction)
+                    return correction
+                correction.correction_mode = "db_fallback"
 
         correction.correction_mode = correction.correction_mode or "db_fallback"
         device_write_skipped = True
         device_verification_details: dict[str, Any] | None = None
+        skip_device_attempt = (
+            tier == "B"
+            and settings.correction_allow_db_only_fallback
+            and correction.correction_mode == "db_fallback"
+        )
 
-        with device_session_lock(settings.zk_device_id, settings):
-            if writable:
-                try:
-                    device_verification_details = device.correct_attendance(
-                        user_id=str(employee.device_user_id),
-                        uid=employee.device_uid,
-                        delete_timestamps=list(before.log_timestamps),
-                        new_check_in=new_check_in,
-                        new_check_out=new_check_out,
-                    )
-                    device_write_skipped = False
-                    record_correction_event(
-                        db,
-                        correction_uuid=correction.correction_uuid,
-                        event_type="device_write",
-                        device_operation_uuid=f"{correction.correction_uuid}:device_write",
-                        payload=device_verification_details,
-                    )
-                except (AttlogCorrectionNotSupported, AttlogCorrectionError, DeviceFetchError, OSError) as exc:
-                    logger.warning("Device attlog correction unavailable (%s); applying effective-only.", exc)
-                    device_write_skipped = True
+        if not skip_device_attempt:
+            with device_session_lock(settings.zk_device_id, settings):
+                if writable:
+                    try:
+                        device_verification_details = device.correct_attendance(
+                            user_id=str(employee.device_user_id),
+                            uid=employee.device_uid,
+                            delete_timestamps=list(before.log_timestamps),
+                            new_check_in=new_check_in,
+                            new_check_out=new_check_out,
+                        )
+                        device_write_skipped = False
+                        record_correction_event(
+                            db,
+                            correction_uuid=correction.correction_uuid,
+                            event_type="device_write",
+                            device_operation_uuid=f"{correction.correction_uuid}:device_write",
+                            payload=device_verification_details,
+                        )
+                    except (AttlogCorrectionNotSupported, AttlogCorrectionError, DeviceFetchError, OSError) as exc:
+                        logger.warning("Device attlog correction unavailable (%s); applying effective-only.", exc)
+                        device_write_skipped = True
 
         final_status = (
             CORRECTION_STATUS_APPLIED_DB_ONLY if device_write_skipped else CORRECTION_STATUS_APPLIED
@@ -458,7 +494,7 @@ def apply_attendance_correction(
             settings=settings,
             final_status=final_status,
             device_verification_details=device_verification_details,
-            from_device_verify=not device_write_skipped and settings.strict_device_authority,
+            from_device_verify=not device_write_skipped,
             device=device if not device_write_skipped else None,
             correlation_id=correlation_id,
             device_operation_uuid=op_uuid,
@@ -547,6 +583,7 @@ def mark_correction_failed_for_command(
     command_uuid: str,
     error_message: str,
 ) -> AttendanceCorrection | None:
+    settings = get_settings()
     correction = db.execute(
         select(AttendanceCorrection).where(
             AttendanceCorrection.device_command_uuid == command_uuid,
@@ -557,6 +594,42 @@ def mark_correction_failed_for_command(
     ).scalar_one_or_none()
     if correction is None:
         return None
+
+    if settings.correction_allow_db_only_fallback and correction.new_check_in is not None:
+        employee = db.get(Employee, correction.employee_id)
+        if employee is not None:
+            before = load_day_snapshot(db, employee=employee, local_date=correction.local_date, settings=settings)
+            op_uuid = correction.device_operation_uuid or f"{correction.correction_uuid}:db_fallback:{command_uuid}"
+            with employee_day_lock(employee.id, correction.local_date, settings):
+                finalized = _finalize_correction(
+                    db,
+                    correction=correction,
+                    employee=employee,
+                    before=before,
+                    new_check_in=correction.new_check_in,
+                    new_check_out=correction.new_check_out,
+                    settings=settings,
+                    final_status=CORRECTION_STATUS_APPLIED_DB_ONLY,
+                    device_verification_details={"device_error": error_message[:500], "fallback": "db_only"},
+                    from_device_verify=False,
+                    device=None,
+                    correlation_id=None,
+                    device_operation_uuid=op_uuid,
+                )
+                if finalized:
+                    correction.correction_mode = correction.correction_mode or "db_fallback"
+                    correction.error_message = f"Device write failed; applied DB-only fallback. {error_message[:1500]}"
+                    record_correction_event(
+                        db,
+                        correction_uuid=correction.correction_uuid,
+                        event_type="device_failed",
+                        device_operation_uuid=f"{correction.correction_uuid}:failed:{command_uuid}",
+                        payload={"error": error_message[:2000], "db_fallback_applied": True},
+                    )
+                    db.commit()
+                    db.refresh(correction)
+                    return correction
+
     correction.status = CORRECTION_STATUS_DEVICE_FAILED
     correction.error_message = error_message[:2000]
     record_correction_event(
@@ -570,16 +643,77 @@ def mark_correction_failed_for_command(
     return correction
 
 
+def recover_orphan_correction(db: Session, correction: AttendanceCorrection) -> AttendanceCorrection:
+    """
+    Finalize corrections stuck in pending without a device command (e.g. failed enqueue).
+    Applies DB-only fallback when enabled.
+    """
+    settings = get_settings()
+    if correction.status not in (CORRECTION_STATUS_PENDING, CORRECTION_STATUS_DEVICE_PENDING):
+        return correction
+    if correction.device_command_uuid:
+        return correction
+    if correction.new_check_in is None:
+        correction.status = CORRECTION_STATUS_FAILED
+        correction.error_message = "Orphan correction missing new_check_in."
+        db.flush()
+        return correction
+    if not settings.correction_allow_db_only_fallback:
+        correction.status = CORRECTION_STATUS_FAILED
+        correction.error_message = "Orphan correction; DB-only fallback disabled."
+        db.flush()
+        return correction
+
+    employee = db.get(Employee, correction.employee_id)
+    if employee is None:
+        correction.status = CORRECTION_STATUS_FAILED
+        correction.error_message = "Orphan correction: employee not found."
+        db.flush()
+        return correction
+
+    before = load_day_snapshot(db, employee=employee, local_date=correction.local_date, settings=settings)
+    op_uuid = correction.device_operation_uuid or f"{correction.correction_uuid}:orphan_recovery"
+    with employee_day_lock(employee.id, correction.local_date, settings):
+        finalized = _finalize_correction(
+            db,
+            correction=correction,
+            employee=employee,
+            before=before,
+            new_check_in=correction.new_check_in,
+            new_check_out=correction.new_check_out,
+            settings=settings,
+            final_status=CORRECTION_STATUS_APPLIED_DB_ONLY,
+            device_verification_details={"orphan_recovery": True},
+            from_device_verify=False,
+            device=None,
+            correlation_id=None,
+            device_operation_uuid=op_uuid,
+        )
+        if finalized:
+            correction.correction_mode = correction.correction_mode or "db_fallback"
+            correction.error_message = "Recovered orphan correction via DB-only fallback."
+    db.flush()
+    return correction
+
+
 def probe_correction_capabilities(
     device_service: DeviceService | None = None,
     settings: Settings | None = None,
 ) -> dict[str, object]:
     settings = settings or get_settings()
+    cache_key = settings.zk_device_id
+    now = time.monotonic()
+    cached = _CAPS_PROBE_CACHE.get(cache_key)
+    if cached is not None and now - cached[0] < _CAPS_PROBE_CACHE_TTL:
+        return dict(cached[1])
+
     device = device_service or DeviceService(settings=settings)
     with device_session_lock(settings.zk_device_id, settings):
-        caps = _probe_device_caps(device)
-    return {
+        caps = _probe_device_caps(device, settings)
+    result = {
         **caps,
         "strict_device_authority": settings.strict_device_authority,
         "correction_allow_db_only_fallback": settings.correction_allow_db_only_fallback,
     }
+    _CAPS_PROBE_CACHE[cache_key] = (now, result)
+    return result

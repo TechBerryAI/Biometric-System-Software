@@ -35,5 +35,5 @@ class AttendanceCorrection(Base):
     device_tier: Mapped[str | None] = mapped_column(String(1), nullable=True)
     device_verification_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     correction_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    device_operation_uuid: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True, index=True)
+    device_operation_uuid: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True, index=True)
     reimport_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

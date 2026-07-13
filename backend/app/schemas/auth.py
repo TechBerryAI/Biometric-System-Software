@@ -28,12 +28,18 @@ class LogoutRequest(BaseModel):
     refresh_token: str = Field(min_length=20, max_length=512)
 
 
+class UserCapabilities(BaseModel):
+    attendance_adjust: bool = False
+    forensic_audit: bool = False
+
+
 class CurrentUserResponse(BaseModel):
     user_uuid: str
     email: str
     full_name: str | None = None
     role: str
     active: bool
+    capabilities: UserCapabilities = Field(default_factory=UserCapabilities)
 
 
 class UserCreateRequest(BaseModel):

@@ -14,7 +14,7 @@ from app.core.security import Permission, require_permissions
 from app.models.user import User
 from app.services.attendance_service import run_device_sync, run_user_sync
 from app.services.audit_service import append_audit_log
-from app.services.device_command_service import device_session_lock
+from app.services.device_command_service import device_session_lock, wait_for_correction_commands_clear
 from app.services.device_exceptions import DeviceFetchError, DeviceLockContentionError
 from app.services.device_registry_service import update_device_health
 from app.services.device_service import format_device_connection_error
@@ -46,6 +46,14 @@ def sync_from_device(
     Same effective steps as ``scripts/sync_from_device.py``.
     """
     settings = get_settings()
+    if not wait_for_correction_commands_clear(db, settings.zk_device_id, settings=settings):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Device '{settings.zk_device_id}' is applying an attendance correction. "
+                "Wait a few seconds and retry sync."
+            ),
+        )
     try:
         with device_session_lock(settings.zk_device_id, settings):
             u_total, u_ins = run_user_sync(db, settings=settings)

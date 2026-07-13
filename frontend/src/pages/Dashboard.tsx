@@ -225,6 +225,7 @@ function ExecutiveKpiCard({
 export function Dashboard() {
   const { can } = useAuth();
   const canInsights = can("reports:read");
+  const canManageDevice = can("device:manage");
   const dash = useDashboard();
   const [dateRange, setDateRange] = useState("Last 14 days");
   const trendDays = dateRangeToDays(dateRange);
@@ -234,7 +235,7 @@ export function Dashboard() {
   const [shiftFilter, setShiftFilter] = useState("All shifts");
   const [deviceFilter, setDeviceFilter] = useState("All devices");
   const [viewMode, setViewMode] = useState<"live" | "today" | "weekly">("live");
-  const [aiEnabled, setAiEnabled] = useState(true);
+  const [aiEnabled, setAiEnabled] = useState(false);
   const [expandedInsight, setExpandedInsight] = useState<string | null>(null);
   const [showOperationalKpis, setShowOperationalKpis] = useState(false);
   const [formatDialogOpen, setFormatDialogOpen] = useState(false);
@@ -611,7 +612,7 @@ export function Dashboard() {
       };
     });
     const anomalyEvents = (anomalyQuery.data?.anomalies ?? []).slice(0, 3).map((anomaly) => ({
-      id: `anomaly-${anomaly.id}`,
+      id: `anomaly-${anomaly.anomaly_key}-${anomaly.anomaly_date}`,
       title: "Attendance anomaly detected",
       subtitle: anomaly.description,
       timestamp: fmtDisplayDate(anomaly.anomaly_date),
@@ -670,7 +671,7 @@ export function Dashboard() {
             ? "medium"
             : "low";
         items.push({
-          id: `anomaly-${anomaly.id}`,
+          id: `anomaly-${anomaly.anomaly_key}-${anomaly.anomaly_date}`,
           title: anomaly.description,
           severity,
           recommendation: anomaly.recommendation ?? "Review attendance records for this date and follow up with the employee.",
@@ -691,7 +692,7 @@ export function Dashboard() {
       });
     }
 
-    if (operationsHealth.failingDevices > 0) {
+    if (operationsHealth.failingDevices > 0 && canManageDevice) {
       items.push({
         id: "device-failures",
         title: `${operationsHealth.failingDevices} biometric device${operationsHealth.failingDevices === 1 ? "" : "s"} failing heartbeat checks.`,
@@ -747,6 +748,7 @@ export function Dashboard() {
     attendanceSignals.late,
     attendanceSignals.present,
     operationsHealth.failingDevices,
+    canManageDevice,
     attendanceRate,
     workforceHealthIndex,
   ]);
@@ -1183,7 +1185,7 @@ export function Dashboard() {
               </span>
             </div>
             <div className="mt-4 h-[340px]">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={1}>
                 <LineChart data={selectedTrend} margin={{ top: 6, right: 12, left: -12, bottom: 2 }}>
                   <CartesianGrid stroke="#E2E8F0" vertical={false} strokeDasharray="3 3" />
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748B" }} axisLine={false} tickLine={false} />
@@ -1436,7 +1438,7 @@ export function Dashboard() {
               <RadarIcon className="h-4 w-4 text-primary" />
             </div>
             <div className="mt-3 h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={1}>
                 <RadarChart data={radarData}>
                   <PolarGrid stroke="#CBD5E1" />
                   <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fill: "#64748B" }} />
@@ -1533,7 +1535,7 @@ export function Dashboard() {
               <Activity className="h-4 w-4 text-primary" />
             </div>
             <div className="mt-4 h-[280px]">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={1}>
                 <AreaChart
                   data={selectedTrend}
                   margin={{ top: 8, right: 8, left: -12, bottom: 0 }}

@@ -48,7 +48,7 @@ export function Audit() {
       <header>
         <h1 className="font-display text-display-xl text-ink">Audit</h1>
         <p className="mt-2 max-w-2xl text-sm text-ink-muted leading-relaxed">
-          Privileged investigation tools — corrections, raw punches, and device snapshots in one place.
+          System audit logs and device history.
         </p>
       </header>
 

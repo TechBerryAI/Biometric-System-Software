@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Loader2, PencilLine } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/auth/AuthContext";
-import { accountTierFromUser, roleLabelFromUser } from "@/auth/privilegedAccess";
+import { accountTierFromUser, roleLabelFromUser } from "@/auth/sessionCapabilities";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,8 +66,8 @@ export function Profile() {
         <Card className="relative overflow-hidden lg:col-span-2">
           <div
             className={
-              accountTier === "god"
-                ? "h-1.5 w-full bg-gradient-to-r from-status-absent via-status-absent to-status-absent-soft"
+              accountTier === "operator"
+                ? "h-1.5 w-full bg-gradient-to-r from-red-600 via-red-500 to-red-100"
                 : accountTier === "ceo"
                 ? "h-1.5 w-full bg-gradient-to-r from-status-late via-status-late to-status-late-soft"
                 : "h-1.5 w-full bg-gradient-to-r from-primary via-primary to-primary-soft"
@@ -95,8 +95,8 @@ export function Profile() {
             <div className="mb-2 flex items-center gap-3 rounded-2xl border border-line/70 bg-surface p-3">
               <span
                 className={
-                  accountTier === "god"
-                    ? "flex h-11 w-11 items-center justify-center rounded-xl bg-status-absent-soft text-sm font-semibold text-status-absent"
+                  accountTier === "operator"
+                    ? "flex h-11 w-11 items-center justify-center rounded-xl bg-red-100 text-sm font-semibold text-red-700"
                     : accountTier === "ceo"
                     ? "flex h-11 w-11 items-center justify-center rounded-xl bg-status-late-soft text-sm font-semibold text-status-late"
                     : "flex h-11 w-11 items-center justify-center rounded-xl bg-primary-soft text-sm font-semibold text-primary"
@@ -169,8 +169,14 @@ export function Profile() {
           </CardHeader>
           <CardContent className="space-y-3">
             <Badge
-              variant={accountTier === "god" ? "absent" : user?.role === "CEO" ? "outline" : "default"}
-              className={user?.role === "CEO" ? "border-status-late-soft bg-status-late-soft text-status-late" : ""}
+              variant={accountTier === "operator" || user?.role === "CEO" ? "outline" : "default"}
+              className={
+                accountTier === "operator"
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : user?.role === "CEO"
+                  ? "border-status-late-soft bg-status-late-soft text-status-late"
+                  : ""
+              }
             >
               {roleLabel}
             </Badge>
