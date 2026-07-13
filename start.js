@@ -247,6 +247,89 @@ async function pipInstall() {
   if (freezeCode !== 0) throw new Error(`pip verification failed with exit ${freezeCode}`);
 }
 
+async function checkPostgresConnectivity() {
+  log("Checking PostgreSQL connectivity...");
+  const pyScript = `
+import sys
+from sqlalchemy import create_engine, text
+from app.core.config import get_settings
+
+settings = get_settings()
+url = str(settings.database_url)
+host = settings.db_host or "unknown"
+port = settings.db_port or 5432
+try:
+    engine = create_engine(url, pool_pre_ping=True)
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    print("OK")
+except Exception as exc:
+    msg = str(exc).lower()
+    if "password authentication failed" in msg:
+        print(f"AUTH_FAIL|{host}|{port}")
+    elif "does not exist" in msg and "database" in msg:
+        print(f"NO_DB|{settings.db_name}")
+    elif "connection refused" in msg:
+        print(f"REFUSED|{host}|{port}")
+    elif "server closed the connection" in msg:
+        print(f"SERVER_CLOSED|{host}|{port}")
+    elif "timeout" in msg or "unreachable" in msg:
+        print(f"TIMEOUT|{host}|{port}")
+    elif "connection failed" in msg or "could not connect" in msg:
+        print(f"UNREACHABLE|{host}|{port}")
+    else:
+        print(f"ERROR|{exc}")
+    sys.exit(1)
+`;
+  const r = spawn(VENV_PY, ["-c", pyScript], {
+    cwd: BACKEND,
+    stdio: ["ignore", "pipe", "inherit"],
+    shell: false,
+    env: envForBackendChild(),
+  });
+  let stdout = "";
+  r.stdout.on("data", (chunk) => {
+    stdout += chunk.toString();
+  });
+  const code = await waitForExit(r);
+  const line = stdout.trim().split("\n").pop() || "";
+  if (code === 0 && line === "OK") {
+    log("PostgreSQL connection OK");
+    return;
+  }
+  const [kind, a, b] = line.split("|");
+  if (kind === "REFUSED") {
+    warn(
+      `Nothing is listening on ${a}:${b} (connection refused). ` +
+        "On the VM, start PostgreSQL and confirm it listens on that port (postgresql.conf / docker publish). " +
+        "For local WSL dev, use DB_HOST=127.0.0.1, DB_PORT=5432 in backend/.env."
+    );
+  } else if (kind === "SERVER_CLOSED") {
+    warn(
+      `PostgreSQL at ${a}:${b} closed the connection (wrong port, pg_hba.conf, or service not ready). ` +
+        "Verify the port, that postgres is running, and pg_hba allows your WSL IP."
+    );
+  } else if (kind === "TIMEOUT" || kind === "UNREACHABLE") {
+    warn(
+      `Cannot reach PostgreSQL at ${a}:${b} (network timeout or unreachable). ` +
+        "If you use the VM database (192.168.1.116), connect to the LAN/VPN first. " +
+        "For local WSL dev, set DB_HOST=127.0.0.1, DB_PORT=5432, and DATABASE_URL with your local postgres password in backend/.env."
+    );
+  } else if (kind === "AUTH_FAIL") {
+    warn(
+      `PostgreSQL rejected the password for user in backend/.env (${a}:${b}). ` +
+        "Update DB_PASSWORD and DATABASE_URL with the correct postgres password."
+    );
+  } else if (kind === "NO_DB") {
+    warn(
+      `Database "${a}" does not exist. Create it with backend/scripts/setup_local_database.sql, then rerun start.js.`
+    );
+  } else {
+    warn(`PostgreSQL check failed: ${line.replace(/^ERROR\|/, "")}`);
+  }
+  throw new Error("PostgreSQL is not reachable with backend/.env settings");
+}
+
 async function alembicUpgrade() {
   log("Running database migrations...");
   const py = VENV_PY;
@@ -321,6 +404,7 @@ async function main() {
 
   await ensureVenv();
   await pipInstall();
+  await checkPostgresConnectivity();
   await alembicUpgrade();
   await npmInstallFrontend();
 
