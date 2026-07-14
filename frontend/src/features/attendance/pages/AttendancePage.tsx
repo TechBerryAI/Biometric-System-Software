@@ -15,6 +15,11 @@ import { cn } from "@/lib/cn";
 import type { ExportPeriod } from "@/lib/dates";
 import { dateList, fmtDisplayDateTime, getExportRange, todayISO } from "@/lib/dates";
 import { fetchDailySummary, fetchDailySummaryRange } from "@/features/attendance/api";
+import {
+  ATTENDANCE_SORT_LABELS,
+  sortAttendanceRows,
+  type AttendanceSortMode,
+} from "@/features/attendance/sortAttendance";
 import { fetchEmployees } from "@/features/employees/api";
 import { getApiErrorMessage } from "@/shared/api/client";
 import { useUiStore } from "@/stores/ui-store";
@@ -33,53 +38,6 @@ function fmtWorkHm(total: number | null): string {
 }
 
 type AttendanceRow = DailySummaryRow & { is_absent: boolean };
-
-type AttendanceSortMode = "early_first" | "late_first" | "name_asc" | "work_desc" | "work_asc";
-
-const SORT_LABELS: Record<AttendanceSortMode, string> = {
-  early_first: "Early first",
-  late_first: "Late first",
-  name_asc: "Name A–Z",
-  work_desc: "Most hours",
-  work_asc: "Least hours",
-};
-
-function punchTime(iso: string | null): number | null {
-  return iso ? new Date(iso).getTime() : null;
-}
-
-function comparePresent(a: AttendanceRow, b: AttendanceRow, mode: AttendanceSortMode): number {
-  const byName = () => a.employee_name.localeCompare(b.employee_name);
-
-  if (mode === "name_asc") return byName();
-
-  if (mode === "work_desc" || mode === "work_asc") {
-    const aWork = a.total_work_minutes ?? -1;
-    const bWork = b.total_work_minutes ?? -1;
-    const diff = mode === "work_desc" ? bWork - aWork : aWork - bWork;
-    return diff !== 0 ? diff : byName();
-  }
-
-  const aIn = punchTime(a.first_check_in);
-  const bIn = punchTime(b.first_check_in);
-  if (aIn != null && bIn != null) {
-    const diff = mode === "late_first" ? bIn - aIn : aIn - bIn;
-    return diff !== 0 ? diff : byName();
-  }
-  if (aIn != null) return -1;
-  if (bIn != null) return 1;
-
-  const aOut = punchTime(a.last_check_out);
-  const bOut = punchTime(b.last_check_out);
-  if (aOut != null && bOut != null) {
-    const diff = mode === "late_first" ? bOut - aOut : aOut - bOut;
-    return diff !== 0 ? diff : byName();
-  }
-  if (aOut != null) return -1;
-  if (bOut != null) return 1;
-
-  return byName();
-}
 
 export function Attendance() {
   const [date, setDate] = useState(todayISO);
@@ -139,13 +97,7 @@ export function Attendance() {
         )
       : rows;
 
-    const present = list.filter((r) => !r.is_absent);
-    const absent = list.filter((r) => r.is_absent);
-
-    present.sort((a, b) => comparePresent(a, b, sortMode));
-    absent.sort((a, b) => a.employee_name.localeCompare(b.employee_name));
-
-    return [...present, ...absent];
+    return sortAttendanceRows(list, sortMode);
   }, [rows, globalSearchQuery, sortMode]);
 
   const presentCount = filtered.filter((r) => !r.is_absent).length;
@@ -161,9 +113,8 @@ export function Attendance() {
         const allRows: Array<DailySummaryRow & { summary_date: string }> = [];
         for (const day of dates) {
           const summary = byDay[day] ?? [];
-          for (const row of summary) {
-            allRows.push({ ...row, summary_date: day });
-          }
+          const dayRows = summary.map((row) => ({ ...row, summary_date: day }));
+          allRows.push(...sortAttendanceRows(dayRows, sortMode));
         }
         await exportAttendanceSummary(format, {
           periodLabel: range.label,
@@ -175,7 +126,7 @@ export function Attendance() {
         setExporting(false);
       }
     },
-    [date, exportPeriod]
+    [date, exportPeriod, sortMode]
   );
 
   return (
@@ -271,14 +222,14 @@ export function Attendance() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-ink-muted">
           Absent today (in view): <span className="font-medium text-ink">{absentCount}</span>. Sorted by{" "}
-          <span className="font-medium text-ink">{SORT_LABELS[sortMode].toLowerCase()}</span>
-          {loading ? "…" : ""} — absents listed last.
+          <span className="font-medium text-ink">{ATTENDANCE_SORT_LABELS[sortMode].toLowerCase()}</span>
+          {loading ? "…" : ""} — absents listed last. Exports use the same order.
         </p>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="secondary" size="sm" className="shrink-0 self-start sm:self-auto">
               <ArrowUpDown className="h-4 w-4" />
-              Sort: {SORT_LABELS[sortMode]}
+              Sort: {ATTENDANCE_SORT_LABELS[sortMode]}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
@@ -286,9 +237,9 @@ export function Attendance() {
               value={sortMode}
               onValueChange={(value) => setSortMode(value as AttendanceSortMode)}
             >
-              {(Object.keys(SORT_LABELS) as AttendanceSortMode[]).map((mode) => (
+              {(Object.keys(ATTENDANCE_SORT_LABELS) as AttendanceSortMode[]).map((mode) => (
                 <DropdownMenuRadioItem key={mode} value={mode}>
-                  {SORT_LABELS[mode]}
+                  {ATTENDANCE_SORT_LABELS[mode]}
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
