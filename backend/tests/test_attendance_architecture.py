@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date, datetime
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from app.services.attendance_effective_service import (
+from app.services.attendance_helpers import (
     DayAttendanceSnapshot,
     _first_meaningful_check_in,
-    employee_punch_bounds,
     verify_imported_timestamps,
 )
 from app.services.attendance_service import prune_recent_duplicate_logs
@@ -49,13 +48,13 @@ class AttendanceArchitectureTests(unittest.TestCase):
 
     def test_day_snapshot_dataclass(self) -> None:
         snap = DayAttendanceSnapshot(
-            local_date=date(2026, 6, 10),
             first_check_in=None,
             last_check_out=None,
             log_ids=[],
             log_timestamps=[],
         )
-        self.assertEqual(snap.local_date.isoformat(), "2026-06-10")
+        self.assertIsNone(snap.first_check_in)
+        self.assertEqual(snap.log_ids, [])
 
     def test_device_attendance_punch_type_uses_status_not_verify_mode(self) -> None:
         self.assertEqual(device_attendance_punch_type(status=0, punch=1), "0")

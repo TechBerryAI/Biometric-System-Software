@@ -19,30 +19,22 @@ Minimum production components:
 ## Critical Backend Variables
 
 - Database/Redis:
-  - `DATABASE_URL`
+  - `DATABASE_URL` (or split `DB_*` fields)
   - `REDIS_URL`
-  - `REDIS_NAMESPACE`
 - CORS/frontend access:
   - `CORS_ALLOW_ORIGINS` (comma-separated exact origins)
   - `CORS_ALLOW_ORIGIN_REGEX` (optional regex)
   - `CORS_ALLOW_PRIVATE_NETWORK_ORIGINS` (`true` to allow LAN/VM origins like `192.168.x.x`)
 - Device:
   - `ZK_DEVICE_IP`, `ZK_DEVICE_PORT`, `ZK_DEVICE_PASSWORD`, `ZK_DEVICE_TIMEOUT_SECONDS`, `ZK_DEVICE_ID`
-- Queue/reconciliation:
-  - `COMMAND_*`
-  - `RECONCILIATION_INTERVAL_SECONDS`
-  - `SNAPSHOT_INTERVAL_SECONDS`
-- Governance:
-  - `DEVICE_READ_ONLY`
-  - `ALLOW_DEVICE_UID_REWRITE`
-  - `ALLOW_DEVICE_PRIVILEGE_UPDATE`
-  - `ALLOW_DEVICE_CARD_REWRITE`
-  - `ALLOW_DEVICE_ADMIN_OVERRIDE`
-- Retention:
-  - `SNAPSHOT_RETENTION_DAYS`
-  - `COMMAND_HISTORY_RETENTION_DAYS`
-  - `RECONCILIATION_RETENTION_DAYS`
-  - `METRICS_RETENTION_DAYS`
+  - `ZK_OMIT_PING`, `DEVICE_AUTO_SYNC_ENABLED`
+- Locale / auth:
+  - `TIMEZONE`
+  - `AUTH_ENABLED`, `JWT_SECRET_KEY`
+- Optional:
+  - `XAI_API_KEY`
+
+Device write / correction policy lives in `backend/app/core/device_policy.py` (not `.env`).
 
 ## Local Developer Start
 
@@ -112,6 +104,6 @@ Without the trailing-slash rewrite form above, upstream receives `/api/auth/logi
 
 - strong `JWT_SECRET_KEY`
 - auth bootstrap credentials removed after first admin setup
-- `DEVICE_READ_ONLY=true` during initial cutover
+- set `DEVICE_WRITES_ENABLED = False` in `backend/app/core/device_policy.py` during initial cutover
 - firmware certification rows seeded and reviewed
 - dashboards and alerts verified before enabling writes

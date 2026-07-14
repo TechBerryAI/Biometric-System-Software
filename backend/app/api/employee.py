@@ -2,24 +2,22 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi import HTTPException, Query, status
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core import device_policy
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import Permission, require_permissions
-from app.models.attendance_effective_punch import AttendanceEffectivePunch
-from app.models.attendance_session import AttendanceSession
+from app.models.attendance_log import AttendanceLog
 from app.models.device_user_mapping import DeviceUserMapping
 from app.models.employee import Employee
-from app.services.employee_identity import identity_filter_for_employee
 from app.models.user import User
 from app.schemas.employee import (
     EmployeeCreate,
@@ -28,13 +26,12 @@ from app.schemas.employee import (
     EmployeeRead,
     EmployeeUpdate,
 )
-from app.services.audit_service import append_audit_log
 from app.services.device_command_service import enqueue_device_command, process_command
 from app.services.employee_offboard_service import offboard_employee
-from app.services.attendance_effective_service import (
+from app.services.attendance_helpers import (
     employee_punch_bounds,
     load_raw_punches_for_dates,
-    summarize_employee_day_for_display,
+    summarize_employee_day_from_logs,
 )
 from app.services.system_governance_service import assert_device_write_allowed
 
@@ -43,17 +40,6 @@ router = APIRouter(
     tags=["employees"],
     dependencies=[Depends(require_permissions(Permission.EMPLOYEE_VIEW))],
 )
-
-
-def _day_bounds_utc(d: date, tz_name: str) -> tuple[datetime, datetime]:
-    tz = ZoneInfo(tz_name)
-    start_local = datetime.combine(d, time.min, tzinfo=tz)
-    end_local = start_local + timedelta(days=1)
-    return start_local.astimezone(ZoneInfo("UTC")), end_local.astimezone(ZoneInfo("UTC"))
-
-
-def _identity_filter_for_employee(emp: Employee, db: Session):
-    return identity_filter_for_employee(emp, db)
 
 
 def _rollover_device_mapping(
@@ -99,10 +85,10 @@ def _rollover_device_mapping(
 
 
 def _ensure_device_writes_enabled(db: Session, *, device_id: str) -> None:
-    if get_settings().device_read_only:
+    if not device_policy.DEVICE_WRITES_ENABLED:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Device write operations are disabled (DEVICE_READ_ONLY=true).",
+            detail="Device write operations are disabled by policy.",
         )
     allowed, reason = assert_device_write_allowed(db, device_id=device_id)
     if not allowed:
@@ -128,20 +114,21 @@ def get_employee(employee_id: int, db: Session = Depends(get_db)) -> EmployeeDet
         db.commit()
         db.refresh(emp)
 
+    employee_code = str(emp.device_user_id)
     total_logs = (
         db.execute(
             select(func.count())
-            .select_from(AttendanceEffectivePunch)
-            .where(AttendanceEffectivePunch.employee_id == emp.id, AttendanceEffectivePunch.is_active.is_(True))
+            .select_from(AttendanceLog)
+            .where(AttendanceLog.employee_code == employee_code)
         ).scalar_one()
         or 0
     )
     first_punch_at, last_punch_at = employee_punch_bounds(db, employee=emp)
     log_rows = list(
         db.execute(
-            select(AttendanceEffectivePunch.timestamp, AttendanceEffectivePunch.punch_type)
-            .where(AttendanceEffectivePunch.employee_id == emp.id, AttendanceEffectivePunch.is_active.is_(True))
-            .order_by(AttendanceEffectivePunch.timestamp)
+            select(AttendanceLog.timestamp, AttendanceLog.punch_type)
+            .where(AttendanceLog.employee_code == employee_code)
+            .order_by(AttendanceLog.timestamp)
         )
     )
     tz = ZoneInfo(get_settings().timezone)
@@ -199,7 +186,6 @@ def get_employee_daily_attendance(
             detail="'to' date must be on or after 'from' date",
         )
 
-
     raw_by_day = load_raw_punches_for_dates(
         db, start_date=start_date, end_date=end_date, employees=[emp], settings=settings
     )
@@ -207,12 +193,12 @@ def get_employee_daily_attendance(
     rows: list[EmployeeDailyAttendanceRead] = []
     d = start_date
     while d <= end_date:
-        first_in, last_out, total_work_minutes, punch_count = summarize_employee_day_for_display(
+        first_in, last_out, total_work_minutes, punch_count = summarize_employee_day_from_logs(
             db,
             employee=emp,
             local_date=d,
             settings=settings,
-            raw_punches=raw_by_day.get(d, {}).get(emp.id),
+            logs=raw_by_day.get(d, {}).get(emp.id),
         )
         if punch_count == 0:
             rows.append(
@@ -258,14 +244,6 @@ def upsert_employee_metadata(
     existing = db.execute(select(Employee).where(Employee.device_user_id == payload.device_user_id)).scalar_one_or_none()
     effective_at = datetime.now(ZoneInfo("UTC"))
     if existing is not None:
-        previous = {
-            "device_user_id": existing.device_user_id,
-            "name": existing.name,
-            "department": existing.department,
-            "shift_start": existing.shift_start.isoformat() if existing.shift_start else None,
-            "shift_end": existing.shift_end.isoformat() if existing.shift_end else None,
-            "departed_at": existing.departed_at.isoformat() if existing.departed_at else None,
-        }
         if not existing.employee_uuid:
             existing.employee_uuid = str(uuid4())
         existing.departed_at = None
@@ -298,23 +276,6 @@ def upsert_employee_metadata(
         )
         # Inline-safe processing fallback prevents queue buildup when workers lag/offline.
         process_command(db, command, settings=settings, worker_id="api-inline")
-        append_audit_log(
-            db,
-            actor_user_uuid=user.user_uuid,
-            action_type="EMPLOYEE_UPDATED",
-            entity_type="employee",
-            entity_id=existing.employee_uuid,
-            previous_state=previous,
-            new_state={
-                "device_user_id": existing.device_user_id,
-                "name": existing.name,
-                "department": existing.department,
-                "shift_start": existing.shift_start.isoformat() if existing.shift_start else None,
-                "shift_end": existing.shift_end.isoformat() if existing.shift_end else None,
-            },
-            ip_address=request.client.host if request.client else None,
-            request_id=getattr(request.state, "request_id", None),
-        )
         db.commit()
         db.refresh(existing)
         return existing
@@ -353,22 +314,6 @@ def upsert_employee_metadata(
     )
     # Inline-safe processing fallback prevents queue buildup when workers lag/offline.
     process_command(db, command, settings=settings, worker_id="api-inline")
-    append_audit_log(
-        db,
-        actor_user_uuid=user.user_uuid,
-        action_type="EMPLOYEE_CREATED",
-        entity_type="employee",
-        entity_id=emp.employee_uuid,
-        new_state={
-            "device_user_id": emp.device_user_id,
-            "name": emp.name,
-            "department": emp.department,
-            "shift_start": emp.shift_start.isoformat() if emp.shift_start else None,
-            "shift_end": emp.shift_end.isoformat() if emp.shift_end else None,
-        },
-        ip_address=request.client.host if request.client else None,
-        request_id=getattr(request.state, "request_id", None),
-    )
     db.commit()
     db.refresh(emp)
     return emp
@@ -406,13 +351,6 @@ def update_employee(
             detail=f"device_user_id '{new_device_user_id}' already exists.",
         )
 
-    previous = {
-        "device_user_id": existing.device_user_id,
-        "name": existing.name,
-        "department": existing.department,
-        "shift_start": existing.shift_start.isoformat() if existing.shift_start else None,
-        "shift_end": existing.shift_end.isoformat() if existing.shift_end else None,
-    }
     settings = get_settings()
     if not existing.employee_uuid:
         existing.employee_uuid = str(uuid4())
@@ -450,36 +388,19 @@ def update_employee(
     )
     # Inline-safe processing fallback prevents queue buildup when workers lag/offline.
     process_command(db, command, settings=settings, worker_id="api-inline")
-    append_audit_log(
-        db,
-        actor_user_uuid=user.user_uuid,
-        action_type="EMPLOYEE_UPDATED",
-        entity_type="employee",
-        entity_id=existing.employee_uuid,
-        previous_state=previous,
-        new_state={
-            "device_user_id": existing.device_user_id,
-            "name": existing.name,
-            "department": existing.department,
-            "shift_start": existing.shift_start.isoformat() if existing.shift_start else None,
-            "shift_end": existing.shift_end.isoformat() if existing.shift_end else None,
-        },
-        ip_address=request.client.host if request.client else None,
-        request_id=getattr(request.state, "request_id", None),
-    )
 
     db.commit()
     db.refresh(existing)
     return existing
 
 
-@router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 def offboard_employee_route(
     employee_id: int,
     request: Request,
     user: User = Depends(require_permissions(Permission.EMPLOYEE_EDIT)),
     db: Session = Depends(get_db),
-) -> None:
+) -> Response:
     """Soft-offboard an employee: hide from directory and remove from biometric device."""
     emp = db.get(Employee, employee_id)
     if emp is None:
@@ -500,3 +421,4 @@ def offboard_employee_route(
         settings=settings,
     )
     db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

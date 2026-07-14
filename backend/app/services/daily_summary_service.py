@@ -1,9 +1,9 @@
-"""Daily per-employee attendance summary from raw device punches (read-only)."""
+"""Daily per-employee attendance summary from attendance_logs."""
 
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -13,17 +13,11 @@ from app.core.config import Settings, get_settings
 from app.models.attendance_session import AttendanceSession
 from app.models.employee import Employee
 from app.schemas.attendance import DailySummaryRow
-from app.services.attendance_effective_service import (
+from app.services.attendance_helpers import (
+    day_bounds_utc,
     load_raw_punches_for_dates,
-    summarize_employee_day_for_display,
+    summarize_employee_day_from_logs,
 )
-
-
-def day_bounds_utc(d: date, tz_name: str) -> tuple[datetime, datetime]:
-    tz = ZoneInfo(tz_name)
-    start_local = datetime.combine(d, time.min, tzinfo=tz)
-    end_local = start_local + timedelta(days=1)
-    return start_local.astimezone(ZoneInfo("UTC")), end_local.astimezone(ZoneInfo("UTC"))
 
 
 def _daily_summary_sort_key(row: DailySummaryRow) -> tuple:
@@ -67,7 +61,7 @@ def compute_daily_summaries_range(
     end_date: date,
     settings: Settings | None = None,
 ) -> dict[date, list[DailySummaryRow]]:
-    """Read-only batch summary from full raw punches (events + logs)."""
+    """Read-only batch summary from attendance_logs."""
     if end_date < start_date:
         return {}
     cfg = settings or get_settings()
@@ -88,12 +82,12 @@ def compute_daily_summaries_range(
         day_sessions = sessions.get(d, {})
         rows: list[DailySummaryRow] = []
         for emp in employees:
-            first_in, last_out, total_min, punch_count = summarize_employee_day_for_display(
+            first_in, last_out, total_min, punch_count = summarize_employee_day_from_logs(
                 db,
                 employee=emp,
                 local_date=d,
                 settings=cfg,
-                raw_punches=day_raw.get(emp.id),
+                logs=day_raw.get(emp.id),
             )
             sess_count = len(day_sessions.get(emp.id, []))
             rows.append(

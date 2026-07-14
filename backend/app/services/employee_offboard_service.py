@@ -15,12 +15,11 @@ from app.constants.keep_list import (
     ORGANIZATION_ROSTER,
     match_employee_to_roster,
 )
+from app.core import device_policy
 from app.core.config import Settings, get_settings
+from app.models.device import Device
 from app.models.device_user_mapping import DeviceUserMapping
 from app.models.employee import Employee
-from app.models.device import Device
-from app.models.device_runtime_health import DeviceRuntimeHealth
-from app.services.audit_service import append_audit_log
 from app.services.device_command_service import enqueue_device_command, process_command
 from app.services.device_service import DeviceService
 
@@ -113,11 +112,6 @@ def offboard_employee(
     if employee.departed_at is not None:
         return False
 
-    previous_state = {
-        "device_user_id": employee.device_user_id,
-        "name": employee.name,
-        "departed_at": None,
-    }
     employee.departed_at = now
     if not employee.employee_uuid:
         from uuid import uuid4
@@ -155,22 +149,6 @@ def offboard_employee(
         # Governance/read-only may block device writes; DB offboard still applies.
         pass
 
-    append_audit_log(
-        db,
-        actor_user_uuid=actor_user_uuid,
-        action_type="EMPLOYEE_OFFBOARDED",
-        entity_type="employee",
-        entity_id=employee.employee_uuid,
-        previous_state=previous_state,
-        new_state={
-            "device_user_id": employee.device_user_id,
-            "name": employee.name,
-            "departed_at": employee.departed_at.isoformat(),
-            "reason": reason,
-        },
-        ip_address=ip_address,
-        request_id=request_id,
-    )
     db.flush()
     return True
 
@@ -209,7 +187,7 @@ def offboard_device_user_only(
 
 def restore_device_writable_state(db: Session, *, device_id: str | None = None) -> str:
     """
-    Clear QUARANTINED/DEGRADED mode and reset runtime risk so maintenance deletes can run.
+    Clear QUARANTINED/DEGRADED mode so maintenance deletes can run.
     Returns previous device mode.
     """
     cfg = get_settings()
@@ -220,16 +198,6 @@ def restore_device_writable_state(db: Session, *, device_id: str | None = None) 
     previous_mode = device.mode
     device.mode = "NORMAL"
     device.quarantine_reason = None
-    runtime = db.execute(
-        select(DeviceRuntimeHealth).where(DeviceRuntimeHealth.device_id == target)
-    ).scalar_one_or_none()
-    if runtime is None:
-        runtime = DeviceRuntimeHealth(device_id=target)
-        db.add(runtime)
-    runtime.operational_risk_level = "LOW"
-    runtime.connection_stability_score = 100
-    runtime.verification_failure_rate = 0
-    runtime.protocol_error_rate = 0
     db.flush()
     return previous_mode
 
@@ -417,8 +385,8 @@ def offboard_device_remnants_only(
     if dry_run:
         return report
 
-    if get_settings().device_read_only:
-        logger.error("DEVICE_READ_ONLY=true — cannot delete users from terminal.")
+    if not device_policy.DEVICE_WRITES_ENABLED:
+        logger.error("Device writes disabled by policy — cannot delete users from terminal.")
         return report
 
     previous_mode = restore_device_writable_state(db)
@@ -458,8 +426,8 @@ def device_write_blockers(db: Session, *, device_id: str | None = None) -> list[
     from app.services.system_governance_service import assert_device_write_allowed
 
     blockers: list[str] = []
-    if cfg.device_read_only:
-        blockers.append("DEVICE_READ_ONLY=true in backend/.env")
+    if not device_policy.DEVICE_WRITES_ENABLED:
+        blockers.append("Device writes disabled by internal policy")
     allowed, reason = assert_device_write_allowed(db, device_id=target)
     if not allowed and reason:
         blockers.append(reason)

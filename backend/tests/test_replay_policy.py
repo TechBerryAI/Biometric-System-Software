@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import unittest
 
-from app.core.config import Settings
 from app.services.device_command_service import _enforce_safe_write_policy, _execution_hash
 
 
@@ -14,12 +13,6 @@ class _DummyCommand:
     device_id: str
     command_type: str
     payload: dict
-
-
-def _settings(**overrides):
-    data = Settings().model_dump()
-    data.update(overrides)
-    return Settings(**data)
 
 
 class ReplayPolicyTests(unittest.TestCase):
@@ -43,10 +36,8 @@ class ReplayPolicyTests(unittest.TestCase):
 
     def test_uid_rewrite_is_blocked_without_override(self) -> None:
         ok, message = _enforce_safe_write_policy(
-            settings=_settings(allow_device_uid_rewrite=False, allow_device_admin_override=False),
             payload={"user_id": "E001", "uid": 1002},
             current_on_device={"uid": 1001},
-            firmware_profile=None,
         )
         self.assertFalse(ok)
         self.assertIsNotNone(message)

@@ -1,4 +1,4 @@
-"""Tests for correction display priority and device command reliability."""
+"""Tests for day summary display and device command reliability."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from app.models.device_command import DeviceCommandStatus
-from app.services.attendance_effective_service import summarize_employee_day_for_display
+from app.services.attendance_helpers import summarize_employee_day_from_logs
 from app.services.device_attlog_protocol import probe_attlog_capabilities
 from app.services.device_command_service import claim_pending_commands
 
@@ -34,75 +34,42 @@ class TierBConn:
         return None
 
 
-class CorrectionDisplayTests(unittest.TestCase):
-    def test_display_prefers_applied_correction_over_raw(self) -> None:
-        tz = ZoneInfo("Asia/Kolkata")
-        raw_in = datetime(2026, 7, 13, 9, 0, 0, tzinfo=tz)
-        raw_out = datetime(2026, 7, 13, 18, 0, 0, tzinfo=tz)
-        corrected_in = datetime(2026, 7, 13, 9, 15, 0, tzinfo=tz)
-        corrected_out = datetime(2026, 7, 13, 18, 5, 0, tzinfo=tz)
-
-        employee = SimpleNamespace(id=1)
-        correction = SimpleNamespace(
-            correction_uuid="corr-1",
-            new_check_in=corrected_in,
-            new_check_out=corrected_out,
-        )
-        effective_punch_in = SimpleNamespace(
-            timestamp=corrected_in,
-            punch_type="0",
-            correction_uuid="corr-1",
-        )
-        effective_punch_out = SimpleNamespace(
-            timestamp=corrected_out,
-            punch_type="1",
-            correction_uuid="corr-1",
-        )
-
-        db = MagicMock()
-        with (
-            patch(
-                "app.services.attendance_effective_service._latest_applied_correction",
-                return_value=correction,
-            ),
-            patch(
-                "app.services.attendance_effective_service.load_active_effective_punches",
-                return_value=[effective_punch_in, effective_punch_out],
-            ),
-        ):
-            first_in, last_out, total_min, punch_count = summarize_employee_day_for_display(
-                db,
-                employee=employee,
-                local_date=date(2026, 7, 13),
-                raw_punches=[_Punch(raw_in, "0"), _Punch(raw_out, "1")],
-            )
-
-        self.assertEqual(first_in, corrected_in)
-        self.assertEqual(last_out, corrected_out)
-        self.assertEqual(punch_count, 2)
-        self.assertIsNotNone(total_min)
-
-    def test_display_falls_back_to_raw_without_correction(self) -> None:
+class DaySummaryDisplayTests(unittest.TestCase):
+    def test_summarize_from_logs(self) -> None:
         tz = ZoneInfo("UTC")
         raw_in = datetime(2026, 7, 13, 9, 0, 0, tzinfo=tz)
         raw_out = datetime(2026, 7, 13, 18, 0, 0, tzinfo=tz)
-        employee = SimpleNamespace(id=1)
+        employee = SimpleNamespace(id=1, device_user_id="E001", employee_uuid="uuid-1")
         db = MagicMock()
 
-        with patch(
-            "app.services.attendance_effective_service._latest_applied_correction",
-            return_value=None,
-        ):
-            first_in, last_out, _, punch_count = summarize_employee_day_for_display(
-                db,
-                employee=employee,
-                local_date=date(2026, 7, 13),
-                raw_punches=[_Punch(raw_in, "0"), _Punch(raw_out, "1")],
-            )
+        first_in, last_out, total_min, punch_count = summarize_employee_day_from_logs(
+            db,
+            employee=employee,
+            local_date=date(2026, 7, 13),
+            logs=[_Punch(raw_in, "0"), _Punch(raw_out, "1")],
+        )
 
         self.assertEqual(first_in, raw_in)
         self.assertEqual(last_out, raw_out)
         self.assertEqual(punch_count, 2)
+        self.assertIsNotNone(total_min)
+
+    def test_summarize_empty_day(self) -> None:
+        employee = SimpleNamespace(id=1, device_user_id="E001", employee_uuid="uuid-1")
+        db = MagicMock()
+        with patch(
+            "app.services.attendance_helpers.load_logs_for_employee_day",
+            return_value=[],
+        ):
+            first_in, last_out, total_min, punch_count = summarize_employee_day_from_logs(
+                db,
+                employee=employee,
+                local_date=date(2026, 7, 13),
+            )
+        self.assertIsNone(first_in)
+        self.assertIsNone(last_out)
+        self.assertIsNone(total_min)
+        self.assertEqual(punch_count, 0)
 
 
 class DeviceCommandPriorityTests(unittest.TestCase):

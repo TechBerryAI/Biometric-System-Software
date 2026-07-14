@@ -374,7 +374,6 @@ export type AttendanceDayPreview = {
 };
 
 export type AttendanceAdjustmentRead = {
-  correction_uuid: string;
   employee_id: number;
   local_date: string;
   previous_check_in: string | null;
@@ -385,8 +384,6 @@ export type AttendanceAdjustmentRead = {
   device_updated: boolean;
   device_command_uuid: string | null;
   device_tier: string | null;
-  correction_mode: string | null;
-  reimport_completed_at: string | null;
   error_message: string | null;
   applied_at: string | null;
 };
@@ -406,8 +403,8 @@ export async function fetchCorrectionCapabilities(): Promise<CorrectionCapabilit
   return data;
 }
 
-export async function fetchCorrectionStatus(correctionUuid: string): Promise<AttendanceAdjustmentRead> {
-  const { data } = await api.get<AttendanceAdjustmentRead>(`/attendance/adjust/corrections/${correctionUuid}`);
+export async function fetchCorrectionStatus(commandUuid: string): Promise<AttendanceAdjustmentRead> {
+  const { data } = await api.get<AttendanceAdjustmentRead>(`/attendance/adjust/commands/${commandUuid}`);
   return data;
 }
 
@@ -458,16 +455,6 @@ export type DeviceCommandRow = {
   completed_at: string | null;
 };
 
-export type AuditLogRow = {
-  id: number;
-  actor_user_uuid: string | null;
-  action_type: string;
-  entity_type: string;
-  entity_id: string;
-  request_id: string | null;
-  timestamp: string;
-};
-
 export async function fetchOperationalMetrics(): Promise<OperationalMetrics> {
   const { data } = await api.get<OperationalMetrics>("/ops/metrics");
   return data;
@@ -477,11 +464,6 @@ export async function fetchDeviceCommands(status?: string): Promise<DeviceComman
   const { data } = await api.get<DeviceCommandRow[]>("/ops/device-commands", {
     params: status ? { status } : {},
   });
-  return data;
-}
-
-export async function fetchAuditLogs(): Promise<AuditLogRow[]> {
-  const { data } = await api.get<AuditLogRow[]>("/ops/audit-logs");
   return data;
 }
 
@@ -514,64 +496,3 @@ export function formatSyncErrorMessage(err: unknown): string {
   return message;
 }
 
-export type ForensicRawEvent = {
-  id: number;
-  event_uuid: string;
-  employee_code: string;
-  timestamp: string;
-  device_id: string;
-  punch_type: string;
-  source: string;
-  created_at: string;
-};
-
-export type ForensicCorrection = {
-  correction_uuid: string;
-  employee_id: number;
-  local_date: string;
-  previous_check_in: string | null;
-  previous_check_out: string | null;
-  new_check_in: string | null;
-  new_check_out: string | null;
-  status: string;
-  correction_mode: string | null;
-  device_tier: string | null;
-  applied_at: string | null;
-  created_at: string;
-};
-
-export type ForensicCorrectionTimeline = {
-  correction: ForensicCorrection;
-  events: Array<{ event_uuid: string; correction_uuid: string; event_type: string; payload: Record<string, unknown> | null; created_at: string }>;
-  device_verification: { command_uuid: string; verification_status: string | null; verification_details: Record<string, unknown> | null; completed_at: string | null } | null;
-};
-
-export type ForensicDeviceSnapshot = {
-  id: number;
-  device_id: string;
-  snapshot_type: string;
-  snapshot_hash: string;
-  user_count: number;
-  firmware_version: string | null;
-  captured_at: string;
-};
-
-export async function fetchForensicRawEvents(params?: { limit?: number }): Promise<ForensicRawEvent[]> {
-  const { data } = await api.get<ForensicRawEvent[]>("/forensics/raw-events", { params });
-  return data;
-}
-
-export async function fetchForensicCorrections(params?: { limit?: number; employee_id?: number }): Promise<ForensicCorrection[]> {
-  const { data } = await api.get<ForensicCorrection[]>("/forensics/correction-ledger", { params });
-  return data;
-}
-
-export async function fetchForensicCorrectionTimeline(correctionUuid: string): Promise<ForensicCorrectionTimeline> {
-  const { data } = await api.get<ForensicCorrectionTimeline>(`/forensics/correction-timeline/${correctionUuid}`);
-  return data;
-}
-
-export async function fetchForensicDeviceSnapshots(params?: { limit?: number }): Promise<ForensicDeviceSnapshot[]> {
-  const { data } = await api.get<ForensicDeviceSnapshot[]>("/forensics/device-snapshots", { params });
-  return data;
-}

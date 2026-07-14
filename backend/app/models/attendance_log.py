@@ -1,4 +1,4 @@
-"""Raw attendance punches from the biometric device (read-only sync)."""
+"""Attendance punches from the biometric device (single source of truth)."""
 
 from __future__ import annotations
 

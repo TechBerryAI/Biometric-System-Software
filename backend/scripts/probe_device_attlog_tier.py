@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.core import device_policy
 from app.core.config import get_settings
 from app.services.device_service import DeviceService
 
@@ -30,13 +31,12 @@ def main() -> int:
         "supports_write": bool(caps.get("supports_write")),
         "supports_selective_delete": bool(caps.get("supports_selective_delete")),
         "supports_full_rewrite": bool(caps.get("supports_full_rewrite")),
-        "correction_tier_b_write_enabled": settings.correction_tier_b_write_enabled,
-        "strict_device_authority": settings.strict_device_authority,
+        "tier_b_rewrite_policy": device_policy.ATTLOG_TIER_B_REWRITE,
         "recommendation": (
             "Tier A: selective attlog write is supported."
             if tier == "A"
             else (
-                "Tier B: enable CORRECTION_TIER_B_WRITE_ENABLED=true after verifying readback on this firmware."
+                "Tier B: set ATTLOG_TIER_B_REWRITE in app.core.device_policy after verifying readback."
                 if tier == "B"
                 else "Tier C: device does not support attlog correction."
             )

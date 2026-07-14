@@ -18,17 +18,15 @@ from app.api.attendance import router as attendance_router
 from app.api.attendance_correction import router as attendance_correction_router
 from app.api.auth import router as auth_router
 from app.api.employee import router as employee_router
-from app.api.forensics import router as forensics_router
 from app.api.insights import router as insights_router
 from app.api.operations import router as operations_router
 from app.api.sync import router as sync_router
+from app.core import device_policy
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import Permission, require_permissions
 from app.models.device import Device
 from app.models.device_command import DeviceCommand, DeviceCommandStatus
-from app.models.device_sync_event import DeviceSyncEvent
-from app.models.reconciliation_job import ReconciliationJob
 from app.services.device_service import DeviceService
 from app.services.device_registry_service import ensure_default_device, update_device_health
 
@@ -92,7 +90,6 @@ app.include_router(insights_router)
 app.include_router(sync_router)
 app.include_router(auth_router)
 app.include_router(operations_router)
-app.include_router(forensics_router)
 
 
 @app.get("/health")
@@ -100,7 +97,7 @@ def health() -> dict[str, str]:
     return {
         "status": "ok",
         "service": settings.app_name,
-        "device_read_only": "true" if settings.device_read_only else "false",
+        "device_writes": "enabled" if device_policy.DEVICE_WRITES_ENABLED else "disabled",
     }
 
 
@@ -187,32 +184,19 @@ def health_queue(db: Session = Depends(get_db)) -> dict[str, int]:
     verification_failures = (
         db.execute(select(func.count()).where(DeviceCommand.verification_status == "FAILED")).scalar_one() or 0
     )
-    reconciliation_pending = (
-        db.execute(select(func.count()).where(ReconciliationJob.status.in_(["PENDING", "RUNNING"]))).scalar_one() or 0
-    )
-    lock_contention = (
-        db.execute(select(func.count()).where(DeviceSyncEvent.event_type == "LOCK_CONTENTION")).scalar_one() or 0
-    )
     return {
         "queue_depth": int(queue_depth),
         "stale_commands": int(stale_commands),
         "dead_letter_commands": int(dead_letter),
         "verification_failures": int(verification_failures),
-        "reconciliation_pending": int(reconciliation_pending),
-        "lock_contention_events": int(lock_contention),
+        "reconciliation_pending": 0,
+        "lock_contention_events": 0,
     }
 
 
 @app.get("/health/reconciliation", dependencies=[Depends(require_permissions(Permission.METRICS_READ))])
-def health_reconciliation(db: Session = Depends(get_db)) -> dict[str, int]:
-    pending = (
-        db.execute(select(func.count()).where(ReconciliationJob.status.in_(["PENDING", "RUNNING", "REVIEW_REQUIRED"]))).scalar_one()
-        or 0
-    )
-    completed = db.execute(select(func.count()).where(ReconciliationJob.status == "COMPLETED")).scalar_one() or 0
+def health_reconciliation() -> dict[str, int]:
     return {
-        "pending_jobs": int(pending),
-        "completed_jobs": int(completed),
+        "pending_jobs": 0,
+        "completed_jobs": 0,
     }
-
-

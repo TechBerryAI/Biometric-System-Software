@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from datetime import time
 from urllib.parse import quote_plus
 
 from pydantic import Field, model_validator
@@ -54,11 +53,6 @@ class Settings(BaseSettings):
         alias="DEVICE_AUTO_SYNC_ENABLED",
         description="When false, Celery stops polling the biometric device (manual sync still works).",
     )
-    device_snapshot_enabled: bool = Field(
-        default=True,
-        alias="DEVICE_SNAPSHOT_ENABLED",
-        description="When false, Celery skips periodic fetch_users snapshots.",
-    )
     device_connectivity_probe_seconds: int = Field(
         default=60,
         ge=15,
@@ -70,7 +64,6 @@ class Settings(BaseSettings):
     duplicate_punch_window_seconds: int = Field(default=30, ge=0, le=300, alias="DUPLICATE_PUNCH_WINDOW_SECONDS")
     attendance_api_default_limit: int = Field(default=1000, ge=100, le=10000, alias="ATTENDANCE_API_DEFAULT_LIMIT")
     attendance_api_max_limit: int = Field(default=5000, ge=500, le=50000, alias="ATTENDANCE_API_MAX_LIMIT")
-    default_shift_start: time = Field(default=time(9, 30), alias="DEFAULT_SHIFT_START")
     # After each device pull, rebuild sessions for this many trailing local calendar days (1–62).
     session_rebuild_lookback_days: int = Field(
         default=14, ge=1, le=62, alias="SESSION_REBUILD_LOOKBACK_DAYS"
@@ -106,45 +99,14 @@ class Settings(BaseSettings):
     login_attempt_max: int = Field(default=5, ge=3, le=50, alias="LOGIN_ATTEMPT_MAX")
 
     command_queue_batch_size: int = Field(default=25, ge=1, le=250, alias="COMMAND_QUEUE_BATCH_SIZE")
-    command_max_retries: int = Field(default=5, ge=1, le=20, alias="COMMAND_MAX_RETRIES")
+    command_max_retries: int = Field(default=10, ge=1, le=20, alias="COMMAND_MAX_RETRIES")
     command_retry_base_seconds: int = Field(default=30, ge=5, le=600, alias="COMMAND_RETRY_BASE_SECONDS")
     command_retry_max_seconds: int = Field(default=900, ge=30, le=86400, alias="COMMAND_RETRY_MAX_SECONDS")
     command_stale_minutes: int = Field(default=15, ge=1, le=240, alias="COMMAND_STALE_MINUTES")
     command_heartbeat_seconds: int = Field(default=10, ge=5, le=120, alias="COMMAND_HEARTBEAT_SECONDS")
-    command_lock_blocking_seconds: int = Field(default=1, ge=0, le=120, alias="COMMAND_LOCK_BLOCKING_SECONDS")
+    command_lock_blocking_seconds: int = Field(default=15, ge=0, le=120, alias="COMMAND_LOCK_BLOCKING_SECONDS")
     command_cooldown_ms: int = Field(default=250, ge=0, le=10000, alias="COMMAND_COOLDOWN_MS")
-    command_max_recover_verification_lookback: int = Field(
-        default=3,
-        ge=1,
-        le=20,
-        alias="COMMAND_MAX_RECOVER_VERIFICATION_LOOKBACK",
-    )
     reconciliation_interval_seconds: int = Field(default=300, ge=30, le=3600, alias="RECONCILIATION_INTERVAL_SECONDS")
-    snapshot_interval_seconds: int = Field(default=900, ge=60, le=21600, alias="SNAPSHOT_INTERVAL_SECONDS")
-    snapshot_retention_days: int = Field(default=30, ge=7, le=3650, alias="SNAPSHOT_RETENTION_DAYS")
-    command_history_retention_days: int = Field(default=90, ge=7, le=3650, alias="COMMAND_HISTORY_RETENTION_DAYS")
-    reconciliation_retention_days: int = Field(default=180, ge=30, le=3650, alias="RECONCILIATION_RETENTION_DAYS")
-    metrics_retention_days: int = Field(default=90, ge=7, le=3650, alias="METRICS_RETENTION_DAYS")
-    allow_device_uid_rewrite: bool = Field(default=False, alias="ALLOW_DEVICE_UID_REWRITE")
-    allow_device_privilege_update: bool = Field(default=False, alias="ALLOW_DEVICE_PRIVILEGE_UPDATE")
-    allow_device_card_rewrite: bool = Field(default=False, alias="ALLOW_DEVICE_CARD_REWRITE")
-    allow_device_admin_override: bool = Field(default=False, alias="ALLOW_DEVICE_ADMIN_OVERRIDE")
-    device_read_only: bool = Field(default=False, alias="DEVICE_READ_ONLY")
-    strict_device_authority: bool = Field(
-        default=False,
-        alias="STRICT_DEVICE_AUTHORITY",
-        description="When true, DB attendance is updated only after verified device write (Tier A).",
-    )
-    correction_allow_db_only_fallback: bool = Field(
-        default=True,
-        alias="CORRECTION_ALLOW_DB_ONLY_FALLBACK",
-        description="When strict mode is on but firmware cannot write attlog, allow applied_db_only if true.",
-    )
-    correction_tier_b_write_enabled: bool = Field(
-        default=False,
-        alias="CORRECTION_TIER_B_WRITE_ENABLED",
-        description="When true, allow guarded full attlog rewrite on Tier B firmware with readback verification.",
-    )
 
     @model_validator(mode="after")
     def _compose_database_url(self) -> "Settings":
@@ -187,4 +149,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

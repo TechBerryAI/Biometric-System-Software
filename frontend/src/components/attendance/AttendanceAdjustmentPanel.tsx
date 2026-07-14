@@ -190,20 +190,16 @@ export function AttendanceAdjustmentModal({
 
   useEffect(() => {
     if (!pollingUuid) return;
-    const terminal = new Set(["applied", "applied_db_only", "device_failed", "failed"]);
+    const terminal = new Set(["applied", "device_failed", "failed"]);
     const interval = window.setInterval(() => {
       void fetchCorrectionStatus(pollingUuid)
         .then((result) => {
           if (terminal.has(result.status)) {
             setPollingUuid(null);
             if (result.status === "applied") {
-              setSuccess("Updated on device and in the database (logs, sessions, reports).");
-            } else if (result.status === "applied_db_only") {
-              setSuccess(
-                "Updated in the database (logs, sessions, reports). Device memory was not rewritten on this firmware; old device punches are suppressed from re-sync.",
-              );
+              setSuccess("Updated on device and in attendance logs.");
             } else {
-              setError(result.error_message || "Device correction failed.");
+              setError(result.error_message || "Device correction failed. Database was not changed.");
             }
             void loadPreview();
             onApplied();
@@ -235,23 +231,15 @@ export function AttendanceAdjustmentModal({
         new_check_out: newCheckOut?.toISOString() ?? null,
       });
       if (result.status === "device_pending") {
-        setPollingUuid(result.correction_uuid);
-        setSuccess("Device correction queued. Waiting for device write and verification…");
+        if (!result.device_command_uuid) {
+          setError("Device correction queued but no command id returned.");
+          return;
+        }
+        setPollingUuid(result.device_command_uuid);
+        setSuccess("Device correction queued. Waiting for verified device write…");
         return;
       }
-      if (result.status === "applied_db_only") {
-        setSuccess(
-          "Updated in the database (logs, sessions, reports). Device memory was not rewritten on this firmware; old device punches are suppressed from re-sync.",
-        );
-        onApplied();
-        await loadPreview();
-        return;
-      }
-      setSuccess(
-        result.device_updated
-          ? "Updated on device and in the database (logs, sessions, reports)."
-          : "Updated in the database (logs, sessions, reports). Device memory was not rewritten on this firmware; old device punches are suppressed from re-sync.",
-      );
+      setSuccess("Updated on device and in attendance logs.");
       onApplied();
       await loadPreview();
     } catch (e: unknown) {

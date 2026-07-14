@@ -175,7 +175,7 @@ Before enabling writes in production:
   - `/health/devices`
    - `/health/queue`
    - `/ops/metrics`
-- keep `DEVICE_READ_ONLY=true` during initial cutover until validation is complete
+- set `DEVICE_WRITES_ENABLED = False` in `backend/app/core/device_policy.py` during initial cutover until validation is complete
 
 ## Key Operational Endpoints
 

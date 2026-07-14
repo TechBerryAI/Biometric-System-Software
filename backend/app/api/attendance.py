@@ -12,11 +12,12 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import Permission, require_permissions
-from app.models.attendance_effective_punch import AttendanceEffectivePunch
+from app.models.attendance_log import AttendanceLog
 from app.models.attendance_session import AttendanceSession
 from app.models.employee import Employee
 from app.schemas.attendance import AttendanceLogRead, AttendanceSessionRead, DailySummaryRow
-from app.services.daily_summary_service import compute_daily_summary, compute_daily_summaries_range, day_bounds_utc
+from app.services.attendance_helpers import day_bounds_utc
+from app.services.daily_summary_service import compute_daily_summary, compute_daily_summaries_range
 
 router = APIRouter(
     prefix="/attendance",
@@ -35,38 +36,36 @@ def list_attendance_logs(
     limit: int | None = Query(None, ge=1),
     db: Session = Depends(get_db),
 ) -> list[AttendanceLogRead]:
-    """Effective attendance punches (what users see — never raw device events)."""
+    """Attendance punches from attendance_logs (single source of truth)."""
     settings = get_settings()
     tz = settings.timezone
     max_limit = settings.attendance_api_max_limit
     applied_limit = min(limit if limit is not None else settings.attendance_api_default_limit, max_limit)
-    q = (
-        select(AttendanceEffectivePunch, Employee.device_user_id)
-        .join(Employee, Employee.id == AttendanceEffectivePunch.employee_id)
-        .where(AttendanceEffectivePunch.is_active.is_(True))
-        .order_by(AttendanceEffectivePunch.timestamp.desc())
-        .offset(offset)
-        .limit(applied_limit)
-    )
+    q = select(AttendanceLog).order_by(AttendanceLog.timestamp.desc()).offset(offset).limit(applied_limit)
     if date_from is not None:
-        q = q.where(AttendanceEffectivePunch.local_date >= date_from)
+        start, _ = day_bounds_utc(date_from, tz)
+        q = q.where(AttendanceLog.timestamp >= start)
     if date_to is not None:
-        q = q.where(AttendanceEffectivePunch.local_date <= date_to)
+        _, end = day_bounds_utc(date_to, tz)
+        q = q.where(AttendanceLog.timestamp < end)
     if employee_code is not None:
-        q = q.where(Employee.device_user_id == employee_code)
+        q = q.where(AttendanceLog.employee_code == employee_code)
     if employee_id is not None:
-        q = q.where(AttendanceEffectivePunch.employee_id == employee_id)
-    rows = db.execute(q).all()
+        emp = db.get(Employee, employee_id)
+        if emp is None:
+            return []
+        q = q.where(AttendanceLog.employee_code == str(emp.device_user_id))
+    rows = list(db.execute(q).scalars().all())
     return [
         AttendanceLogRead(
-            id=punch.id,
-            employee_code=str(device_user_id),
-            timestamp=punch.timestamp,
-            device_id=settings.zk_device_id,
-            punch_type=punch.punch_type,
-            created_at=punch.created_at,
+            id=log.id,
+            employee_code=log.employee_code,
+            timestamp=log.timestamp,
+            device_id=log.device_id,
+            punch_type=log.punch_type,
+            created_at=log.created_at,
         )
-        for punch, device_user_id in rows
+        for log in rows
     ]
 
 

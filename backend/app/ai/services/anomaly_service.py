@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.cache.redis_cache import AIResponseCache
@@ -23,7 +23,6 @@ from app.ai.schemas.insight_models import (
     AttendanceAnomalyRead,
 )
 from app.core.config import Settings
-from app.models.attendance_anomaly import AttendanceAnomaly
 from app.models.attendance_session import AttendanceSession
 from app.services.daily_summary_service import compute_daily_summaries_range
 
@@ -87,7 +86,6 @@ class AnomalyService:
         usage: AIUsage | None = None
         if anomalies:
             anomalies, usage = self._attach_ai_explanations(anomalies)
-        self._persist_anomalies(db, start_day, end_day, anomalies)
 
         return AnomalyDetectionResponse(
             period_start=start_day,
@@ -285,38 +283,6 @@ class AnomalyService:
             metadata={"unit": "percent", "delta": round(float(value - baseline), 3)},
             created_at=datetime.now(ZoneInfo(self._settings.timezone)),
         )
-
-    def _persist_anomalies(
-        self,
-        db: Session,
-        period_start: date,
-        period_end: date,
-        anomalies: list[AttendanceAnomalyRead],
-    ) -> None:
-        db.execute(
-            delete(AttendanceAnomaly).where(
-                AttendanceAnomaly.anomaly_date >= period_start,
-                AttendanceAnomaly.anomaly_date <= period_end,
-            )
-        )
-        for item in anomalies:
-            db.add(
-                AttendanceAnomaly(
-                    anomaly_key=item.anomaly_key,
-                    anomaly_date=item.anomaly_date,
-                    category=item.category,
-                    severity=item.severity.value,
-                    score=item.score,
-                    department=item.department,
-                    metric_value=item.metric_value,
-                    baseline_value=item.baseline_value,
-                    description=item.description,
-                    explanation=item.explanation,
-                    recommendation=item.recommendation,
-                    metadata_json=item.metadata,
-                )
-            )
-        db.commit()
 
     def _attach_ai_explanations(
         self,

@@ -15,6 +15,7 @@ from zk import ZK
 from zk.exception import ZKError
 
 from app.core.config import Settings, get_settings
+from app.core import device_policy
 from app.services.device_attlog_codec import AttlogRecord
 from app.services.device_attlog_protocol import apply_attlog_correction, probe_attlog_capabilities
 from app.services.device_exceptions import AttlogCorrectionError, AttlogCorrectionNotSupported, DeviceFetchError
@@ -419,7 +420,7 @@ class DeviceService:
 
     def probe_attlog_capabilities(self) -> dict[str, object]:
         def _probe(conn: Any) -> dict[str, object]:
-            caps = probe_attlog_capabilities(conn, allow_tier_b_write=self._settings.correction_tier_b_write_enabled)
+            caps = probe_attlog_capabilities(conn, allow_tier_b_write=device_policy.ATTLOG_TIER_B_REWRITE)
             return {
                 "tier": caps.tier,
                 "record_size": caps.record_size,
@@ -470,7 +471,7 @@ class DeviceService:
                 delete_timestamps=delete_timestamps,
                 new_records=new_records,
                 tz_name=self._settings.timezone,
-                allow_tier_b_write=self._settings.correction_tier_b_write_enabled,
+                allow_tier_b_write=device_policy.ATTLOG_TIER_B_REWRITE,
             )
 
         try:

@@ -55,7 +55,7 @@ def probe_attlog_capabilities(conn: Any, *, allow_tier_b_write: bool = False) ->
         if hasattr(conn, "clear_attendance") and hasattr(conn, "_send_with_buffer"):
             if allow_tier_b_write:
                 logger.warning(
-                    "Tier B attlog full rewrite enabled via CORRECTION_TIER_B_WRITE_ENABLED; "
+                    "Tier B attlog full rewrite allowed by internal policy; "
                     "write will be verified by readback before finalize."
                 )
                 return AttlogCapabilities(

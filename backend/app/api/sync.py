@@ -13,7 +13,6 @@ from app.core.database import get_db
 from app.core.security import Permission, require_permissions
 from app.models.user import User
 from app.services.attendance_service import run_device_sync, run_user_sync
-from app.services.audit_service import append_audit_log
 from app.services.device_command_service import device_session_lock, wait_for_correction_commands_clear
 from app.services.device_exceptions import DeviceFetchError, DeviceLockContentionError
 from app.services.device_registry_service import update_device_health
@@ -45,6 +44,7 @@ def sync_from_device(
     punch codes, and rebuild sessions for SESSION_REBUILD_LOOKBACK_DAYS trailing local days.
     Same effective steps as ``scripts/sync_from_device.py``.
     """
+    del request, user  # auth + request context still required via Depends
     settings = get_settings()
     if not wait_for_correction_commands_clear(db, settings.zk_device_id, settings=settings):
         raise HTTPException(
@@ -92,16 +92,6 @@ def sync_from_device(
         attendance_records_fetched=a_fetch,
         new_attendance_logs=a_ins,
         placeholder_employees_created=placeholders,
-    )
-    append_audit_log(
-        db,
-        actor_user_uuid=user.user_uuid,
-        action_type="SYNC_TRIGGERED",
-        entity_type="device",
-        entity_id=settings.zk_device_id,
-        new_state=response.model_dump(),
-        ip_address=request.client.host if request.client else None,
-        request_id=getattr(request.state, "request_id", None),
     )
     db.commit()
     return response
