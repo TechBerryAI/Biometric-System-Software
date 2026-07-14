@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core import device_policy
 from app.core.config import get_settings
-from app.services.device_service import DeviceService
+from app.domains.devices.services.device_service import DeviceService
 
 
 def main() -> int:

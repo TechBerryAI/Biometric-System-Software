@@ -12,10 +12,10 @@ _BACKEND = Path(__file__).resolve().parents[1]
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
-from app.constants.keep_list import ORGANIZATION_ROSTER  # noqa: E402
+from app.shared.keep_list import ORGANIZATION_ROSTER  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
-from app.services.employee_offboard_service import (  # noqa: E402
+from app.domains.employees.services.employee_offboard_service import (  # noqa: E402
     OffboardBulkReport,
     device_write_blockers,
     offboard_all_except_keep_list,

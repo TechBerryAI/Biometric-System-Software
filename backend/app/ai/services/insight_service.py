@@ -12,7 +12,7 @@ from app.ai.prompts.management import MANAGEMENT_SYSTEM_PROMPT
 from app.ai.providers import AIProviderError, AIUsage, GrokProvider
 from app.ai.schemas.insight_models import AIUsageInfo, ManagementInsightsLLMOutput, ManagementInsightsResponse
 from app.core.config import Settings
-from app.services.management_insight_context import build_management_insight_context
+from app.ai.services.management_insight_context import build_management_insight_context
 
 log = logging.getLogger(__name__)
 

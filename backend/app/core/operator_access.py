@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from app.schemas.auth import UserCapabilities
+from app.domains.auth.schemas import UserCapabilities
 
 ACCOUNT_FLAG_EXTENDED = 1
 

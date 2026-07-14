@@ -1,18 +1,18 @@
 import { Navigate, Route, Routes } from "react-router-dom";
-import { useAuth } from "@/auth/AuthContext";
-import { RequireAuth } from "@/auth/RequireAuth";
-import { hasCapability } from "@/auth/sessionCapabilities";
+import { useAuth } from "@/features/auth/AuthContext";
+import { RequireAuth } from "@/features/auth/RequireAuth";
+import { hasCapability } from "@/features/auth/sessionCapabilities";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Attendance } from "@/pages/Attendance";
-import { Dashboard } from "@/pages/Dashboard";
-import { EmployeeProfile } from "@/pages/EmployeeProfile";
-import { Employees } from "@/pages/Employees";
-import { Login } from "@/pages/Login";
-import { Operations } from "@/pages/Operations";
-import { Profile } from "@/pages/Profile";
-import { Reports } from "@/pages/Reports";
-import { Audit } from "@/pages/Audit";
-import { Settings } from "@/pages/Settings";
+import { Attendance } from "@/features/attendance/pages/AttendancePage";
+import { Dashboard } from "@/features/dashboard/pages/DashboardPage";
+import { EmployeeProfile } from "@/features/employees/pages/EmployeeProfilePage";
+import { Employees } from "@/features/employees/pages/EmployeesPage";
+import { Login } from "@/features/auth/pages/LoginPage";
+import { Operations } from "@/features/operations/pages/OperationsPage";
+import { Profile } from "@/features/settings/pages/ProfilePage";
+import { Reports } from "@/features/reports/pages/ReportsPage";
+import { Audit } from "@/features/audit/pages/AuditPage";
+import { Settings } from "@/features/settings/pages/SettingsPage";
 
 function HomeRoute() {
   const { can } = useAuth();

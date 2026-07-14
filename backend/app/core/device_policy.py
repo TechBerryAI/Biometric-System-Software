@@ -7,7 +7,9 @@ site policy must change — they deliberately do not appear in .env.
 from __future__ import annotations
 
 # When True, Tier B firmware may use guarded full attlog rewrite with readback.
-ATTLOG_TIER_B_REWRITE: bool = True
+# Keep False: pyzk cannot commit attlog uploads on real ZK/ESSL firmware (clear
+# would wipe device memory without restoring punches).
+ATTLOG_TIER_B_REWRITE: bool = False
 
 # When False, all device write / enqueue paths are blocked (cutover freeze).
 DEVICE_WRITES_ENABLED: bool = True

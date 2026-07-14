@@ -23,8 +23,8 @@ from app.ai.schemas.insight_models import (
     AttendanceAnomalyRead,
 )
 from app.core.config import Settings
-from app.models.attendance_session import AttendanceSession
-from app.services.daily_summary_service import compute_daily_summaries_range
+from app.domains.attendance.models.attendance_session import AttendanceSession
+from app.domains.attendance.services.daily_summary_service import compute_daily_summaries_range
 
 log = logging.getLogger(__name__)
 

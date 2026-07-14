@@ -17,13 +17,14 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
-import { useAuth } from "@/auth/AuthContext";
-import { accountTierFromUser } from "@/auth/sessionCapabilities";
-import type { Permission } from "@/auth/permissions";
+import { useAuth } from "@/features/auth/AuthContext";
+import { accountTierFromUser } from "@/features/auth/sessionCapabilities";
+import type { Permission } from "@/features/auth/permissions";
 import { cn } from "@/lib/cn";
 import { useUiStore } from "@/stores/ui-store";
 import { Button } from "@/components/ui/button";
-import { fetchOperationalMetrics, formatSyncErrorMessage, syncFromDevice } from "@/services/api";
+import { fetchOperationalMetrics, syncFromDevice } from "@/features/operations/api";
+import { formatSyncErrorMessage } from "@/shared/api/client";
 
 const items = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: "dashboard:view" as Permission },

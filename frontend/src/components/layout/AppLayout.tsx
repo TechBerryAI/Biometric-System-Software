@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { useAuth } from "@/auth/AuthContext";
-import { accountTierFromUser } from "@/auth/sessionCapabilities";
+import { useAuth } from "@/features/auth/AuthContext";
+import { accountTierFromUser } from "@/features/auth/sessionCapabilities";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 

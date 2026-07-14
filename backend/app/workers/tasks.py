@@ -11,12 +11,12 @@ from sqlalchemy import and_, or_
 
 from app.core.database import SessionLocal
 from app.core.config import get_settings
-from app.models.device_command import DeviceCommand, DeviceCommandStatus
-from app.services.attendance_service import run_device_sync, run_user_sync
-from app.services.device_command_service import claim_pending_commands, device_session_lock, process_command
-from app.services.device_service import DeviceService
-from app.services.device_exceptions import DeviceFetchError, DeviceLockContentionError
-from app.services.device_registry_service import reconcile_device_mappings, update_device_health
+from app.domains.devices.models.device_command import DeviceCommand, DeviceCommandStatus
+from app.domains.attendance.services.attendance_service import run_device_sync, run_user_sync
+from app.domains.devices.services.device_command_service import claim_pending_commands, device_session_lock, process_command
+from app.domains.devices.services.device_service import DeviceService
+from app.shared.device_exceptions import DeviceFetchError, DeviceLockContentionError
+from app.domains.devices.services.device_registry_service import reconcile_device_mappings, update_device_health
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)

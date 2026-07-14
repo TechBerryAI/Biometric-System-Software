@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from app.core.database import SessionLocal
 from app.core.operator_access import ACCOUNT_FLAG_EXTENDED
-from app.models.user import User
+from app.domains.auth.models.user import User
 
 
 def main() -> int:

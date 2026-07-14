@@ -1,11 +1,11 @@
 """Pydantic schemas."""
 
-from app.schemas.attendance import (
+from app.domains.attendance.schemas import (
     AttendanceLogRead,
     AttendanceSessionRead,
     DailySummaryRow,
 )
-from app.schemas.employee import EmployeeCreate, EmployeeRead, EmployeeUpdate
+from app.domains.employees.schemas import EmployeeCreate, EmployeeRead, EmployeeUpdate
 
 __all__ = [
     "AttendanceLogRead",

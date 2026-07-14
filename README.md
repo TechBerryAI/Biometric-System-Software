@@ -2,34 +2,37 @@
 
 Enterprise-grade workforce attendance and operations platform with:
 
-- immutable workforce identity and device mapping lineage
+- attendance + device operations around ZKTeco/ESSL terminals
 - replay-safe queued device writes with mandatory verification readback
-- reconciliation and drift recovery workflows
-- firmware certification and runtime risk containment
+- append-only attendance truth with rebuildable sessions
 - governance controls (maintenance, emergency freeze, quarantine)
 - React operations center and RBAC-protected APIs
 
 ## Documentation
 
-All detailed docs are now in `docs/`.
+All detailed docs are in `docs/`.
 
-- Start here: `docs/README.md`
-- Architecture: `docs/architecture-overview.md`
-- Backend internals: `docs/backend-architecture.md`
-- Frontend architecture: `docs/frontend-architecture.md`
-- Reliability/operations: `docs/operations-and-reliability.md`
-- Deployment: `docs/deployment-and-environments.md`
-- Runbooks: `docs/runbooks.md`
-- API map: `docs/api-overview.md`
+- Start here: [`docs/README.md`](docs/README.md)
+- Structure snapshot: [`docs/architecture/PROJECT_STRUCTURE.md`](docs/architecture/PROJECT_STRUCTURE.md)
+- Architecture: [`docs/architecture/overview.md`](docs/architecture/overview.md)
+- Backend: [`docs/architecture/backend.md`](docs/architecture/backend.md)
+- Frontend: [`docs/architecture/frontend.md`](docs/architecture/frontend.md)
+- Reliability: [`docs/operations/reliability.md`](docs/operations/reliability.md)
+- Deployment: [`docs/operations/deployment.md`](docs/operations/deployment.md)
+- Runbooks: [`docs/operations/runbooks.md`](docs/operations/runbooks.md)
+- API map: [`docs/api/overview.md`](docs/api/overview.md)
 
 ## Repository Layout
 
 ```text
 .
 ├── backend/       # FastAPI, SQLAlchemy, Alembic, Celery, pyzk integration
-├── frontend/      # React + Vite + TypeScript + Tailwind
-├── docs/          # Architecture, deployment, runbooks, API docs
-├── start.js       # Local full-stack bootstrap
+├── frontend/      # React + Vite + TypeScript + Tailwind (npm workspace)
+├── e2e/           # Playwright end-to-end scenarios
+├── docs/          # Architecture, API, operations, testing
+├── scripts/       # Repo automation (start, start-vm, traceability check)
+├── Makefile       # install / test targets
+├── package.json   # npm workspaces root + Playwright
 └── README.md
 ```
 
@@ -45,16 +48,22 @@ All detailed docs are now in `docs/`.
 From repository root:
 
 ```bash
-node start.js
-```
-
-For VM app-server startup (example VM IP `192.168.1.117`):
-
-```bash
-node start-vm.js
+npm start
 ```
 
 or:
+
+```bash
+node start.js
+```
+
+or:
+
+```bash
+node scripts/start.js
+```
+
+For VM app-server startup (example VM IP `192.168.1.117`):
 
 ```bash
 npm run start:vm
@@ -75,17 +84,8 @@ Default URLs:
 
 ## Enable Celery Worker + Beat
 
-On Windows PowerShell:
-
-```powershell
-$env:START_CELERY="1"
-node start.js
-```
-
-On Linux/macOS shell:
-
 ```bash
-START_CELERY=1 node start.js
+START_CELERY=1 npm start
 ```
 
 ## Manual Setup (Backend + Frontend)
@@ -94,7 +94,7 @@ START_CELERY=1 node start.js
 
 ```bash
 cd backend
-copy .env.example .env
+cp .env.example .env
 ```
 
 Update at minimum:
@@ -104,20 +104,14 @@ Update at minimum:
 - `ZK_DEVICE_IP`
 - `JWT_SECRET_KEY`
 
-### 2) Install backend and run migrations
-
-Windows:
+### 2) Install and run tests
 
 ```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-alembic upgrade head
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+make install
+make test
 ```
 
-Linux/macOS:
+### 3) Start backend
 
 ```bash
 cd backend
@@ -128,7 +122,7 @@ alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 3) Start Celery (separate terminals)
+### 4) Start Celery (separate terminals)
 
 ```bash
 cd backend
@@ -136,28 +130,13 @@ celery -A app.workers.celery_app worker -l info
 celery -A app.workers.celery_app beat -l info
 ```
 
-### 4) Start frontend
+### 5) Start frontend
+
+From repository root (npm workspaces):
 
 ```bash
-cd frontend
 npm install
 npm run dev
-```
-
-If needed, set frontend API URL:
-
-Windows PowerShell:
-
-```powershell
-$env:VITE_API_URL="/api"
-$env:VITE_DEV_PROXY_TARGET="http://localhost:8000"
-npm run dev
-```
-
-Linux/macOS:
-
-```bash
-VITE_API_URL=/api VITE_DEV_PROXY_TARGET=http://localhost:8000 npm run dev
 ```
 
 ## Production-Grade Startup Checklist
@@ -173,8 +152,8 @@ Before enabling writes in production:
   - `/health/db`
   - `/health/redis`
   - `/health/devices`
-   - `/health/queue`
-   - `/ops/metrics`
+  - `/health/queue`
+  - `/ops/metrics`
 - set `DEVICE_WRITES_ENABLED = False` in `backend/app/core/device_policy.py` during initial cutover until validation is complete
 
 ## Key Operational Endpoints
@@ -182,9 +161,9 @@ Before enabling writes in production:
 - Health: `/health/*`
 - Operational metrics: `/ops/metrics`
 - Device command queue: `/ops/device-commands`
-- Forensics: `/forensics/*`
+- Insights: `/insights/*`
 
-Full endpoint grouping is documented in `docs/api-overview.md`.
+Full endpoint grouping is documented in [`docs/api/overview.md`](docs/api/overview.md).
 
 ## Safety and Platform Guarantees
 
@@ -192,15 +171,11 @@ Full endpoint grouping is documented in `docs/api-overview.md`.
 - Biometric template operations are not part of this platform.
 - Device writes are asynchronous, serialized per device, and verification-backed.
 - Attendance truth remains append-only (`attendance_logs`) and sessions are derived/rebuildable.
-- Reconciliation and quarantine controls are first-class operational mechanisms.
 
 ## Troubleshooting
 
 - Check `backend/.env` for `DATABASE_URL` and `REDIS_URL`.
 - If login shows browser CORS/preflight errors on VM/LAN hosts, set `VITE_API_URL` correctly and verify backend CORS vars (`CORS_ALLOW_ORIGINS`, `CORS_ALLOW_PRIVATE_NETWORK_ORIGINS`).
 - If migrations fail, ensure PostgreSQL is running and credentials are correct.
-- If queue is stuck, inspect:
-  - `/ops/metrics`
-  - `/ops/device-commands?status=DEAD_LETTER`
-  - `/ops/reconciliation-jobs`
-- If device behavior is unstable, quarantine or freeze via PostgreSQL (see `docs/api-overview.md` and `docs/runbooks.md`).
+- If queue is stuck, inspect `/ops/metrics` and `/ops/device-commands?status=DEAD_LETTER`.
+- If device behavior is unstable, quarantine or freeze via PostgreSQL (see [`docs/api/overview.md`](docs/api/overview.md) and [`docs/operations/runbooks.md`](docs/operations/runbooks.md)).

@@ -1,10 +1,19 @@
 {
   "name": "biometric-system-software",
   "private": true,
-  "description": "Biometric attendance — run `npm start` for local dev (see start.js)",
+  "description": "Biometric attendance — run `npm start` or `node start.js` for local dev. Prefer `make test` for the suite.",
+  "workspaces": [
+    "frontend"
+  ],
   "scripts": {
-    "start": "node start.js",
-    "start:vm": "node start-vm.js",
-    "build": "npm --prefix frontend run build"
+    "start": "node scripts/start.js",
+    "start:vm": "node scripts/start-vm.js",
+    "dev": "npm run dev -w attendance-frontend",
+    "build": "npm run build -w attendance-frontend",
+    "test": "npm run test -w attendance-frontend",
+    "test:e2e": "playwright test --config=e2e/playwright.config.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.51.0"
   }
 }

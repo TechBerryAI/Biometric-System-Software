@@ -11,7 +11,7 @@ if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
 from app.core.database import SessionLocal  # noqa: E402
-from app.services.employee_offboard_service import restore_device_writable_state  # noqa: E402
+from app.domains.employees.services.employee_offboard_service import restore_device_writable_state  # noqa: E402
 
 
 def main() -> None:

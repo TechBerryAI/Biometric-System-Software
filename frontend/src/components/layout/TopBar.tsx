@@ -1,9 +1,9 @@
 import { Bell, Search } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/auth/AuthContext";
-import { accountTierFromUser, roleLabelFromUser } from "@/auth/sessionCapabilities";
-import { AddAccountModal } from "@/components/accounts/AddAccountModal";
+import { useAuth } from "@/features/auth/AuthContext";
+import { accountTierFromUser, roleLabelFromUser } from "@/features/auth/sessionCapabilities";
+import { AddAccountModal } from "@/features/settings/components/AddAccountModal";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

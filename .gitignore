@@ -209,9 +209,19 @@ cython_debug/
 # Node (frontend)
 node_modules/
 frontend/dist/
+frontend/coverage/
+*.tsbuildinfo
 # Keep frontend source lib files versioned.
 !frontend/src/lib/
 !frontend/src/lib/**
+
+# Playwright
+e2e/test-results/
+e2e/playwright-report/
+e2e/blob-report/
+e2e/playwright/.cache/
+test-results/
+playwright-report/
 
 # Marimo
 marimo/_static/

@@ -19,7 +19,7 @@ if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
 from app.core.database import SessionLocal  # noqa: E402
-from app.services.attendance_service import run_device_sync, run_user_sync  # noqa: E402
+from app.domains.attendance.services.attendance_service import run_device_sync, run_user_sync  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 
