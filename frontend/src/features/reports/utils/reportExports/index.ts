@@ -1,3 +1,17 @@
+export {
+  downloadDepartmentAttendanceExcel,
+  fmtAttendanceInstruction,
+  fmtMonthSpan,
+  fmtPunchAmPm,
+  fmtReportDate,
+  fmtTotalHours,
+  resolveAttendanceMark,
+} from "./departmentAttendanceExcel";
+export type {
+  DepartmentAttendanceDay,
+  DepartmentAttendanceMember,
+  DepartmentAttendancePayload,
+} from "./departmentAttendanceExcel";
 import {
   downloadAttendanceSummaryExcel,
   downloadDashboardReportExcel,
