@@ -1,8 +1,15 @@
 import { motion } from "framer-motion";
-import { Download } from "lucide-react";
+import { ArrowUpDown, Download } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 import type { ExportPeriod } from "@/lib/dates";
@@ -27,12 +34,60 @@ function fmtWorkHm(total: number | null): string {
 
 type AttendanceRow = DailySummaryRow & { is_absent: boolean };
 
+type AttendanceSortMode = "early_first" | "late_first" | "name_asc" | "work_desc" | "work_asc";
+
+const SORT_LABELS: Record<AttendanceSortMode, string> = {
+  early_first: "Early first",
+  late_first: "Late first",
+  name_asc: "Name A–Z",
+  work_desc: "Most hours",
+  work_asc: "Least hours",
+};
+
+function punchTime(iso: string | null): number | null {
+  return iso ? new Date(iso).getTime() : null;
+}
+
+function comparePresent(a: AttendanceRow, b: AttendanceRow, mode: AttendanceSortMode): number {
+  const byName = () => a.employee_name.localeCompare(b.employee_name);
+
+  if (mode === "name_asc") return byName();
+
+  if (mode === "work_desc" || mode === "work_asc") {
+    const aWork = a.total_work_minutes ?? -1;
+    const bWork = b.total_work_minutes ?? -1;
+    const diff = mode === "work_desc" ? bWork - aWork : aWork - bWork;
+    return diff !== 0 ? diff : byName();
+  }
+
+  const aIn = punchTime(a.first_check_in);
+  const bIn = punchTime(b.first_check_in);
+  if (aIn != null && bIn != null) {
+    const diff = mode === "late_first" ? bIn - aIn : aIn - bIn;
+    return diff !== 0 ? diff : byName();
+  }
+  if (aIn != null) return -1;
+  if (bIn != null) return 1;
+
+  const aOut = punchTime(a.last_check_out);
+  const bOut = punchTime(b.last_check_out);
+  if (aOut != null && bOut != null) {
+    const diff = mode === "late_first" ? bOut - aOut : aOut - bOut;
+    return diff !== 0 ? diff : byName();
+  }
+  if (aOut != null) return -1;
+  if (bOut != null) return 1;
+
+  return byName();
+}
+
 export function Attendance() {
   const [date, setDate] = useState(todayISO);
   const globalSearchQuery = useUiStore((s) => s.globalSearchQuery);
   const [rows, setRows] = useState<AttendanceRow[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(false);
+  const [sortMode, setSortMode] = useState<AttendanceSortMode>("early_first");
   const [exportPeriod, setExportPeriod] = useState<ExportPeriod>("day");
   const [exporting, setExporting] = useState(false);
   const [formatDialogOpen, setFormatDialogOpen] = useState(false);
@@ -84,22 +139,14 @@ export function Attendance() {
         )
       : rows;
 
-    return [...list].sort((a, b) => {
-      const aIn = a.first_check_in ? new Date(a.first_check_in).getTime() : null;
-      const bIn = b.first_check_in ? new Date(b.first_check_in).getTime() : null;
-      if (aIn != null && bIn != null) return aIn - bIn;
-      if (aIn != null) return -1;
-      if (bIn != null) return 1;
+    const present = list.filter((r) => !r.is_absent);
+    const absent = list.filter((r) => r.is_absent);
 
-      const aOut = a.last_check_out ? new Date(a.last_check_out).getTime() : null;
-      const bOut = b.last_check_out ? new Date(b.last_check_out).getTime() : null;
-      if (aOut != null && bOut != null) return aOut - bOut;
-      if (aOut != null) return -1;
-      if (bOut != null) return 1;
+    present.sort((a, b) => comparePresent(a, b, sortMode));
+    absent.sort((a, b) => a.employee_name.localeCompare(b.employee_name));
 
-      return a.employee_name.localeCompare(b.employee_name);
-    });
-  }, [rows, globalSearchQuery]);
+    return [...present, ...absent];
+  }, [rows, globalSearchQuery, sortMode]);
 
   const presentCount = filtered.filter((r) => !r.is_absent).length;
   const absentCount = filtered.filter((r) => r.is_absent).length;
@@ -136,7 +183,7 @@ export function Attendance() {
       <header>
         <h1 className="font-display text-display-xl text-ink">Attendance</h1>
         <p className="mt-2 max-w-2xl text-sm text-ink-muted leading-relaxed">
-          Daily roster sorted by punch order.{" "}
+          Daily roster with present employees sorted by your chosen order; absents always list last.{" "}
           <span className="text-ink-subtle">
             Use the sidebar <strong>Sync now</strong> action to pull latest device punches. This page auto-updates
             after each successful sync.
@@ -221,10 +268,33 @@ export function Attendance() {
         ))}
       </div>
 
-      <p className="text-xs text-ink-muted">
-        Absent today (in view): <span className="font-medium text-ink">{absentCount}</span>. Sorted by
-        check-in time — earliest arrivals first.
-      </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs text-ink-muted">
+          Absent today (in view): <span className="font-medium text-ink">{absentCount}</span>. Sorted by{" "}
+          <span className="font-medium text-ink">{SORT_LABELS[sortMode].toLowerCase()}</span>
+          {loading ? "…" : ""} — absents listed last.
+        </p>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="secondary" size="sm" className="shrink-0 self-start sm:self-auto">
+              <ArrowUpDown className="h-4 w-4" />
+              Sort: {SORT_LABELS[sortMode]}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuRadioGroup
+              value={sortMode}
+              onValueChange={(value) => setSortMode(value as AttendanceSortMode)}
+            >
+              {(Object.keys(SORT_LABELS) as AttendanceSortMode[]).map((mode) => (
+                <DropdownMenuRadioItem key={mode} value={mode}>
+                  {SORT_LABELS[mode]}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       <div className="overflow-hidden rounded-2xl border border-line/70 bg-surface-card shadow-card">
         <div className="scrollbar-thin overflow-x-auto">
