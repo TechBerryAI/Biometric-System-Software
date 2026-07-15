@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { DayPunchesDialog } from "@/features/attendance/components/DayPunchesDialog";
 import { cn } from "@/lib/cn";
 import type { ExportPeriod } from "@/lib/dates";
 import { dateList, fmtDisplayDateTime, getExportRange, todayISO } from "@/lib/dates";
@@ -50,6 +51,8 @@ export function Attendance() {
   const [exporting, setExporting] = useState(false);
   const [formatDialogOpen, setFormatDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [punchesOpen, setPunchesOpen] = useState(false);
+  const [punchesEmployee, setPunchesEmployee] = useState<AttendanceRow | null>(null);
 
   const fetchRoster = useCallback(async () => {
     const [emps, summary] = await Promise.all([fetchEmployees(), fetchDailySummary(date)]);
@@ -136,7 +139,7 @@ export function Attendance() {
         <p className="mt-2 max-w-2xl text-sm text-ink-muted leading-relaxed">
           Daily roster with present employees sorted by your chosen order; absents always list last.{" "}
           <span className="text-ink-subtle">
-            Use the sidebar <strong>Sync now</strong> action to pull latest device punches. This page auto-updates
+            Use the sidebar <strong>Sync now</strong> action to pull all punches still stored on the terminal. This page auto-updates
             after each successful sync.
           </span>
         </p>
@@ -277,8 +280,17 @@ export function Attendance() {
                   >
                     <td className="px-5 py-3.5 tabular-nums text-ink-muted">{idx + 1}</td>
                     <td className="px-5 py-3.5">
-                      <p className="font-medium text-ink">{r.employee_name}</p>
-                      <p className="text-xs text-ink-muted font-mono">{r.device_user_id}</p>
+                      <button
+                        type="button"
+                        className="text-left transition hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 rounded"
+                        onClick={() => {
+                          setPunchesEmployee(r);
+                          setPunchesOpen(true);
+                        }}
+                      >
+                        <p className="font-medium text-ink hover:underline underline-offset-2">{r.employee_name}</p>
+                        <p className="text-xs text-ink-muted font-mono">{r.device_user_id}</p>
+                      </button>
                     </td>
                     <td className="px-5 py-3.5 whitespace-nowrap text-ink-muted">{fmtDisplayDateTime(r.first_check_in)}</td>
                     <td className="px-5 py-3.5 whitespace-nowrap text-ink-muted">{fmtDisplayDateTime(r.last_check_out)}</td>
@@ -290,6 +302,14 @@ export function Attendance() {
           </table>
         </div>
       </div>
+
+      <DayPunchesDialog
+        open={punchesOpen}
+        onOpenChange={setPunchesOpen}
+        employeeId={punchesEmployee?.employee_id ?? null}
+        employeeName={punchesEmployee?.employee_name ?? "Employee"}
+        date={date}
+      />
     </div>
   );
 }

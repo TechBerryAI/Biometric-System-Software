@@ -25,6 +25,19 @@ def ensure_default_device(db: Session, settings: Settings | None = None) -> Devi
         existing.ip_address = settings.zk_device_ip
         existing.port = settings.zk_device_port
         existing.timezone = settings.timezone
+        existing.active = True
+        # Deactivate other registry rows pointing at the same physical terminal.
+        for sibling in db.execute(
+            select(Device).where(
+                Device.ip_address == existing.ip_address,
+                Device.id != existing.id,
+                Device.active.is_(True),
+            )
+        ).scalars().all():
+            sibling.active = False
+            sibling.health_status = "OFFLINE"
+            sibling.mode = "OFFLINE"
+            sibling.quarantine_reason = sibling.quarantine_reason or "Duplicate IP merged into canonical device"
         return existing
     row = Device(
         name=settings.zk_device_id,
@@ -36,6 +49,17 @@ def ensure_default_device(db: Session, settings: Settings | None = None) -> Devi
     )
     db.add(row)
     db.flush()
+    for sibling in db.execute(
+        select(Device).where(
+            Device.ip_address == row.ip_address,
+            Device.id != row.id,
+            Device.active.is_(True),
+        )
+    ).scalars().all():
+        sibling.active = False
+        sibling.health_status = "OFFLINE"
+        sibling.mode = "OFFLINE"
+        sibling.quarantine_reason = sibling.quarantine_reason or "Duplicate IP merged into canonical device"
     return row
 
 

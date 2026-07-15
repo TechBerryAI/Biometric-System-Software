@@ -51,12 +51,20 @@ Actions:
 3. Validate verification success rates and drift impact.
 4. Promote status only after stability evidence.
 
-## 6. Incident Artifacts
+## 7. Missing evening punches / short workdays (~3h)
 
-Capture for each incident:
+Symptom: In ~09:30, Out ~13:00, work ~3h even though people worked 9–10h. Corrected days look fine.
 
-- request/correlation IDs
-- affected `command_uuid` values
-- device mode and runtime risk level
-- recent `device_sync_events`
-- reconciliation and approval records
+Cause: Evening punches were never stored (or were lost from the terminal buffer). First/last summary is correct on the punches that exist. Dual device labels for one IP (`Workplace Entrance` + `main-entrance`) made history harder to reason about.
+
+Actions:
+
+1. Confirm Alembic head includes `0019` (canonicalizes device id to `ZK_DEVICE_ID`).
+2. Run **Sync now** (always pulls everything still on the terminal):
+   - UI: sidebar **Sync now**
+   - API: `POST /sync/device` (defaults to `full=true`)
+   - CLI: `cd backend && .venv/bin/python scripts/sync_from_device.py`
+3. Check incomplete days: `cd backend && .venv/bin/python scripts/report_incomplete_days.py`
+   Ops metric `incomplete_attendance_days` on `/ops/metrics` counts weekday days whose last punch is before 15:00.
+4. Days still short after sync: evenings are no longer on the device — use Attendance Adjust (already trusted).
+5. Keep auto-sync on when the network is reliable (`DEVICE_AUTO_SYNC_ENABLED=true`), or run Sync at least once after typical exit time so evenings do not roll off the terminal before the next morning pull.

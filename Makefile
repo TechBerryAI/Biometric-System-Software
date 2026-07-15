@@ -10,7 +10,7 @@
 .PHONY: help install install-backend install-frontend install-e2e \
 	test test-backend test-frontend test-e2e test-e2e-list test-matrix \
 	test-unit test-api test-integration test-workers test-scenarios \
-	test-backend-cov clean
+	test-backend-cov sync-full report-incomplete import-softworks clean
 
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 BACKEND := $(ROOT)backend
@@ -55,6 +55,9 @@ help:
 	@echo "  make test-matrix          Traceability matrix completeness gate"
 	@echo ""
 	@echo "Other"
+	@echo "  make sync-full            Full device attendance pull (ignores incremental floor)"
+	@echo "  make report-incomplete    List weekday days whose last punch is before 15:00"
+	@echo "  make import-softworks     Import Softworks four-punch XLS (append-only, never overwrite)"
 	@echo "  make clean                Remove caches and reports"
 
 install: install-backend install-frontend install-e2e
@@ -120,6 +123,21 @@ test-matrix: $(PYTHON)
 
 $(PYTHON):
 	@$(MAKE) install-backend
+
+# Live device / DB helpers (do not use in-memory DATABASE_URL from this Makefile)
+sync-full:
+	cd "$(BACKEND)" && env -u DATABASE_URL "$(PYTHON)" scripts/sync_from_device.py
+
+report-incomplete:
+	cd "$(BACKEND)" && env -u DATABASE_URL "$(PYTHON)" scripts/report_incomplete_days.py
+
+# Softworks monthly Four-Punch XLS → attendance_logs (idempotent inserts only).
+# Default source: imports/Attendance or Attendance/Attendance
+import-softworks:
+	cd "$(BACKEND)" && env -u DATABASE_URL "$(PYTHON)" scripts/import_softworks_attendance.py
+
+import-softworks-rebuild-sessions:
+	cd "$(BACKEND)" && env -u DATABASE_URL "$(PYTHON)" scripts/import_softworks_attendance.py --rebuild-sessions-only
 
 clean:
 	rm -rf "$(BACKEND)/.pytest_cache" "$(BACKEND)/htmlcov" "$(BACKEND)/.coverage"

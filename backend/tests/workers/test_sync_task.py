@@ -35,6 +35,7 @@ def test_sync_attendance_from_device_runs_with_patches() -> None:
     assert result["users_fetched"] == 3
     user_sync.assert_called_once()
     device_sync.assert_called_once()
+    assert device_sync.call_args.kwargs.get("full_resync") is True
     health.assert_called()
     fake_db.commit.assert_called()
     fake_db.close.assert_called_once()

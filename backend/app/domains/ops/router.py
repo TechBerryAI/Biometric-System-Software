@@ -21,6 +21,7 @@ from app.domains.auth.models.user import User
 from app.domains.devices.schemas import DeviceCommandRead
 from app.domains.devices.services.device_command_service import INTERNAL_COMMAND_TYPES, reprocess_device_command
 from app.domains.devices.services.device_registry_service import ensure_default_device
+from app.domains.attendance.services.incomplete_day_metrics import count_incomplete_attendance_days
 
 router = APIRouter(prefix="/ops", tags=["operations"])
 
@@ -43,6 +44,7 @@ class OperationalMetricsRead(BaseModel):
     device_ip: str
     device_port: int
     device_auto_sync_enabled: bool
+    incomplete_attendance_days: int = 0
 
 
 @router.get(
@@ -157,6 +159,11 @@ def operational_metrics(db: Session = Depends(get_db)) -> OperationalMetricsRead
     registered_device = db.execute(select(Device).where(Device.name == settings.zk_device_id)).scalar_one_or_none()
     if registered_device is None:
         registered_device = ensure_default_device(db, settings=settings)
+    else:
+        # Keep duplicate same-IP rows inactive whenever metrics are polled.
+        ensure_default_device(db, settings=settings)
+        db.flush()
+    incomplete_days = count_incomplete_attendance_days(db, lookback_days=30, settings=settings)
     device_health_status = (
         "MANUAL" if not settings.device_auto_sync_enabled else registered_device.health_status
     )
@@ -181,4 +188,5 @@ def operational_metrics(db: Session = Depends(get_db)) -> OperationalMetricsRead
         device_ip=registered_device.ip_address,
         device_port=registered_device.port,
         device_auto_sync_enabled=settings.device_auto_sync_enabled,
+        incomplete_attendance_days=incomplete_days,
     )

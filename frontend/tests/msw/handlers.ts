@@ -127,6 +127,36 @@ export const handlers = [
   http.get(`${base}/attendance/daily-summary/range`, async () => {
     return HttpResponse.json({ "2024-06-01": mockDailySummary });
   }),
+  http.get(`${base}/attendance/day-punches`, async ({ request }) => {
+    const url = new URL(request.url);
+    const employeeId = Number(url.searchParams.get("employee_id") || "1");
+    const date = url.searchParams.get("date") || "2024-06-01";
+    return HttpResponse.json({
+      employee_id: employeeId,
+      employee_name: "Ada Lovelace",
+      device_user_id: "1001",
+      local_date: date,
+      first_check_in: "2024-06-01T08:00:00Z",
+      last_check_out: "2024-06-01T17:00:00Z",
+      total_work_minutes: 540,
+      punches: [
+        {
+          id: 1,
+          timestamp: "2024-06-01T08:00:00Z",
+          device_id: "main-entrance",
+          punch_type: "0",
+          role: "in",
+        },
+        {
+          id: 2,
+          timestamp: "2024-06-01T17:00:00Z",
+          device_id: "main-entrance",
+          punch_type: "1",
+          role: "out",
+        },
+      ],
+    });
+  }),
   http.get(`${base}/attendance/logs`, async () => {
     return HttpResponse.json([]);
   }),

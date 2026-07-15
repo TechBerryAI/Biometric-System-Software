@@ -1,5 +1,5 @@
 import { api, SYNC_HTTP_TIMEOUT_MS } from "@/shared/api/client";
-import type { AttendanceLog, DailySummaryRow } from "@/types";
+import type { AttendanceLog, DailySummaryRow, DayPunchesResponse } from "@/types";
 
 export async function fetchDailySummary(summaryDate?: string): Promise<DailySummaryRow[]> {
   const { data } = await api.get<DailySummaryRow[]>("/attendance/daily-summary", {
@@ -29,6 +29,13 @@ export async function fetchAttendanceLogs(params: {
   limit?: number;
 }): Promise<AttendanceLog[]> {
   const { data } = await api.get<AttendanceLog[]>("/attendance/logs", { params });
+  return data;
+}
+
+export async function fetchDayPunches(employeeId: number, date: string): Promise<DayPunchesResponse> {
+  const { data } = await api.get<DayPunchesResponse>("/attendance/day-punches", {
+    params: { employee_id: employeeId, date },
+  });
   return data;
 }
 

@@ -312,9 +312,12 @@ async function main() {
 
   await waitForHttp(apiHealthLocal, "API");
 
-  if (process.env.START_CELERY === "1") {
-    log("Starting Celery worker + beat (requires Redis)...");
-    run(backendPython, ["-m", "celery", "-A", "app.workers.celery_app", "worker", "-l", "info"], {
+  const startCelery =
+    process.env.START_CELERY === "1" ||
+    (process.env.START_CELERY !== "0" && process.env.DEVICE_AUTO_SYNC_ENABLED !== "false");
+  if (startCelery) {
+    log("Starting Celery worker + beat (device auto-sync; needs Redis on REDIS_URL)...");
+    run(backendPython, ["-m", "celery", "-A", "app.workers.celery_app", "worker", "-l", "info", "-Q", "attendance"], {
       cwd: BACKEND,
       shell: false,
       env: backendEnv,
@@ -325,7 +328,7 @@ async function main() {
       env: backendEnv,
     });
   } else {
-    log("Tip: set START_CELERY=1 to run worker+beat (requires Redis)");
+    log("Celery skipped (START_CELERY=0). Manual Sync still works from the UI.");
   }
 
   log(

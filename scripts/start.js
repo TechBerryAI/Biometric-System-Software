@@ -440,9 +440,14 @@ async function main() {
 
   await waitForHttp(apiHealth, "API", { maxWaitMs: 120000, intervalMs: 500 });
 
-  if (process.env.START_CELERY === "1") {
-    log("Starting Celery worker + beat (device polling; needs Redis on REDIS_URL)...");
-    run(VENV_PY, ["-m", "celery", "-A", "app.workers.celery_app", "worker", "-l", "info"], {
+  // Auto-start worker+beat when Redis is expected (device polls every DEVICE_POLL_INTERVAL_SECONDS).
+  // Set START_CELERY=0 to skip. Explicit START_CELERY=1 always starts them.
+  const startCelery =
+    process.env.START_CELERY === "1" ||
+    (process.env.START_CELERY !== "0" && process.env.DEVICE_AUTO_SYNC_ENABLED !== "false");
+  if (startCelery) {
+    log("Starting Celery worker + beat (device auto-sync; needs Redis on REDIS_URL)...");
+    run(VENV_PY, ["-m", "celery", "-A", "app.workers.celery_app", "worker", "-l", "info", "-Q", "attendance"], {
       cwd: BACKEND,
       shell: false,
       env: envForBackendChild(),
@@ -453,7 +458,7 @@ async function main() {
       env: envForBackendChild(),
     });
   } else {
-    log("Tip: set START_CELERY=1 to run worker+beat (requires Redis)");
+    log("Celery skipped (START_CELERY=0). Manual Sync still works from the UI.");
   }
 
   log(`Starting Vite on ${feOrigin} (API base ${apiUrl}, dev proxy ${devProxyTarget})...`);

@@ -38,3 +38,22 @@ class DailySummaryRow(BaseModel):
     last_check_out: datetime | None
     total_work_minutes: int | None
     sessions_count: int
+
+
+class DayPunchRead(BaseModel):
+    id: int
+    timestamp: datetime
+    device_id: str
+    punch_type: str
+    role: str = Field(description="in | out | punch")
+
+
+class DayPunchesResponse(BaseModel):
+    employee_id: int
+    employee_name: str
+    device_user_id: str
+    local_date: date
+    first_check_in: datetime | None
+    last_check_out: datetime | None
+    total_work_minutes: int | None
+    punches: list[DayPunchRead]

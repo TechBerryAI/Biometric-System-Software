@@ -8,11 +8,11 @@ export type DeviceSyncResponse = {
   placeholder_employees_created?: number;
 };
 
-/** Pull users + attendance from the terminal (read-only), then reload DB-backed views. */
-export async function syncFromDevice(full = false): Promise<DeviceSyncResponse> {
+/** Pull all users + attendance still on the terminal (full history, read-only). */
+export async function syncFromDevice(): Promise<DeviceSyncResponse> {
   const { data } = await api.post<DeviceSyncResponse>("/sync/device", null, {
     timeout: SYNC_HTTP_TIMEOUT_MS,
-    params: full ? { full: true } : {},
+    params: { full: true },
   });
   return data;
 }
@@ -27,6 +27,7 @@ export type OperationalMetrics = {
   device_ip?: string;
   device_port?: number;
   device_auto_sync_enabled?: boolean;
+  incomplete_attendance_days?: number;
 };
 
 export type DeviceCommandRow = {

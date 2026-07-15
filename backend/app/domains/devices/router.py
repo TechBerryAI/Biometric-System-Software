@@ -35,14 +35,18 @@ class DeviceSyncResponse(BaseModel):
 @router.post("/device", response_model=DeviceSyncResponse)
 def sync_from_device(
     request: Request,
-    full: bool = Query(False, description="Ignore incremental sync floor and pull all device attendance"),
+    full: bool = Query(
+        True,
+        description="Pull all attendance still on the device (default True). Set false only for rare incremental pulls.",
+    ),
     user: User = Depends(require_permissions(Permission.SYNC_TRIGGER)),
     db: Session = Depends(get_db),
 ) -> DeviceSyncResponse:
     """
     Pull users and attendance from the terminal (pyzk read-only), backfill missing employees for orphan
     punch codes, and rebuild sessions for SESSION_REBUILD_LOOKBACK_DAYS trailing local days.
-    Same effective steps as ``scripts/sync_from_device.py``.
+
+    Defaults to a full device history pull so Sync now never misses punches still stored on the terminal.
     """
     del request, user  # auth + request context still required via Depends
     settings = get_settings()

@@ -134,6 +134,10 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
+# Softworks / ESSL attendance export dumps (local only)
+/imports/
+/Attendance/
+
 # Environments — never commit secrets (use .env.example as template)
 .env
 .env.*

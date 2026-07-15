@@ -38,6 +38,11 @@ def _incremental_sync_floor(db: Session, *, device_id: str, settings: Settings) 
         .limit(1)
     ).scalar_one_or_none()
     if latest is None:
+        # Fallback: any log timestamp (e.g. remapped history under another label).
+        latest = db.execute(
+            select(AttendanceLog.timestamp).order_by(AttendanceLog.timestamp.desc()).limit(1)
+        ).scalar_one_or_none()
+    if latest is None:
         return None
     return latest - timedelta(minutes=settings.device_sync_overlap_minutes)
 
@@ -205,9 +210,24 @@ def insert_attendance_logs_idempotent(
     records: Sequence[DeviceAttendanceRecord],
     device_id: str,
 ) -> int:
-    """Insert raw logs; duplicates ignored via unique (device_id, employee_code, timestamp)."""
+    """Append-only insert of raw logs. Never updates or deletes existing rows.
+
+    Duplicates are ignored via:
+      1) unique (device_id, employee_code, timestamp) → ON CONFLICT DO NOTHING
+      2) near-duplicate skip: same employee_code + punch_type within
+         DUPLICATE_PUNCH_WINDOW_SECONDS across *any* device_id (twin terminal labels)
+
+    Real In→Out pairs inside the window are both kept (different punch_type).
+    """
     rows = 0
     settings = get_settings()
+    canonical_device_id = settings.zk_device_id
+    if device_id and device_id != canonical_device_id:
+        logger.debug(
+            "Insert requested for device_id=%s; stamping logs as canonical %s",
+            device_id,
+            canonical_device_id,
+        )
     duplicate_window = timedelta(seconds=settings.duplicate_punch_window_seconds)
     for r in records:
         employee_code = r.user_id
@@ -215,7 +235,6 @@ def insert_attendance_logs_idempotent(
         if duplicate_window.total_seconds() > 0:
             existing_near_duplicate = db.execute(
                 select(AttendanceLog.id).where(
-                    AttendanceLog.device_id == device_id,
                     AttendanceLog.employee_code == employee_code,
                     AttendanceLog.punch_type == punch_type,
                     AttendanceLog.timestamp >= r.timestamp - duplicate_window,
@@ -225,7 +244,7 @@ def insert_attendance_logs_idempotent(
             if existing_near_duplicate is not None:
                 logger.info(
                     "Skipping near-duplicate punch device=%s employee=%s ts=%s punch=%s",
-                    device_id,
+                    canonical_device_id,
                     employee_code,
                     r.timestamp.isoformat(),
                     punch_type,
@@ -233,7 +252,7 @@ def insert_attendance_logs_idempotent(
                 continue
         mapping = _resolve_mapping_for_punch(
             db,
-            device_id=device_id,
+            device_id=canonical_device_id,
             device_user_id=employee_code,
             at_time=r.timestamp,
         )
@@ -242,17 +261,17 @@ def insert_attendance_logs_idempotent(
             .values(
                 employee_code=employee_code,
                 timestamp=r.timestamp,
-                device_id=device_id,
+                device_id=canonical_device_id,
                 employee_uuid=mapping.employee_uuid if mapping else None,
                 device_mapping_id=mapping.id if mapping else None,
                 punch_type=punch_type,
             )
             .on_conflict_do_nothing(index_elements=["device_id", "employee_code", "timestamp"])
+            .returning(AttendanceLog.id)
         )
         res = db.execute(stmt)
-        rc = res.rowcount
-        if rc is not None and rc > 0:
-            rows += rc
+        if res.scalar_one_or_none() is not None:
+            rows += 1
     db.commit()
     return rows
 

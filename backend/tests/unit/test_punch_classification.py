@@ -85,3 +85,59 @@ def test_summarize_day_punches_with_overtime() -> None:
 @pytest.mark.testid("BE-UNIT-PUNCH-001")
 def test_summarize_day_punches_empty() -> None:
     assert summarize_day_punches([]) == (None, None, None)
+
+
+@pytest.mark.testid("BE-UNIT-PUNCH-002")
+def test_summarize_leading_out_then_in_uses_chronological_first() -> None:
+    """Early ZK toggle OUT must not steal In-Time from the first punch."""
+    t0 = datetime(2026, 7, 14, 6, 15, tzinfo=UTC)
+    t1 = datetime(2026, 7, 14, 9, 0, tzinfo=UTC)
+    t2 = datetime(2026, 7, 14, 18, 30, tzinfo=UTC)
+    punches = [_Punch(t0, "1"), _Punch(t1, "0"), _Punch(t2, "1")]
+    first_in, last_out, total_min = summarize_day_punches(punches)
+    assert first_in == t0
+    assert last_out == t2
+    assert total_min == int((t2 - t0).total_seconds() // 60)
+
+
+@pytest.mark.testid("BE-UNIT-PUNCH-002")
+def test_summarize_all_same_direction_uses_first_last_span() -> None:
+    t0 = datetime(2026, 7, 14, 8, 0, tzinfo=UTC)
+    t1 = datetime(2026, 7, 14, 19, 0, tzinfo=UTC)
+    for punch_type in ("0", "1"):
+        first_in, last_out, total_min = summarize_day_punches(
+            [_Punch(t0, punch_type), _Punch(t1, punch_type)]
+        )
+        assert first_in == t0
+        assert last_out == t1
+        assert total_min == 660
+
+
+@pytest.mark.testid("BE-UNIT-PUNCH-002")
+def test_summarize_single_punch_has_in_only() -> None:
+    t0 = datetime(2026, 7, 14, 7, 30, tzinfo=UTC)
+    first_in, last_out, total_min = summarize_day_punches([_Punch(t0, "1")])
+    assert first_in == t0
+    assert last_out is None
+    assert total_min is None
+
+
+@pytest.mark.testid("BE-UNIT-PUNCH-002")
+def test_summarize_same_second_multi_device_does_not_duplicate_out() -> None:
+    """Identical timestamps from two devices must not copy In into Out."""
+    t0 = datetime(2026, 7, 15, 9, 15, 8, tzinfo=UTC)
+    punches = [_Punch(t0, "1"), _Punch(t0, "1")]
+    first_in, last_out, total_min = summarize_day_punches(punches)
+    assert first_in == t0
+    assert last_out is None
+    assert total_min is None
+
+
+@pytest.mark.testid("BE-UNIT-PUNCH-002")
+def test_summarize_near_duplicate_within_window_is_single_in() -> None:
+    t0 = datetime(2026, 7, 15, 9, 15, 8, tzinfo=UTC)
+    punches = [_Punch(t0, "1"), _Punch(t0 + timedelta(seconds=5), "0")]
+    first_in, last_out, total_min = summarize_day_punches(punches, duplicate_window_seconds=30)
+    assert first_in == t0
+    assert last_out is None
+    assert total_min is None

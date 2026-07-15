@@ -33,7 +33,7 @@ def sync_attendance_from_device(self) -> dict[str, int | bool]:
     try:
         with device_session_lock(settings.zk_device_id, settings):
             users_fetched, users_upserted = run_user_sync(db, settings=settings)
-            fetched, inserted, backfilled = run_device_sync(db, settings=settings)
+            fetched, inserted, backfilled = run_device_sync(db, full_resync=True, settings=settings)
         update_device_health(db, status="ONLINE", detail="auto_sync_ok", settings=settings)
         db.commit()
         logger.info(

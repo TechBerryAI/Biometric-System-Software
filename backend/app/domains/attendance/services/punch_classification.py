@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Protocol, Sequence
-from zoneinfo import ZoneInfo
 
 
 _IN_ALIASES = {
@@ -121,36 +120,42 @@ def summarize_day_punches(
     punches: Sequence[PunchLike],
     *,
     tz_name: str | None = None,
+    duplicate_window_seconds: int = 30,
 ) -> tuple[datetime | None, datetime | None, int | None]:
     """
-    Derive first check-in, last check-out, and span minutes for one local day.
+    Derive In-Time, Out-Time, and span minutes for one local day.
 
-    Never copies an OUT timestamp into the IN column (or vice versa).
+    Device punch_type codes are unreliable (ZK auto-toggle often labels the early
+    arrival as OUT). Roster times therefore use chronological first/last punch:
+
+    - 1 distinct punch  → In = that punch, Out empty, duration empty
+    - 2+ distinct punches → In = earliest, Out = latest, duration = last - first
+
+    Exact same-second rows (e.g. multi-device double-insert) and near-duplicates
+    within ``duplicate_window_seconds`` collapse to one punch for In/Out only;
+    raw logs remain unchanged in storage.
     """
+    del tz_name  # reserved for callers that pass local timezone context
     if not punches:
         return None, None, None
 
     ordered = sorted(punches, key=lambda p: p.timestamp)
-    resolved_types = resolve_punch_types_for_day(
-        [str(p.punch_type) for p in ordered],
-        [p.timestamp for p in ordered],
-        tz_name=tz_name,
-    )
+    window = max(int(duplicate_window_seconds), 0)
+    distinct: list[PunchLike] = []
+    for punch in ordered:
+        if distinct:
+            gap = (punch.timestamp - distinct[-1].timestamp).total_seconds()
+            if gap <= window:
+                continue
+        distinct.append(punch)
 
-    ins = [
-        p.timestamp
-        for p, direction in zip(ordered, resolved_types, strict=True)
-        if classify_punch(direction) is True
-    ]
-    outs = [
-        p.timestamp
-        for p, direction in zip(ordered, resolved_types, strict=True)
-        if classify_punch(direction) is False
-    ]
+    first_in = distinct[0].timestamp
+    if len(distinct) == 1:
+        return first_in, None, None
 
-    first_in = min(ins) if ins else None
-    last_out = max(outs) if outs else None
-    total_min: int | None = None
-    if first_in is not None and last_out is not None and last_out > first_in:
-        total_min = int((last_out - first_in).total_seconds() // 60)
+    last_out = distinct[-1].timestamp
+    if last_out <= first_in:
+        return first_in, None, None
+
+    total_min = int((last_out - first_in).total_seconds() // 60)
     return first_in, last_out, total_min

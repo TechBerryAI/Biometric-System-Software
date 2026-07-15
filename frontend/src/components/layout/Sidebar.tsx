@@ -92,7 +92,7 @@ export function Sidebar() {
       window.dispatchEvent(new Event("biometrica:device-sync"));
       setSyncState({
         tone: "ok",
-        message: `Synced ${result.new_attendance_logs} new logs from ${result.attendance_records_fetched} fetched records.`,
+        message: `Synced ${result.new_attendance_logs} new logs from ${result.attendance_records_fetched} device records.`,
       });
     } catch (error: unknown) {
       setSyncState({
@@ -265,7 +265,7 @@ export function Sidebar() {
                 {opsMetrics.isLoading
                   ? "Checking live device status..."
                   : manualSyncMode
-                    ? "Manual sync — use Sync now to pull from terminal"
+                    ? "Manual sync — Sync now pulls all punches still on the terminal"
                     : syncHealthy
                       ? `${failingDevices} devices failing, ${retryPressure} sync retries pending`
                       : `Device offline${deviceTarget ? ` (${deviceTarget})` : ""} — check connectivity`}
@@ -278,6 +278,7 @@ export function Sidebar() {
                 className="rounded-xl text-xs"
                 onClick={() => void onSyncNow()}
                 disabled={syncing}
+                title="Pull all attendance still stored on the terminal"
               >
                 <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
                 Sync now

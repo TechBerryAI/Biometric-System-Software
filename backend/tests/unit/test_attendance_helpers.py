@@ -43,3 +43,18 @@ def test_pair_logs_for_day_complete_and_missing() -> None:
     assert pairs[0][0] is cin and pairs[0][1] is cout
     assert pairs[1][2] == "missing_check_out"
     assert pairs[1][0] is orphan_in and pairs[1][1] is None
+
+
+@pytest.mark.testid("BE-UNIT-HELP-002")
+def test_pair_logs_for_day_leading_out_kept_as_first_in() -> None:
+    """Device-coded leading OUT must still start the first session."""
+    emp = make_employee(device_user_id="TBI002")
+    t0 = datetime(2026, 7, 14, 6, 10, tzinfo=UTC)
+    early = make_attendance_log(employee=emp, punched_at=t0, punch_type="1")
+    mid = make_attendance_log(employee=emp, punched_at=t0 + timedelta(hours=3), punch_type="0")
+    late = make_attendance_log(employee=emp, punched_at=t0 + timedelta(hours=12), punch_type="1")
+
+    pairs = pair_logs_for_day([early, mid, late], UTC, duplicate_window_seconds=30)
+    assert len(pairs) == 2
+    assert pairs[0][0] is early and pairs[0][1] is mid and pairs[0][2] == "complete"
+    assert pairs[1][0] is late and pairs[1][1] is None and pairs[1][2] == "missing_check_out"

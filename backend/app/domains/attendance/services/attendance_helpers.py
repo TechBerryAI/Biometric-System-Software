@@ -14,7 +14,7 @@ from app.domains.attendance.models.attendance_log import AttendanceLog
 from app.domains.attendance.models.attendance_session import AttendanceSession
 from app.domains.employees.models.device_user_mapping import DeviceUserMapping
 from app.domains.employees.models.employee import Employee
-from app.domains.attendance.services.punch_classification import classify_punch, summarize_day_punches
+from app.domains.attendance.services.punch_classification import summarize_day_punches
 
 _CHECK_IN_DIRECTION_CODES = ("0", "3", "4")
 _ENROLLMENT_GAP_DAYS = 30
@@ -68,53 +68,33 @@ def pair_logs_for_day(
     duplicate_window_seconds: int,
 ) -> list[tuple[AttendanceLog, AttendanceLog | None, str]]:
     """
-    Pair IN/OUT for one employee for one local calendar day.
+    Pair punches for one employee for one local calendar day.
+
+    Device punch_type is unreliable (leading early arrivals are often stored as OUT).
+    Pair chronologically: 1st→IN, 2nd→OUT, … after collapsing near-duplicate scans.
     Returns list of (check_in_log, check_out_log_or_none, status).
     """
     logs_sorted = sorted(logs, key=lambda x: x.timestamp)
-    sessions: list[tuple[AttendanceLog, AttendanceLog | None, str]] = []
-    pending_in: AttendanceLog | None = None
-    next_expects_in = True
-    duplicate_window = timedelta(seconds=duplicate_window_seconds)
+    duplicate_window = timedelta(seconds=max(duplicate_window_seconds, 0))
 
+    deduped: list[AttendanceLog] = []
     for log in logs_sorted:
-        cls = classify_punch(log.punch_type)
-        if cls is True:
-            if pending_in is not None and duplicate_window.total_seconds() > 0:
-                if log.timestamp - pending_in.timestamp <= duplicate_window:
-                    continue
-            if pending_in is not None:
-                sessions.append((pending_in, None, "missing_check_out"))
-            pending_in = log
-            next_expects_in = False
-        elif cls is False:
-            if pending_in is None:
+        if deduped and duplicate_window.total_seconds() > 0:
+            if log.timestamp - deduped[-1].timestamp <= duplicate_window:
                 continue
-            if log.timestamp <= pending_in.timestamp:
-                continue
-            if duplicate_window.total_seconds() > 0 and log.timestamp - pending_in.timestamp <= duplicate_window:
-                continue
-            sessions.append((pending_in, log, "complete"))
-            pending_in = None
-            next_expects_in = True
-        else:
-            if next_expects_in:
-                if pending_in is not None:
-                    sessions.append((pending_in, None, "missing_check_out"))
-                pending_in = log
-                next_expects_in = False
-            else:
-                if pending_in is None:
-                    next_expects_in = True
-                    continue
-                if log.timestamp <= pending_in.timestamp:
-                    continue
-                sessions.append((pending_in, log, "complete"))
-                pending_in = None
-                next_expects_in = True
+        deduped.append(log)
 
-    if pending_in is not None:
-        sessions.append((pending_in, None, "missing_check_out"))
+    sessions: list[tuple[AttendanceLog, AttendanceLog | None, str]] = []
+    for i in range(0, len(deduped), 2):
+        cin = deduped[i]
+        if i + 1 < len(deduped):
+            cout = deduped[i + 1]
+            if cout.timestamp > cin.timestamp:
+                sessions.append((cin, cout, "complete"))
+            else:
+                sessions.append((cin, None, "missing_check_out"))
+        else:
+            sessions.append((cin, None, "missing_check_out"))
 
     return sessions
 
@@ -157,7 +137,11 @@ def load_day_snapshot(
 ) -> DayAttendanceSnapshot:
     settings = settings or get_settings()
     logs = load_logs_for_employee_day(db, employee=employee, local_date=local_date, settings=settings)
-    first_in, last_out, _ = summarize_day_punches(logs, tz_name=settings.timezone)
+    first_in, last_out, _ = summarize_day_punches(
+        logs,
+        tz_name=settings.timezone,
+        duplicate_window_seconds=settings.duplicate_punch_window_seconds,
+    )
     return DayAttendanceSnapshot(
         first_check_in=first_in,
         last_check_out=last_out,
@@ -178,7 +162,11 @@ def summarize_employee_day_from_logs(
     day_logs = logs if logs is not None else load_logs_for_employee_day(
         db, employee=employee, local_date=local_date, settings=settings
     )
-    first_in, last_out, total_min = summarize_day_punches(day_logs, tz_name=settings.timezone)
+    first_in, last_out, total_min = summarize_day_punches(
+        day_logs,
+        tz_name=settings.timezone,
+        duplicate_window_seconds=settings.duplicate_punch_window_seconds,
+    )
     return first_in, last_out, total_min, len(day_logs)
 
 

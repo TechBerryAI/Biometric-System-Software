@@ -8,6 +8,7 @@ import {
   AttendanceAdjustmentModal,
   AttendanceRowEditButton,
 } from "@/features/attendance/components/AttendanceAdjustmentPanel";
+import { DayPunchesDialog } from "@/features/attendance/components/DayPunchesDialog";
 import { EmployeeAvatar } from "@/features/employees/components/EmployeeAvatar";
 import { OffboardEmployeeDialog } from "@/features/employees/components/OffboardEmployeeDialog";
 import { Button } from "@/components/ui/button";
@@ -66,6 +67,8 @@ export function EmployeeProfile() {
   const [formatDialogOpen, setFormatDialogOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [offboardOpen, setOffboardOpen] = useState(false);
+  const [punchesOpen, setPunchesOpen] = useState(false);
+  const [punchesDate, setPunchesDate] = useState<string | null>(null);
 
   const openCorrection = useCallback((row: EmployeeDailyAttendance) => {
     setCorrectionRow(row);
@@ -400,22 +403,22 @@ export function EmployeeProfile() {
                     rows.map((r, idx) => (
                       <tr
                         key={r.summary_date}
-                        role={canAdjustAttendance ? "button" : undefined}
-                        tabIndex={canAdjustAttendance ? 0 : undefined}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => {
-                          if (canAdjustAttendance) openCorrection(r);
+                          setPunchesDate(r.summary_date);
+                          setPunchesOpen(true);
                         }}
                         onKeyDown={(e) => {
-                          if (canAdjustAttendance && (e.key === "Enter" || e.key === " ")) {
+                          if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
-                            openCorrection(r);
+                            setPunchesDate(r.summary_date);
+                            setPunchesOpen(true);
                           }
                         }}
                         className={cn(
-                          "border-b border-line/40 transition-colors",
-                          idx % 2 === 1 && "bg-surface/[0.35]",
-                          canAdjustAttendance &&
-                            "cursor-pointer hover:bg-primary-soft/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+                          "border-b border-line/40 transition-colors cursor-pointer hover:bg-primary-soft/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30",
+                          idx % 2 === 1 && "bg-surface/[0.35]"
                         )}
                       >
                         <td className="px-5 py-3.5">{fmtDisplayDate(r.summary_date)}</td>
@@ -431,7 +434,7 @@ export function EmployeeProfile() {
                         </td>
                         <td className="px-5 py-3.5 tabular-nums text-ink-muted">{r.punch_count}</td>
                         {canAdjustAttendance ? (
-                          <td className="px-5 py-3.5">
+                          <td className="px-5 py-3.5" onClick={(e) => e.stopPropagation()}>
                             <AttendanceRowEditButton onClick={() => openCorrection(r)} />
                           </td>
                         ) : null}
@@ -455,6 +458,14 @@ export function EmployeeProfile() {
               }}
             />
           ) : null}
+
+          <DayPunchesDialog
+            open={punchesOpen}
+            onOpenChange={setPunchesOpen}
+            employeeId={Number.isFinite(numericEmployeeId) ? numericEmployeeId : null}
+            employeeName={employee?.name ?? "Employee"}
+            date={punchesDate ?? toDate}
+          />
         </div>
       )}
     </div>

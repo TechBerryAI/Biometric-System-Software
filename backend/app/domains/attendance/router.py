@@ -15,8 +15,18 @@ from app.core.security import Permission, require_permissions
 from app.domains.attendance.models.attendance_log import AttendanceLog
 from app.domains.attendance.models.attendance_session import AttendanceSession
 from app.domains.employees.models.employee import Employee
-from app.domains.attendance.schemas import AttendanceLogRead, AttendanceSessionRead, DailySummaryRow
-from app.domains.attendance.services.attendance_helpers import day_bounds_utc
+from app.domains.attendance.schemas import (
+    AttendanceLogRead,
+    AttendanceSessionRead,
+    DailySummaryRow,
+    DayPunchRead,
+    DayPunchesResponse,
+)
+from app.domains.attendance.services.attendance_helpers import (
+    day_bounds_utc,
+    load_logs_for_employee_day,
+    summarize_employee_day_from_logs,
+)
 from app.domains.attendance.services.daily_summary_service import compute_daily_summary, compute_daily_summaries_range
 
 router = APIRouter(
@@ -125,6 +135,66 @@ def daily_summary_range(
         )
     summaries = compute_daily_summaries_range(db, date_from, date_to, settings)
     return {d.isoformat(): rows for d, rows in summaries.items()}
+
+
+@router.get("/day-punches", response_model=DayPunchesResponse)
+def list_day_punches(
+    employee_id: int = Query(..., description="Internal employee id"),
+    punch_date: date = Query(..., alias="date", description="Local calendar date"),
+    db: Session = Depends(get_db),
+) -> DayPunchesResponse:
+    """All stored punches for one employee on one local day (In/Out are first/last distinct)."""
+    emp = db.get(Employee, employee_id)
+    if emp is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
+
+    settings = get_settings()
+    logs = load_logs_for_employee_day(db, employee=emp, local_date=punch_date, settings=settings)
+    first_in, last_out, total_min, _ = summarize_employee_day_from_logs(
+        db, employee=emp, local_date=punch_date, settings=settings, logs=logs
+    )
+
+    first_id: int | None = None
+    last_id: int | None = None
+    if first_in is not None:
+        for log in logs:
+            if log.timestamp == first_in:
+                first_id = log.id
+                break
+    if last_out is not None:
+        for log in reversed(logs):
+            if log.timestamp == last_out:
+                last_id = log.id
+                break
+
+    punches: list[DayPunchRead] = []
+    for log in logs:
+        if first_id is not None and log.id == first_id:
+            role = "in"
+        elif last_id is not None and log.id == last_id and last_id != first_id:
+            role = "out"
+        else:
+            role = "punch"
+        punches.append(
+            DayPunchRead(
+                id=log.id,
+                timestamp=log.timestamp,
+                device_id=log.device_id,
+                punch_type=log.punch_type,
+                role=role,
+            )
+        )
+
+    return DayPunchesResponse(
+        employee_id=emp.id,
+        employee_name=emp.name,
+        device_user_id=str(emp.device_user_id),
+        local_date=punch_date,
+        first_check_in=first_in,
+        last_check_out=last_out,
+        total_work_minutes=total_min,
+        punches=punches,
+    )
 
 
 @router.get("/{employee_id}", response_model=list[AttendanceSessionRead])

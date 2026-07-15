@@ -66,3 +66,22 @@ export interface DailySummaryRow {
   total_work_minutes: number | null;
   sessions_count: number;
 }
+
+export interface DayPunch {
+  id: number;
+  timestamp: string;
+  device_id: string;
+  punch_type: string;
+  role: "in" | "out" | "punch" | string;
+}
+
+export interface DayPunchesResponse {
+  employee_id: number;
+  employee_name: string;
+  device_user_id: string;
+  local_date: string;
+  first_check_in: string | null;
+  last_check_out: string | null;
+  total_work_minutes: number | null;
+  punches: DayPunch[];
+}
