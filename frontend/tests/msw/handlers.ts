@@ -64,13 +64,19 @@ export const handlers = [
   http.post(`${base}/auth/login`, async () => {
     return HttpResponse.json(mockTokens);
   }),
-  http.post(`${base}/auth/refresh`, async () => {
+  http.post(`${base}/auth/refresh`, async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { refresh_token?: string };
+    if (!body.refresh_token) {
+      return HttpResponse.json({ detail: "Missing refresh token" }, { status: 401 });
+    }
     return HttpResponse.json(mockTokens);
   }),
   http.post(`${base}/auth/logout`, async () => {
     return new HttpResponse(null, { status: 204 });
   }),
-  http.get(`${base}/auth/me`, async () => {
+  http.get(`${base}/auth/me`, async ({ request }) => {
+    const auth = request.headers.get("authorization");
+    if (!auth) return HttpResponse.json({ detail: "Unauthorized" }, { status: 401 });
     return HttpResponse.json(mockUser);
   }),
   http.put(`${base}/auth/me`, async () => {

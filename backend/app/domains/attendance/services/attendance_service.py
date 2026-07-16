@@ -113,11 +113,14 @@ def _ensure_active_mapping(
     return new_mapping.id
 
 
-def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -> int:
+def sync_employees_from_device_users(
+    db: Session, users: Sequence[DeviceUser], *, device_id: str | None = None
+) -> int:
     """Upsert device users into employees. Returns number of rows affected."""
     affected = 0
     now = datetime.now(ZoneInfo("UTC"))
     settings = get_settings()
+    resolved_device_id = device_id or settings.zk_device_id
     for u in users:
         departed = db.execute(
             select(Employee).where(
@@ -129,7 +132,7 @@ def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -
             try:
                 enqueue_delete_user_command(
                     db,
-                    device_id=settings.zk_device_id,
+                    device_id=resolved_device_id,
                     user_id=u.user_id,
                     uid=u.uid,
                     initiated_from="sync:departed_cleanup",
@@ -197,7 +200,7 @@ def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -
         _ensure_active_mapping(
             db,
             employee_uuid=emp.employee_uuid,
-            device_id=settings.zk_device_id,
+            device_id=resolved_device_id,
             device_user_id=u.user_id,
             effective_at=now,
         )
@@ -218,6 +221,9 @@ def insert_attendance_logs_idempotent(
          DUPLICATE_PUNCH_WINDOW_SECONDS across *any* device_id (twin terminal labels)
 
     Real In→Out pairs inside the window are both kept (different punch_type).
+
+    Prepared rows are inserted in chunks (ATTENDANCE_BULK_INSERT_CHUNK_SIZE)
+    via a single multi-VALUES INSERT per chunk for throughput.
     """
     rows = 0
     settings = get_settings()
@@ -229,10 +235,18 @@ def insert_attendance_logs_idempotent(
             canonical_device_id,
         )
     duplicate_window = timedelta(seconds=settings.duplicate_punch_window_seconds)
+    prepared: list[dict] = []
+    # Track near-dups within this batch so we don't need a round-trip per row.
+    batch_seen: dict[tuple[str, str], datetime] = {}
+
     for r in records:
         employee_code = r.user_id
         punch_type = device_attendance_punch_type(status=r.status, punch=r.punch)
         if duplicate_window.total_seconds() > 0:
+            batch_key = (employee_code, punch_type)
+            prev_batch = batch_seen.get(batch_key)
+            if prev_batch is not None and abs((r.timestamp - prev_batch).total_seconds()) <= duplicate_window.total_seconds():
+                continue
             existing_near_duplicate = db.execute(
                 select(AttendanceLog.id).where(
                     AttendanceLog.employee_code == employee_code,
@@ -250,28 +264,37 @@ def insert_attendance_logs_idempotent(
                     punch_type,
                 )
                 continue
+            batch_seen[batch_key] = r.timestamp
         mapping = _resolve_mapping_for_punch(
             db,
             device_id=canonical_device_id,
             device_user_id=employee_code,
             at_time=r.timestamp,
         )
+        prepared.append(
+            {
+                "employee_code": employee_code,
+                "timestamp": r.timestamp,
+                "device_id": canonical_device_id,
+                "employee_uuid": mapping.employee_uuid if mapping else None,
+                "device_mapping_id": mapping.id if mapping else None,
+                "punch_type": punch_type,
+            }
+        )
+
+    chunk_size = settings.attendance_bulk_insert_chunk_size
+    for i in range(0, len(prepared), chunk_size):
+        chunk = prepared[i : i + chunk_size]
+        if not chunk:
+            continue
         stmt = (
             pg_insert(AttendanceLog)
-            .values(
-                employee_code=employee_code,
-                timestamp=r.timestamp,
-                device_id=canonical_device_id,
-                employee_uuid=mapping.employee_uuid if mapping else None,
-                device_mapping_id=mapping.id if mapping else None,
-                punch_type=punch_type,
-            )
+            .values(chunk)
             .on_conflict_do_nothing(index_elements=["device_id", "employee_code", "timestamp"])
             .returning(AttendanceLog.id)
         )
         res = db.execute(stmt)
-        if res.scalar_one_or_none() is not None:
-            rows += 1
+        rows += len(res.scalars().all())
     db.commit()
     return rows
 
@@ -336,6 +359,7 @@ def run_device_sync(
     settings: Settings | None = None,
     *,
     full_resync: bool = False,
+    device_id: str | None = None,
 ) -> tuple[int, int, int]:
     """
     Fetch attendance from device, insert logs, backfill employees, rebuild sessions.
@@ -346,21 +370,22 @@ def run_device_sync(
     from app.domains.devices.services.device_command_service import wait_for_correction_commands_clear
 
     settings = settings or get_settings()
-    if not wait_for_correction_commands_clear(db, settings.zk_device_id, settings=settings):
+    resolved_device_id = device_id or settings.zk_device_id
+    if not wait_for_correction_commands_clear(db, resolved_device_id, settings=settings):
         logger.warning(
             "Deferring device sync: CORRECT_ATTENDANCE still active for device %s",
-            settings.zk_device_id,
+            resolved_device_id,
         )
         return 0, 0, 0
     device = device or DeviceService(settings=settings)
-    floor = None if full_resync else _incremental_sync_floor(db, device_id=settings.zk_device_id, settings=settings)
+    floor = None if full_resync else _incremental_sync_floor(db, device_id=resolved_device_id, settings=settings)
     fetched_records = device.fetch_attendance()
     if floor is not None:
         fetched_records = [row for row in fetched_records if row.timestamp >= floor]
     records = _dedupe_device_records(fetched_records, settings=settings)
 
     tz = ZoneInfo(settings.timezone)
-    protected_days = load_corrected_employee_days(db, device_id=settings.zk_device_id)
+    protected_days = load_corrected_employee_days(db, device_id=resolved_device_id)
     if protected_days:
         before_count = len(records)
         records = [
@@ -376,7 +401,7 @@ def run_device_sync(
                 len(protected_days),
             )
 
-    n = insert_attendance_logs_idempotent(db, records, settings.zk_device_id)
+    n = insert_attendance_logs_idempotent(db, records, resolved_device_id)
     placeholders = backfill_employees_from_orphan_logs(db)
 
     today = datetime.now(tz).date()
@@ -431,12 +456,15 @@ def run_user_sync(
     db: Session,
     device: DeviceService | None = None,
     settings: Settings | None = None,
+    *,
+    device_id: str | None = None,
 ) -> tuple[int, int]:
     """Fetch users from device and insert new employees."""
     settings = settings or get_settings()
+    resolved_device_id = device_id or settings.zk_device_id
     device = device or DeviceService(settings=settings)
     users = device.fetch_users()
-    inserted = sync_employees_from_device_users(db, users)
+    inserted = sync_employees_from_device_users(db, users, device_id=resolved_device_id)
     return len(users), inserted
 
 

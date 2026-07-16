@@ -17,8 +17,16 @@ class Settings(BaseSettings):
     )
 
     app_name: str = Field(default="Biometric Attendance API", alias="APP_NAME")
+    environment: str = Field(default="development", alias="ENVIRONMENT")
     debug: bool = Field(default=False, alias="DEBUG")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    json_logs: bool = Field(default=True, alias="JSON_LOGS")
+    otel_enabled: bool = Field(default=False, alias="OTEL_ENABLED")
+    otel_service_name: str = Field(default="biometric-api", alias="OTEL_SERVICE_NAME")
+    otel_exporter_otlp_endpoint: str = Field(
+        default="http://localhost:4318/v1/traces",
+        alias="OTEL_EXPORTER_OTLP_ENDPOINT",
+    )
     cors_allow_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173,http://frontend:5173",
         alias="CORS_ALLOW_ORIGINS",
@@ -95,8 +103,45 @@ class Settings(BaseSettings):
     auth_enabled: bool = Field(default=True, alias="AUTH_ENABLED")
     auth_bootstrap_admin_email: str | None = Field(default=None, alias="AUTH_BOOTSTRAP_ADMIN_EMAIL")
     auth_bootstrap_admin_password: str | None = Field(default=None, alias="AUTH_BOOTSTRAP_ADMIN_PASSWORD")
+
+    deployment_mode: str = Field(default="saas", alias="DEPLOYMENT_MODE")
+    default_tenant_id: int = Field(default=1, alias="DEFAULT_TENANT_ID")
+    auth_cookie_enabled: bool = Field(default=True, alias="AUTH_COOKIE_ENABLED")
+    auth_cookie_only: bool = Field(default=False, alias="AUTH_COOKIE_ONLY")
+    csrf_enabled: bool = Field(default=True, alias="CSRF_ENABLED")
+    encryption_key: str | None = Field(default=None, alias="ENCRYPTION_KEY")
+    database_read_url: str | None = Field(default=None, alias="DATABASE_READ_URL")
+    db_pool_size: int = Field(default=10, ge=1, le=100, alias="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=20, ge=0, le=200, alias="DB_MAX_OVERFLOW")
+    db_pool_recycle_seconds: int = Field(default=1800, ge=60, le=7200, alias="DB_POOL_RECYCLE_SECONDS")
+    attendance_archive_retention_days: int = Field(
+        default=365,
+        ge=30,
+        le=3650,
+        alias="ATTENDANCE_ARCHIVE_RETENTION_DAYS",
+    )
+    attendance_archive_delete: bool = Field(default=False, alias="ATTENDANCE_ARCHIVE_DELETE")
+    attendance_bulk_insert_chunk_size: int = Field(
+        default=500,
+        ge=50,
+        le=5000,
+        alias="ATTENDANCE_BULK_INSERT_CHUNK_SIZE",
+    )
+    dashboard_cache_ttl_seconds: int = Field(default=60, ge=5, le=3600, alias="DASHBOARD_CACHE_TTL_SECONDS")
+    gateway_max_connectors: int = Field(default=200, ge=10, le=5000, alias="GATEWAY_MAX_CONNECTORS")
+    gateway_idle_ttl_seconds: int = Field(default=600, ge=30, le=86400, alias="GATEWAY_IDLE_TTL_SECONDS")
+    gateway_sync_semaphore: int = Field(default=8, ge=1, le=64, alias="GATEWAY_SYNC_SEMAPHORE")
+    redis_lock_urls: str = Field(default="", alias="REDIS_LOCK_URLS")
+    feature_flags: str = Field(
+        default="",
+        alias="FEATURE_FLAGS",
+        description="Comma-separated overrides, e.g. ai_insights=false,mfa_enforcement=true",
+    )
+    mfa_required: bool = Field(default=False, alias="MFA_REQUIRED")
     login_attempt_window_seconds: int = Field(default=900, ge=60, le=86400, alias="LOGIN_ATTEMPT_WINDOW_SECONDS")
     login_attempt_max: int = Field(default=5, ge=3, le=50, alias="LOGIN_ATTEMPT_MAX")
+    api_rate_limit_window_seconds: int = Field(default=60, ge=10, le=3600, alias="API_RATE_LIMIT_WINDOW_SECONDS")
+    api_rate_limit_max: int = Field(default=120, ge=10, le=10000, alias="API_RATE_LIMIT_MAX")
 
     command_queue_batch_size: int = Field(default=25, ge=1, le=250, alias="COMMAND_QUEUE_BATCH_SIZE")
     command_max_retries: int = Field(default=10, ge=1, le=20, alias="COMMAND_MAX_RETRIES")

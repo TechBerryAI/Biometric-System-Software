@@ -13,6 +13,7 @@ import { Profile } from "@/features/settings/pages/ProfilePage";
 import { Reports } from "@/features/reports/pages/ReportsPage";
 import { Audit } from "@/features/audit/pages/AuditPage";
 import { Settings } from "@/features/settings/pages/SettingsPage";
+import { RealtimeMonitoring } from "@/features/monitoring/pages/RealtimeMonitoringPage";
 
 function HomeRoute() {
   const { can } = useAuth();
@@ -79,6 +80,14 @@ export default function App() {
                   element={
                     <RequireAuth permission="anomaly:manage">
                       <Reports />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/monitoring"
+                  element={
+                    <RequireAuth permission="reports:read">
+                      <RealtimeMonitoring />
                     </RequireAuth>
                   }
                 />

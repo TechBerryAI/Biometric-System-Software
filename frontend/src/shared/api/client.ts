@@ -1,5 +1,6 @@
 import axios from "axios";
 import { API_BASE_URL } from "@/config/api";
+import { getSelectedTenantId } from "@/stores/tenant-store";
 
 const baseURL = API_BASE_URL;
 
@@ -7,12 +8,14 @@ export const api = axios.create({
   baseURL,
   headers: { "Content-Type": "application/json" },
   timeout: 30000,
+  withCredentials: true,
 });
 
 export const rawApi = axios.create({
   baseURL,
   headers: { "Content-Type": "application/json" },
   timeout: 30000,
+  withCredentials: true,
 });
 
 let accessToken: string | null = null;
@@ -30,11 +33,36 @@ export function registerTokenRefreshHandler(handler: () => Promise<string | null
   refreshHandler = handler;
 }
 
-api.interceptors.request.use((config) => {
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function attachSecurityHeaders(config: Record<string, unknown>) {
   if (accessToken) {
-    config.headers = config.headers ?? {};
-    config.headers.Authorization = `Bearer ${accessToken}`;
+    config.Authorization = `Bearer ${accessToken}`;
+  } else {
+    delete config.Authorization;
   }
+  const csrf = readCookie("csrf_token");
+  if (csrf) {
+    config["X-CSRF-Token"] = csrf;
+  }
+  const tenantId = getSelectedTenantId();
+  if (tenantId != null) {
+    config["x-tenant-id"] = String(tenantId);
+  }
+  return config;
+}
+
+api.interceptors.request.use((config) => {
+  config.headers = attachSecurityHeaders(config.headers ?? {});
+  return config;
+});
+
+rawApi.interceptors.request.use((config) => {
+  config.headers = attachSecurityHeaders(config.headers ?? {});
   return config;
 });
 
@@ -46,9 +74,10 @@ api.interceptors.response.use(
     if (!original || original._retry || !refreshHandler) throw error;
     original._retry = true;
     const token = await refreshHandler();
-    if (!token) throw error;
-    original.headers = original.headers ?? {};
-    original.headers.Authorization = `Bearer ${token}`;
+    if (token) {
+      original.headers = original.headers ?? {};
+      original.headers.Authorization = `Bearer ${token}`;
+    }
     return api.request(original);
   }
 );

@@ -11,6 +11,9 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-key-not-for-prod")
 os.environ.setdefault("AUTH_BOOTSTRAP_ADMIN_EMAIL", "bootstrap@example.com")
 os.environ.setdefault("AUTH_BOOTSTRAP_ADMIN_PASSWORD", "Bootstrap123!")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
+os.environ.setdefault("ENCRYPTION_KEY", "test-encryption-key-not-for-prod")
+os.environ.setdefault("CSRF_ENABLED", "false")
+os.environ.setdefault("AUTH_COOKIE_ENABLED", "false")
 os.environ.setdefault("XAI_API_KEY", "")
 os.environ.setdefault("DEVICE_AUTO_SYNC_ENABLED", "false")
 
@@ -28,11 +31,16 @@ from app.core.security import create_access_token
 from app.models import (  # noqa: F401 — register metadata
     AttendanceLog,
     AttendanceSession,
+    AttendanceArchiveRun,
+    IdempotencyKey,
     Device,
     DeviceCommand,
+    DeviceSyncState,
+    DeviceUserDrift,
     DeviceUserMapping,
     Employee,
     RefreshToken,
+    AuditEvent,
     SystemControlState,
     User,
 )

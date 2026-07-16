@@ -1,7 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { hasPermission, type Permission, type UserRole } from "./permissions";
 import { clearApiAuth, configureApiAuth, registerTokenRefreshHandler } from "@/shared/api/client";
-import { fetchCurrentUser, loginWithPassword, logoutSession, refreshSession, type AuthTokens } from "@/features/auth/api";
+import {
+  fetchCurrentUser,
+  loginWithPassword,
+  logoutSession,
+  refreshSession,
+  verifyMfaLogin,
+  type AuthTokens,
+  type LoginChallengeResponse,
+} from "@/features/auth/api";
 
 type SessionUser = {
   user_uuid: string;
@@ -12,15 +20,16 @@ type SessionUser = {
 };
 
 type SessionState = {
-  accessToken: string;
-  refreshToken: string;
-  refreshExpiresAt: string;
+  accessToken?: string;
+  refreshToken?: string;
+  refreshExpiresAt?: string;
+  cookieAuth?: boolean;
 };
 
 type AuthContextValue = {
   user: SessionUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, mfaCode?: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   applyAuthTokens: (tokens: AuthTokens) => void;
@@ -35,7 +44,7 @@ function readStoredSession(): SessionState | null {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SessionState;
-    if (!parsed.accessToken || !parsed.refreshToken) return null;
+    if (!parsed.accessToken && !parsed.refreshToken && !parsed.cookieAuth) return null;
     return parsed;
   } catch {
     return null;
@@ -43,11 +52,25 @@ function readStoredSession(): SessionState | null {
 }
 
 function persistSession(session: SessionState | null) {
-  if (!session) {
+  if (!session || (!session.accessToken && !session.refreshToken && !session.cookieAuth)) {
     localStorage.removeItem(SESSION_KEY);
     return;
   }
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+
+function tokensToSession(tokens: AuthTokens): SessionState {
+  const cookieAuth = !tokens.access_token && !tokens.refresh_token;
+  return {
+    accessToken: tokens.access_token ?? undefined,
+    refreshToken: tokens.refresh_token ?? undefined,
+    refreshExpiresAt: tokens.refresh_expires_at ?? undefined,
+    cookieAuth,
+  };
+}
+
+function isLoginChallenge(value: AuthTokens | LoginChallengeResponse): value is LoginChallengeResponse {
+  return "challenge_token" in value && value.mfa_required === true;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -58,26 +81,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const applySession = useCallback((next: SessionState | null) => {
     setSession(next);
     persistSession(next);
-    if (next) configureApiAuth(next.accessToken);
-    else clearApiAuth();
+    if (next?.accessToken) configureApiAuth(next.accessToken);
+    else if (!next?.cookieAuth) clearApiAuth();
   }, []);
 
   const tryRefresh = useCallback(async () => {
-    if (!session?.refreshToken) return false;
-    const refreshed = await refreshSession(session.refreshToken);
+    const refreshed = await refreshSession(session?.refreshToken);
     if (!refreshed) return false;
-    applySession({
-      accessToken: refreshed.access_token,
-      refreshToken: refreshed.refresh_token,
-      refreshExpiresAt: refreshed.refresh_expires_at,
-    });
+    const next = tokensToSession(refreshed);
+    applySession(next.accessToken || next.refreshToken || next.cookieAuth ? next : { cookieAuth: true });
     return true;
   }, [applySession, session?.refreshToken]);
 
   useEffect(() => {
     registerTokenRefreshHandler(async () => {
       const refreshed = await tryRefresh();
-      return refreshed ? readStoredSession()?.accessToken ?? null : null;
+      if (!refreshed) return null;
+      return readStoredSession()?.accessToken ?? null;
     });
   }, [tryRefresh]);
 
@@ -85,29 +105,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const init = async () => {
       const stored = readStoredSession();
-      if (!stored) {
-        setLoading(false);
-        return;
-      }
-      applySession(stored);
+      if (stored?.accessToken) applySession(stored);
+      else clearApiAuth();
+
       let me = await fetchCurrentUser();
-      if (!me) {
+      if (!me && stored?.refreshToken) {
         const refreshed = await refreshSession(stored.refreshToken);
-        if (!refreshed) {
-          applySession(null);
-          if (!cancelled) setUser(null);
-          setLoading(false);
-          return;
+        if (refreshed) {
+          applySession(tokensToSession(refreshed));
+          me = await fetchCurrentUser();
         }
-        const next = {
-          accessToken: refreshed.access_token,
-          refreshToken: refreshed.refresh_token,
-          refreshExpiresAt: refreshed.refresh_expires_at,
-        };
-        applySession(next);
-        me = await fetchCurrentUser();
       }
-      if (!cancelled) setUser(me as SessionUser);
+      if (!me && stored?.cookieAuth) {
+        const refreshed = await refreshSession();
+        if (refreshed) {
+          applySession(tokensToSession(refreshed));
+          me = await fetchCurrentUser();
+        }
+      }
+      if (!me && stored) applySession(null);
+      if (!cancelled) setUser(me as SessionUser | null);
       setLoading(false);
     };
     init();
@@ -117,14 +134,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applySession]);
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      const tokens = await loginWithPassword(email, password);
-      const nextSession = {
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        refreshExpiresAt: tokens.refresh_expires_at,
-      };
-      applySession(nextSession);
+    async (email: string, password: string, mfaCode?: string) => {
+      const result = await loginWithPassword(email, password, mfaCode);
+      if (isLoginChallenge(result)) {
+        throw new Error("MFA verification required. Provide an authenticator code.");
+      }
+      applySession(tokensToSession(result));
       const me = await fetchCurrentUser();
       if (!me) throw new Error("Could not load current user after login.");
       setUser(me as SessionUser);
@@ -133,8 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    const refreshToken = session?.refreshToken;
-    if (refreshToken) await logoutSession(refreshToken);
+    await logoutSession(session?.refreshToken);
     applySession(null);
     setUser(null);
   }, [applySession, session?.refreshToken]);
@@ -150,11 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const applyAuthTokens = useCallback(
     (tokens: AuthTokens) => {
-      applySession({
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        refreshExpiresAt: tokens.refresh_expires_at,
-      });
+      applySession(tokensToSession(tokens));
     },
     [applySession]
   );
@@ -188,3 +198,5 @@ export function useAuth() {
   if (!context) throw new Error("useAuth must be used inside AuthProvider");
   return context;
 }
+
+export { verifyMfaLogin };

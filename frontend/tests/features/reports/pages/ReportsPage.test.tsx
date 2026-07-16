@@ -13,7 +13,7 @@ vi.mock("@/features/attendance/hooks/useAttendanceTrend", () => ({
 
 describe("FE-UNIT-REP-001 Reports page", () => {
   it("renders reports heading and export card", () => {
-    renderWithProviders(<Reports />, { withAuth: false, route: "/reports" });
+    renderWithProviders(<Reports />, { withAuth: true, route: "/reports" });
     expect(screen.getByRole("heading", { name: /reports/i })).toBeInTheDocument();
     expect(screen.getByText(/report export/i)).toBeInTheDocument();
   });

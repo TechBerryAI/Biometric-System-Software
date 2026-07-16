@@ -67,6 +67,8 @@ def make_device(
     port: int = 4370,
     health_status: str = "ONLINE",
     mode: str = "NORMAL",
+    connectivity_mode: str = "pull",
+    branch_id: str | None = None,
 ) -> Device:
     return Device(
         name=name,
@@ -75,6 +77,8 @@ def make_device(
         health_status=health_status,
         mode=mode,
         active=True,
+        connectivity_mode=connectivity_mode,
+        branch_id=branch_id,
     )
 
 

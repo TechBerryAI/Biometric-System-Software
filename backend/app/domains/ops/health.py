@@ -18,6 +18,11 @@ from app.domains.devices.models.device import Device
 from app.domains.devices.models.device_command import DeviceCommand, DeviceCommandStatus
 from app.domains.devices.services.device_registry_service import ensure_default_device, update_device_health
 from app.domains.devices.services.device_service import DeviceService
+from app.domains.ops.services.sync_state_metrics import (
+    count_reconciliation_completed,
+    count_reconciliation_pending,
+    sum_lock_contention_events,
+)
 
 router = APIRouter(tags=["health"])
 settings = get_settings()
@@ -120,14 +125,14 @@ def health_queue(db: Session = Depends(get_db)) -> dict[str, int]:
         "stale_commands": int(stale_commands),
         "dead_letter_commands": int(dead_letter),
         "verification_failures": int(verification_failures),
-        "reconciliation_pending": 0,
-        "lock_contention_events": 0,
+        "reconciliation_pending": count_reconciliation_pending(db),
+        "lock_contention_events": sum_lock_contention_events(db),
     }
 
 
 @router.get("/health/reconciliation", dependencies=[Depends(require_permissions(Permission.METRICS_READ))])
-def health_reconciliation() -> dict[str, int]:
+def health_reconciliation(db: Session = Depends(get_db)) -> dict[str, int]:
     return {
-        "pending_jobs": 0,
-        "completed_jobs": 0,
+        "pending_jobs": count_reconciliation_pending(db),
+        "completed_jobs": count_reconciliation_completed(db),
     }

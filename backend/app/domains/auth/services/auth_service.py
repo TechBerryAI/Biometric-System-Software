@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from redis import Redis
@@ -32,6 +33,12 @@ ALLOWED_APP_ROLES = {
 
 def _utcnow() -> datetime:
     return datetime.now(ZoneInfo("UTC"))
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=ZoneInfo("UTC"))
+    return value.astimezone(ZoneInfo("UTC"))
 
 
 class LoginRateLimiter:
@@ -97,33 +104,62 @@ def authenticate_user(db: Session, email: str, password: str) -> User | None:
     return user
 
 
-def issue_session_tokens(db: Session, user: User) -> tuple[str, str, datetime]:
+def issue_session_tokens(
+    db: Session,
+    user: User,
+    *,
+    family_id: str | None = None,
+) -> tuple[str, str, datetime]:
     settings = get_settings()
     access_token, _ = create_access_token(user_uuid=user.user_uuid, role=user.role, email=user.email)
     refresh_token = generate_refresh_token()
     refresh_expiry = _utcnow() + timedelta(days=settings.refresh_token_expire_days)
+    token_family = family_id or str(uuid4())
     db.add(
         RefreshToken(
             user_id=user.id,
             token_hash=hash_refresh_token(refresh_token),
             expires_at=refresh_expiry,
             revoked=False,
+            family_id=token_family,
         )
     )
     user.last_login = _utcnow()
     return access_token, refresh_token, refresh_expiry
 
 
+def _revoke_token_family(db: Session, family_id: str) -> None:
+    now = _utcnow()
+    tokens = db.execute(
+        select(RefreshToken).where(RefreshToken.family_id == family_id, RefreshToken.revoked.is_(False))
+    ).scalars()
+    for token in tokens:
+        token.revoked = True
+        token.revoked_at = now
+
+
 def rotate_refresh_token(db: Session, raw_refresh_token: str) -> tuple[User, str, str, datetime] | None:
     token_hash = hash_refresh_token(raw_refresh_token)
     refresh = db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash)).scalar_one_or_none()
-    if refresh is None or refresh.revoked or refresh.expires_at <= _utcnow():
+    if refresh is None:
         return None
+
+    if refresh.revoked:
+        if refresh.family_id:
+            _revoke_token_family(db, refresh.family_id)
+            db.flush()
+        return None
+
+    if _as_utc(refresh.expires_at) <= _as_utc(_utcnow()):
+        return None
+
     user = db.get(User, refresh.user_id)
     if user is None or not user.active:
         return None
+
     refresh.revoked = True
-    access_token, new_refresh, refresh_expiry = issue_session_tokens(db, user)
+    refresh.revoked_at = _utcnow()
+    access_token, new_refresh, refresh_expiry = issue_session_tokens(db, user, family_id=refresh.family_id)
     return user, access_token, new_refresh, refresh_expiry
 
 
@@ -133,6 +169,7 @@ def revoke_refresh_token(db: Session, raw_refresh_token: str) -> bool:
     if refresh is None:
         return False
     refresh.revoked = True
+    refresh.revoked_at = _utcnow()
     return True
 
 
@@ -143,6 +180,7 @@ def revoke_all_user_refresh_tokens(db: Session, user_id: int) -> int:
     count = 0
     for token in tokens:
         token.revoked = True
+        token.revoked_at = _utcnow()
         count += 1
     return count
 

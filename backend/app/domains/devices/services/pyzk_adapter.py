@@ -11,6 +11,7 @@ from zk import ZK
 from zk.exception import ZKError
 
 from app.core.config import Settings
+from app.domains.devices.connection import DeviceConnectionConfig
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -19,17 +20,26 @@ T = TypeVar("T")
 class PyZKAdapter:
     """Isolate unstable pyzk behavior behind bounded retries and parsing guards."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings | None = None, *, connection: DeviceConnectionConfig | None = None) -> None:
         self._settings = settings
+        self._connection = connection
+
+    def _resolve_connection(self) -> DeviceConnectionConfig:
+        if self._connection is not None:
+            return self._connection
+        from app.core.config import get_settings
+
+        return DeviceConnectionConfig.from_settings(self._settings or get_settings())
 
     def _make_zk(self) -> ZK:
+        conn = self._resolve_connection()
         return ZK(
-            self._settings.zk_device_ip,
-            port=self._settings.zk_device_port,
-            timeout=self._settings.zk_device_timeout_seconds,
-            password=self._settings.zk_device_password,
-            force_udp=self._settings.zk_force_udp,
-            ommit_ping=self._settings.zk_omit_ping,
+            conn.ip_address,
+            port=conn.port,
+            timeout=conn.timeout_seconds,
+            password=conn.password,
+            force_udp=conn.force_udp,
+            ommit_ping=conn.omit_ping,
         )
 
     def run(self, operation_name: str, callback: Callable[[Any], T], *, max_attempts: int = 3) -> T:

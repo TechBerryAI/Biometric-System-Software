@@ -16,6 +16,7 @@ class Device(Base):
     __tablename__ = "devices"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     device_uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid4()))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     ip_address: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -30,4 +31,11 @@ class Device(Base):
     health_status: Mapped[str] = mapped_column(String(32), nullable=False, default="UNKNOWN", server_default="UNKNOWN")
     mode: Mapped[str] = mapped_column(String(16), nullable=False, default="NORMAL", server_default="NORMAL", index=True)
     quarantine_reason: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    branch_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    connectivity_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pull", server_default="pull", index=True
+    )
+    offline_buffer: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    device_secret_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    config_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

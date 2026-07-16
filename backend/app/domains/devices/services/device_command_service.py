@@ -22,9 +22,11 @@ from app.core import device_policy
 from app.core.operator_access import is_operator_account
 from app.core.redis_keys import with_namespace
 from app.domains.devices.models.device_command import DeviceCommand, DeviceCommandStatus
+from app.domains.devices.models.device import Device
 from app.domains.auth.models.user import User
 from app.shared.device_exceptions import DeviceLockContentionError
 from app.domains.devices.services.device_service import DeviceService
+from app.domains.devices.connection import DeviceConnectionConfig
 from app.domains.ops.services.system_governance_service import assert_device_write_allowed
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,16 @@ _CORRECTION_ACTIVE_STATUSES = frozenset(
         DeviceCommandStatus.VERIFYING.value,
     }
 )
+
+
+def _append_status_history(command: DeviceCommand, status: str, *, detail: str | None = None) -> None:
+    history = list(command.status_history or [])
+    entry: dict[str, Any] = {"status": status, "at": _utcnow().isoformat()}
+    if detail:
+        entry["detail"] = detail
+    history.append(entry)
+    # Keep last 50 transitions to bound JSON growth.
+    command.status_history = history[-50:]
 
 
 def device_has_active_correction_commands(db: Session, device_id: str) -> bool:
@@ -260,9 +272,34 @@ def enqueue_device_command(
         verification_status=None,
         verification_details=None,
         next_attempt_at=_utcnow(),
+        status_history=[{"status": DeviceCommandStatus.PENDING.value, "at": _utcnow().isoformat()}],
     )
     db.add(command)
     db.flush()
+    # Extend audit trail for enroll/delete and other device writes.
+    try:
+        from app.domains.audit.services.audit_service import record_audit_event
+        from app.domains.auth.models.user import User as AuthUser
+
+        actor = None
+        if created_by:
+            actor = db.execute(select(AuthUser).where(AuthUser.user_uuid == created_by)).scalar_one_or_none()
+        event = record_audit_event(
+            db,
+            action=f"device_command.{command_type.lower()}",
+            actor=actor,
+            resource_type="device_command",
+            resource_id=command.command_uuid,
+            metadata={
+                "device_id": device_id,
+                "command_type": command_type,
+                "initiated_from": initiated_from,
+            },
+        )
+        command.audit_event_uuid = event.event_uuid
+        db.flush()
+    except Exception:  # noqa: BLE001
+        logger.debug("device_command audit recording skipped", exc_info=True)
     return command
 
 
@@ -575,6 +612,13 @@ def _mark_correction_failed_if_needed(db: Session, command: DeviceCommand, *, er
     )
 
 
+def _device_service_for_command(db: Session, command: DeviceCommand, settings: Settings) -> DeviceService:
+    device = db.execute(select(Device).where(Device.name == command.device_id)).scalar_one_or_none()
+    if device is not None:
+        return DeviceService(connection=DeviceConnectionConfig.from_device(device, settings))
+    return DeviceService(settings=settings)
+
+
 def process_command(
     db: Session,
     command: DeviceCommand,
@@ -587,6 +631,7 @@ def process_command(
     if command.status in (DeviceCommandStatus.PENDING.value, DeviceCommandStatus.RETRYING.value):
         now = _utcnow()
         command.status = DeviceCommandStatus.RUNNING.value
+        _append_status_history(command, DeviceCommandStatus.RUNNING.value)
         command.started_at = command.started_at or now
         command.heartbeat_at = now
     if not device_policy.DEVICE_WRITES_ENABLED:
@@ -628,7 +673,7 @@ def process_command(
             _mark_correction_failed_if_needed(db, command, error_message=command.last_error)
         return
 
-    device_service = DeviceService(settings=settings)
+    device_service = _device_service_for_command(db, command, settings)
     lock_heartbeat = _LockHeartbeat(
         lock,
         period_seconds=settings.command_heartbeat_seconds,
@@ -671,7 +716,7 @@ def process_command(
                 )
             return
 
-        if command.command_type == "DELETE_USER":
+        if command.command_type == "DELETE_USER" or command.command_type == "REMOTE_DELETE":
             if command.retries > 0 and _recover_if_delete_already_applied(
                 command=command,
                 device_service=device_service,
@@ -704,6 +749,73 @@ def process_command(
             command.completed_at = _utcnow()
             command.last_error = None
             return
+
+            command.last_error = None
+            return
+
+        if command.command_type == "RESTART":
+            device_service.restart_device()
+            command.status = DeviceCommandStatus.SUCCESS.value
+            command.completed_at = _utcnow()
+            command.last_error = None
+            return
+
+        if command.command_type == "SYNC_TIME":
+            synced_at = device_service.sync_device_time()
+            command.verification_details = {"synced_at": synced_at.isoformat()}
+            command.status = DeviceCommandStatus.SUCCESS.value
+            command.completed_at = _utcnow()
+            command.last_error = None
+            return
+
+        if command.command_type == "REMOTE_CONFIG":
+            config = payload.get("config") or payload
+            applied = device_service.apply_remote_config(dict(config))
+            command.verification_details = {"applied": applied}
+            command.status = DeviceCommandStatus.SUCCESS.value
+            command.completed_at = _utcnow()
+            command.last_error = None
+            return
+
+        if command.command_type == "FIRMWARE_CHECK":
+            fingerprint = device_service.detect_firmware_fingerprint()
+            command.verification_details = fingerprint
+            command.firmware_profile = str(fingerprint.get("firmware_version") or "unknown")
+            command.status = DeviceCommandStatus.SUCCESS.value
+            command.completed_at = _utcnow()
+            command.last_error = None
+            return
+
+        if command.command_type == "FORCE_SYNC":
+            from app.domains.attendance.services.attendance_service import run_device_sync, run_user_sync
+
+            full_resync = bool(payload.get("full_resync", True))
+            users_fetched, users_upserted = run_user_sync(
+                db, device=device_service, settings=settings, device_id=command.device_id
+            )
+            fetched, inserted, placeholders = run_device_sync(
+                db,
+                device=device_service,
+                settings=settings,
+                full_resync=full_resync,
+                device_id=command.device_id,
+            )
+            command.verification_details = {
+                "users_fetched": users_fetched,
+                "users_upserted": users_upserted,
+                "fetched": fetched,
+                "inserted": inserted,
+                "placeholder_employees": placeholders,
+            }
+            command.status = DeviceCommandStatus.SUCCESS.value
+            command.completed_at = _utcnow()
+            command.last_error = None
+            return
+
+        if command.command_type == "REMOTE_ENROLL":
+            enroll_payload = dict(payload)
+            enroll_payload.setdefault("name", enroll_payload.get("name") or enroll_payload.get("user_id"))
+            payload = enroll_payload
 
         # UPSERT_USER (default path for remaining allowlisted write commands)
         if command.retries > 0 and _recover_if_already_applied(

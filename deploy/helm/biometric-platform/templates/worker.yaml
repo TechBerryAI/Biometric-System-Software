@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "biometric-platform.fullname" . }}-worker
+spec:
+  replicas: {{ .Values.replicaCount.worker }}
+  selector:
+    matchLabels:
+      app: worker
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: worker
+        release: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.image.worker.repository }}:{{ .Values.image.worker.tag }}"
+          imagePullPolicy: {{ .Values.image.worker.pullPolicy }}
+          command:
+            - celery
+            - -A
+            - app.workers.celery_app:celery_app
+            - worker
+            - --loglevel=INFO
+            - -Q
+            - attendance
+          env:
+            - name: DATABASE_URL
+              value: {{ include "biometric-platform.databaseUrl" . | quote }}
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "biometric-platform.fullname" . }}-config
+                  key: REDIS_URL
+            - name: ENVIRONMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "biometric-platform.fullname" . }}-config
+                  key: ENVIRONMENT
+            - name: JSON_LOGS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "biometric-platform.fullname" . }}-config
+                  key: JSON_LOGS
+          resources:
+            {{- toYaml .Values.resources.worker | nindent 12 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "biometric-platform.fullname" . }}-beat
+spec:
+  replicas: {{ .Values.replicaCount.beat }}
+  selector:
+    matchLabels:
+      app: beat
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: beat
+        release: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: beat
+          image: "{{ .Values.image.worker.repository }}:{{ .Values.image.worker.tag }}"
+          imagePullPolicy: {{ .Values.image.worker.pullPolicy }}
+          command:
+            - celery
+            - -A
+            - app.workers.celery_app:celery_app
+            - beat
+            - --loglevel=INFO
+          env:
+            - name: DATABASE_URL
+              value: {{ include "biometric-platform.databaseUrl" . | quote }}
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "biometric-platform.fullname" . }}-config
+                  key: REDIS_URL
+            - name: ENVIRONMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "biometric-platform.fullname" . }}-config
+                  key: ENVIRONMENT
+            - name: JSON_LOGS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "biometric-platform.fullname" . }}-config
+                  key: JSON_LOGS
+          resources:
+            {{- toYaml .Values.resources.beat | nindent 12 }}

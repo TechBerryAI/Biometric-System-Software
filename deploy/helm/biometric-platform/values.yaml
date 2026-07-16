@@ -1,0 +1,48 @@
+replicaCount:
+  api: 2
+  worker: 1
+  beat: 1
+  frontend: 2
+
+image:
+  api:
+    repository: biometric-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  worker:
+    repository: biometric-worker
+    tag: latest
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: biometric-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: nginx
+  host: attendance.example.com
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 20m
+
+postgres:
+  storage: 10Gi
+  database: biometric
+  user: biometric
+
+config:
+  environment: staging
+  jsonLogs: true
+  otelEnabled: false
+  corsAllowOrigins: https://attendance.example.com
+
+secrets:
+  postgresPassword: change-me
+  jwtSecretKey: change-me
+  encryptionKey: change-me-32-char-minimum-secret
+
+resources:
+  api: {}
+  worker: {}
+  beat: {}
+  frontend: {}

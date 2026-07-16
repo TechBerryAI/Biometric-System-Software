@@ -26,6 +26,24 @@ def count_incomplete_attendance_days(
     tz_name = settings.timezone
     tz = ZoneInfo(tz_name)
     start = datetime.now(tz) - timedelta(days=max(lookback_days, 1))
+    dialect = db.get_bind().dialect.name
+    if dialect == "sqlite":
+        row = db.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM (
+                  SELECT employee_code, date(timestamp) AS d, MAX(timestamp) AS last_ts
+                  FROM attendance_logs
+                  WHERE timestamp >= :start
+                  GROUP BY employee_code, date(timestamp)
+                ) day_span
+                WHERE CAST(strftime('%w', d) AS INTEGER) BETWEEN 1 AND 5
+                  AND CAST(strftime('%H', last_ts) AS INTEGER) < :hour
+                """
+            ),
+            {"start": start, "hour": last_punch_before_hour},
+        ).scalar()
+        return int(row or 0)
     row = db.execute(
         text(
             """

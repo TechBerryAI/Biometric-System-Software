@@ -9,7 +9,7 @@ from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -20,6 +20,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.operator_access import is_operator_account
 from app.domains.auth.models.user import User
+from app.domains.auth.services.cookie_auth_service import resolve_access_token
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -75,9 +76,20 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         Permission.AUDIT_READ,
         Permission.METRICS_READ,
     },
-    "MANAGER": set(),
-    "VIEWER": set(),
-    "DEVICE_OPERATOR": set(),
+    "MANAGER": {
+        Permission.EMPLOYEE_VIEW,
+        Permission.REPORT_READ,
+        Permission.SYNC_TRIGGER,
+    },
+    "VIEWER": {
+        Permission.EMPLOYEE_VIEW,
+        Permission.REPORT_READ,
+    },
+    "DEVICE_OPERATOR": {
+        Permission.DEVICE_MANAGE,
+        Permission.SYNC_TRIGGER,
+        Permission.METRICS_READ,
+    },
 }
 
 ALLOWED_APP_ROLES = {"SUPER_ADMIN", "HR_ADMIN", "IT_ADMIN", "CEO"}
@@ -129,6 +141,7 @@ def hash_refresh_token(token: str) -> str:
 
 
 def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
@@ -141,9 +154,11 @@ def get_current_user(
                 detail="Auth disabled but no active users exist.",
             )
         return user
-    if credentials is None:
+
+    bearer_token = credentials.credentials if credentials is not None else None
+    token = resolve_access_token(request, bearer_token)
+    if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing access token")
-    token = credentials.credentials
     try:
         payload = decode_access_token(token)
     except JWTError as exc:

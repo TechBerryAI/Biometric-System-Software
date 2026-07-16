@@ -102,7 +102,7 @@ test-scenarios: $(PYTEST)
 
 test-backend-cov: $(PYTEST)
 	cd "$(BACKEND)" && "$(PYTEST)" tests/unit tests/api tests/integration tests/workers tests/e2e_scenarios \
-		--cov=app --cov-report=term-missing -q --tb=short
+		--cov=app --cov-report=term-missing --cov-fail-under=85 -q --tb=short
 
 $(PYTEST):
 	@$(MAKE) install-backend
