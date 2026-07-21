@@ -13,7 +13,13 @@ from app.core.database import Base
 class AttendanceLog(Base):
     __tablename__ = "attendance_logs"
     __table_args__ = (
-        UniqueConstraint("device_id", "employee_code", "timestamp", name="uq_log_device_employee_ts"),
+        UniqueConstraint(
+            "device_id",
+            "employee_code",
+            "timestamp",
+            "punch_type",
+            name="uq_log_device_employee_ts_punch",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

@@ -11,7 +11,7 @@ import type {
   DashboardReportPayload,
   EmployeeReportPayload,
 } from "./types";
-import { fmtMinutes, safeFilename } from "./shared";
+import { fmtMinutes, mapRowsWithDaySeparators, safeFilename } from "./shared";
 
 const ACCENT: [number, number, number] = [13, 148, 136];
 const ACCENT_DARK: [number, number, number] = [15, 118, 110];
@@ -167,7 +167,7 @@ export function downloadAttendanceSummaryPdf(args: AttendanceSummaryPayload): vo
     startY,
     theme: "striped",
     head: [["Date", "Day", "Employee", "Device ID", "In time", "Out time", "Total work", "Absent"]],
-    body: rows.map((r) => [
+    body: mapRowsWithDaySeparators(rows, (r) => [
       fmtDisplayDate(r.summary_date),
       fmtDayOfWeek(r.summary_date),
       r.employee_name,

@@ -8,6 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAttendanceTrend } from "@/features/attendance/hooks/useAttendanceTrend";
+import {
+  ATTENDANCE_SORT_LABELS,
+  type AttendanceSortMode,
+} from "@/features/attendance/sortAttendance";
 import type { ExportPeriod } from "@/lib/dates";
 import { dateList, getExportRange, todayISO } from "@/lib/dates";
 import { ReportFormatDialog } from "@/features/reports/components/ReportFormatDialog";
@@ -15,18 +19,22 @@ import { fetchDailySummaryRange } from "@/features/attendance/api";
 import { fetchEmployees } from "@/features/employees/api";
 import { useAuth } from "@/features/auth/AuthContext";
 import { isOperatorAccount } from "@/features/auth/sessionCapabilities";
-import type { DailySummaryRow } from "@/types";
+import { buildSortedSummaryRows } from "@/features/reports/utils/buildSortedSummaryRows";
 import {
   downloadDepartmentAttendanceExcel,
   exportAttendanceSummary,
   type ReportFormat,
 } from "@/features/reports/utils/reportExports";
 
+const selectClassName =
+  "h-10 rounded-xl border border-line bg-surface-card px-3 text-sm shadow-sm focus-visible:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15";
+
 export function Reports() {
   const { user } = useAuth();
-  const godMode = isOperatorAccount(user);
+  const elevated = isOperatorAccount(user);
   const [anchorDate, setAnchorDate] = useState(todayISO);
   const [period, setPeriod] = useState<ExportPeriod>("week");
+  const [sortMode, setSortMode] = useState<AttendanceSortMode>("early_first");
   const [department, setDepartment] = useState("");
   const [formatDialogOpen, setFormatDialogOpen] = useState(false);
   const trend = useAttendanceTrend(14);
@@ -34,7 +42,7 @@ export function Reports() {
   const employeesQuery = useQuery({
     queryKey: ["employees"],
     queryFn: fetchEmployees,
-    enabled: godMode,
+    enabled: elevated,
   });
 
   const departments = useMemo(() => {
@@ -57,14 +65,11 @@ export function Reports() {
     mutationFn: async (format: ReportFormat) => {
       const dates = dateList(range.from, range.to);
       const byDay = await fetchDailySummaryRange(range.from, range.to);
-      const allRows: Array<DailySummaryRow & { summary_date: string }> = [];
-      for (const day of dates) {
-        const summary = byDay[day] ?? [];
-        for (const row of summary) {
-          allRows.push({ ...row, summary_date: day });
-        }
-      }
-      await exportAttendanceSummary(format, { periodLabel: range.label, rows: allRows });
+      const allRows = buildSortedSummaryRows(byDay, dates, sortMode);
+      await exportAttendanceSummary(format, {
+        periodLabel: `${range.label} · ${ATTENDANCE_SORT_LABELS[sortMode]}`,
+        rows: allRows,
+      });
     },
   });
 
@@ -101,7 +106,7 @@ export function Reports() {
       : null;
 
   function handleDownloadClick() {
-    if (godMode && department) {
+    if (elevated && department) {
       departmentExportMutation.mutate();
       return;
     }
@@ -125,7 +130,7 @@ export function Reports() {
               <CardTitle>Report export</CardTitle>
             </div>
             <CardDescription>
-              {godMode
+              {elevated
                 ? "Pick a department for a multi-sheet Excel pack, or leave it blank for the standard all-employee export."
                 : "Roll up every employee across your chosen window into one document."}
             </CardDescription>
@@ -140,20 +145,38 @@ export function Reports() {
               <select
                 value={period}
                 onChange={(e) => setPeriod(e.target.value as ExportPeriod)}
-                className="h-10 rounded-xl border border-line bg-surface-card px-3 text-sm shadow-sm focus-visible:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15"
+                className={selectClassName}
               >
                 <option value="day">Single day</option>
                 <option value="week">Last 7 days</option>
                 <option value="month">Last 30 days</option>
               </select>
             </label>
-            {godMode ? (
+            <label className="flex flex-col gap-1.5 text-sm">
+              <span className="text-xs font-medium text-ink-muted">Sort by</span>
+              <select
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as AttendanceSortMode)}
+                className={selectClassName}
+                aria-label="Sort by"
+              >
+                {(Object.keys(ATTENDANCE_SORT_LABELS) as AttendanceSortMode[]).map((mode) => (
+                  <option key={mode} value={mode}>
+                    {ATTENDANCE_SORT_LABELS[mode]}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-ink-muted">
+                Multi-day exports sort each date independently (not across the whole window).
+              </span>
+            </label>
+            {elevated ? (
               <label className="flex flex-col gap-1.5 text-sm">
                 <span className="text-xs font-medium text-ink-muted">Department</span>
                 <select
                   value={department}
                   onChange={(e) => setDepartment(e.target.value)}
-                  className="h-10 rounded-xl border border-line bg-surface-card px-3 text-sm shadow-sm focus-visible:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15"
+                  className={selectClassName}
                 >
                   <option value="">All employees (standard export)</option>
                   {departments.map((d) => (
@@ -170,18 +193,18 @@ export function Reports() {
               </label>
             ) : null}
             <p className="rounded-xl border border-line/80 bg-surface px-3 py-2 text-xs text-ink-muted leading-relaxed">
-              {range.label}
+              {range.label} · {ATTENDANCE_SORT_LABELS[sortMode]}
             </p>
             <Button
               type="button"
               className="w-full sm:w-auto"
               onClick={handleDownloadClick}
-              disabled={exportBusy || (godMode && Boolean(department) && departmentMembers.length === 0)}
+              disabled={exportBusy || (elevated && Boolean(department) && departmentMembers.length === 0)}
             >
               <Download className="h-4 w-4" />
               {exportBusy
                 ? "Preparing…"
-                : godMode && department
+                : elevated && department
                   ? "Download Excel"
                   : "Download"}
             </Button>

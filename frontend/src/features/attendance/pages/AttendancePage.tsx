@@ -13,9 +13,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { DayPunchesDialog } from "@/features/attendance/components/DayPunchesDialog";
 import { cn } from "@/lib/cn";
-import type { ExportPeriod } from "@/lib/dates";
-import { dateList, fmtDisplayDateTime, getExportRange, todayISO } from "@/lib/dates";
-import { fetchDailySummary, fetchDailySummaryRange } from "@/features/attendance/api";
+import { fmtDisplayDateTime, getExportRange, todayISO } from "@/lib/dates";
+import { fetchDailySummary } from "@/features/attendance/api";
 import {
   ATTENDANCE_SORT_LABELS,
   sortAttendanceRows,
@@ -47,7 +46,6 @@ export function Attendance() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(false);
   const [sortMode, setSortMode] = useState<AttendanceSortMode>("early_first");
-  const [exportPeriod, setExportPeriod] = useState<ExportPeriod>("day");
   const [exporting, setExporting] = useState(false);
   const [formatDialogOpen, setFormatDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,18 +108,12 @@ export function Attendance() {
     async (format: ReportFormat) => {
       setExporting(true);
       try {
-        const range = getExportRange(date, exportPeriod);
-        const dates = dateList(range.from, range.to);
-        const byDay = await fetchDailySummaryRange(range.from, range.to);
-        const allRows: Array<DailySummaryRow & { summary_date: string }> = [];
-        for (const day of dates) {
-          const summary = byDay[day] ?? [];
-          const dayRows = summary.map((row) => ({ ...row, summary_date: day }));
-          allRows.push(...sortAttendanceRows(dayRows, sortMode));
-        }
+        const range = getExportRange(date, "day");
+        const summary = await fetchDailySummary(date);
+        const dayRows = summary.map((row) => ({ ...row, summary_date: date }));
         await exportAttendanceSummary(format, {
           periodLabel: range.label,
-          rows: allRows,
+          rows: sortAttendanceRows(dayRows, sortMode),
         });
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Failed to export report");
@@ -129,7 +121,7 @@ export function Attendance() {
         setExporting(false);
       }
     },
-    [date, exportPeriod, sortMode]
+    [date, sortMode]
   );
 
   return (
@@ -150,25 +142,13 @@ export function Attendance() {
           <div>
             <h2 className="font-display text-display-lg text-ink">Export</h2>
             <p className="mt-1 max-w-xl text-sm text-ink-muted">
-              Select date and period together, then download a report for audits and payroll handoff.
+              Download this day&apos;s roster for audits and payroll handoff. Use Reports for multi-day ranges.
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="text-xs font-medium text-ink-muted">Date</span>
               <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-            </label>
-            <label className="flex flex-col gap-1.5 text-sm">
-              <span className="text-xs font-medium text-ink-muted">Period</span>
-              <select
-                value={exportPeriod}
-                onChange={(e) => setExportPeriod(e.target.value as ExportPeriod)}
-                className="h-10 min-w-[12rem] rounded-xl border border-line bg-surface-card px-3 text-sm text-ink shadow-sm transition-shadow hover:border-line focus-visible:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15"
-              >
-                <option value="day">Single day</option>
-                <option value="week">Last 7 days</option>
-                <option value="month">Last 30 days</option>
-              </select>
             </label>
             <Button
               type="button"

@@ -49,7 +49,7 @@ export async function signOut(page: Page): Promise<void> {
   // TopBar account trigger shows role label (e.g. "Super Admin") or email on large screens.
   await page
     .locator("header button")
-    .filter({ hasText: /Super Admin|GOD mode|CEO|IT Admin|HR Admin|@/ })
+    .filter({ hasText: /GOD mode|CEO|IT Admin|HR Admin|@/ })
     .first()
     .click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();

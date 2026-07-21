@@ -33,7 +33,7 @@
 | AI (optional) | xAI Grok — advisory insights only (`XAI_API_KEY`) |
 | Data | PostgreSQL (canonical), Redis (Celery + locks), SQLite in-memory for tests |
 | E2E / CI | Playwright (`e2e/`), GitHub Actions (`.github/workflows/test.yml`), Makefile |
-| Bootstrap | Root `start.js` / `start-vm.js` (no Docker/compose today) |
+| Bootstrap | Root `start-vm.js` for VM; local via `make install` + manual processes (no Docker/compose today) |
 
 ---
 
@@ -44,7 +44,7 @@ Biometric-System-Software/
 ├── README.md
 ├── Makefile                  # install / test targets
 ├── package.json              # npm workspaces root + Playwright
-├── scripts/                  # start.js, start-vm.js, traceability check
+├── scripts/                  # start-vm.js, traceability check
 ├── .github/workflows/test.yml
 ├── backend/                  # FastAPI app + Alembic + pytest
 ├── frontend/                 # Vite React app (workspace package)
@@ -56,8 +56,8 @@ Biometric-System-Software/
 
 | Goal | Command |
 |------|---------|
-| Full stack | `npm start` → `node scripts/start.js` (API `:8000`, UI `:5173`) |
-| With Celery | `START_CELERY=1 npm start` |
+| Full stack (local) | `make start` (API `:8000`, UI `:5173`, Celery when Redis is up) |
+| Full stack (VM) | `make start-vm` / `npm run start:vm` |
 | Backend | `uvicorn app.main:app` from `backend/` |
 | Frontend | `npm run dev` from repo root (workspace) |
 | Tests | `make test` / `make test-backend` / `make test-frontend` / `make test-e2e` |
@@ -195,7 +195,7 @@ frontend/src/
 | `/` | home by capability |
 | `/employees`, `/employees/:id` | `employee:view` |
 | `/attendance` | `reports:read` |
-| `/reports` | `anomaly:manage` |
+| `/reports` | `reports:read` |
 | `/operations` | `device:manage` |
 | `/settings` | `metrics:read` |
 | `/audit` | `forensic_audit` |
@@ -252,7 +252,7 @@ Use these as the backlog for “make it premium,” not as moral judgments.
 ### Repo / docs
 
 1. **Docs drift** — Root README and several `docs/*` still describe firmware certification, forensics APIs, reconciliation job tables removed in migration `0018`. Metrics stubs returning `0` reinforce the narrative gap.
-2. **Duplicate bootstraps** — `start.js` vs `start-vm.js` (~25k combined, large overlap).
+2. **VM vs local bootstrap** — VM uses `start-vm.js`; local uses Makefile + separate processes.
 3. **No Docker** while deployment docs talk production topology (nginx snippets only).
 4. **Dual npm lockfiles** — root (Playwright) + `frontend/` — workable but easy to confuse.
 5. **Site-specific ops in product tree** — `constants/keep_list.py`, `backend/scripts/purge_departed_employees.py`.

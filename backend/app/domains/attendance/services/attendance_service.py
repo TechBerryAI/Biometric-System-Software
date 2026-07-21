@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, time, timedelta
-from typing import Sequence
+from typing import Protocol, Sequence
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -29,19 +29,57 @@ from app.domains.attendance.services.punch_classification import device_attendan
 logger = logging.getLogger(__name__)
 
 
+class AttendanceFetchSource(Protocol):
+    """Anything that can supply attendance rows (pull DeviceService or PushConnector)."""
+
+    def fetch_attendance(self) -> list[DeviceAttendanceRecord]: ...
+
+
+class UserFetchSource(Protocol):
+    """Anything that can supply device users."""
+
+    def fetch_users(self) -> list[DeviceUser]: ...
+
+
+class MergedAttendanceSource:
+    """Merge pull + push buffer attendance; exact dedupe happens in run_device_sync."""
+
+    def __init__(self, *sources: AttendanceFetchSource) -> None:
+        self._sources = sources
+
+    def fetch_attendance(self) -> list[DeviceAttendanceRecord]:
+        out: list[DeviceAttendanceRecord] = []
+        for source in self._sources:
+            out.extend(source.fetch_attendance())
+        return out
+
+
+class MergedUserSource:
+    """Merge pull + push buffer users."""
+
+    def __init__(self, *sources: UserFetchSource) -> None:
+        self._sources = sources
+
+    def fetch_users(self) -> list[DeviceUser]:
+        out: list[DeviceUser] = []
+        for source in self._sources:
+            out.extend(source.fetch_users())
+        return out
+
+
+
 def _incremental_sync_floor(db: Session, *, device_id: str, settings: Settings) -> datetime | None:
-    """Use recent overlap window so incremental sync avoids reprocessing full history."""
+    """Use recent overlap window so incremental sync avoids reprocessing full history.
+
+    Only considers logs for this device_id. If this device has no rows yet, returns None
+    so the full fetch is imported (never fall back to another device's latest timestamp).
+    """
     latest = db.execute(
         select(AttendanceLog.timestamp)
         .where(AttendanceLog.device_id == device_id)
         .order_by(AttendanceLog.timestamp.desc())
         .limit(1)
     ).scalar_one_or_none()
-    if latest is None:
-        # Fallback: any log timestamp (e.g. remapped history under another label).
-        latest = db.execute(
-            select(AttendanceLog.timestamp).order_by(AttendanceLog.timestamp.desc()).limit(1)
-        ).scalar_one_or_none()
     if latest is None:
         return None
     return latest - timedelta(minutes=settings.device_sync_overlap_minutes)
@@ -50,22 +88,51 @@ def _incremental_sync_floor(db: Session, *, device_id: str, settings: Settings) 
 def _dedupe_device_records(
     records: Sequence[DeviceAttendanceRecord],
     *,
-    settings: Settings,
+    settings: Settings | None = None,
 ) -> list[DeviceAttendanceRecord]:
-    """Collapse noisy back-to-back duplicate punches produced by unstable device firmware."""
-    window = timedelta(seconds=settings.duplicate_punch_window_seconds)
-    if window.total_seconds() <= 0:
-        return list(records)
+    """Collapse exact duplicates within a single fetch batch (same user/ts/status/punch).
+
+    Time-window near-dup filtering is intentionally not applied here — every distinct
+    device event must reach storage. Display/session pairing may still collapse near
+    scans via DUPLICATE_PUNCH_WINDOW_SECONDS.
+    """
+    del settings  # reserved for callers that still pass settings=
+    seen: set[tuple[str, datetime, int, int]] = set()
     out: list[DeviceAttendanceRecord] = []
-    last_seen: dict[tuple[str, int], datetime] = {}
     for row in sorted(records, key=lambda r: r.timestamp):
-        key = (row.user_id, row.status)
-        prev = last_seen.get(key)
-        if prev is not None and row.timestamp - prev <= window:
+        key = (row.user_id, row.timestamp, row.status, row.punch)
+        if key in seen:
             continue
+        seen.add(key)
         out.append(row)
-        last_seen[key] = row.timestamp
     return out
+
+
+def _resolve_mapping_with_legacy_fallback(
+    db: Session,
+    *,
+    device_id: str,
+    device_user_id: str,
+    at_time: datetime,
+    canonical_device_id: str,
+):
+    """Prefer mapping for the physical device; fall back to canonical id for legacy rows."""
+    mapping = _resolve_mapping_for_punch(
+        db,
+        device_id=device_id,
+        device_user_id=device_user_id,
+        at_time=at_time,
+    )
+    if mapping is not None:
+        return mapping
+    if device_id != canonical_device_id:
+        return _resolve_mapping_for_punch(
+            db,
+            device_id=canonical_device_id,
+            device_user_id=device_user_id,
+            at_time=at_time,
+        )
+    return None
 
 
 def _ensure_active_mapping(
@@ -215,67 +282,42 @@ def insert_attendance_logs_idempotent(
 ) -> int:
     """Append-only insert of raw logs. Never updates or deletes existing rows.
 
-    Duplicates are ignored via:
-      1) unique (device_id, employee_code, timestamp) → ON CONFLICT DO NOTHING
-      2) near-duplicate skip: same employee_code + punch_type within
-         DUPLICATE_PUNCH_WINDOW_SECONDS across *any* device_id (twin terminal labels)
+    Exact replays are ignored via unique
+    (device_id, employee_code, timestamp, punch_type) → ON CONFLICT DO NOTHING.
 
-    Real In→Out pairs inside the window are both kept (different punch_type).
+    Time-window near-duplicates are NOT skipped at storage time — every distinct
+    device event is kept. Display/session pairing may still collapse near scans.
 
     Prepared rows are inserted in chunks (ATTENDANCE_BULK_INSERT_CHUNK_SIZE)
     via a single multi-VALUES INSERT per chunk for throughput.
     """
     rows = 0
     settings = get_settings()
+    stamp_device_id = device_id or settings.zk_device_id
     canonical_device_id = settings.zk_device_id
-    if device_id and device_id != canonical_device_id:
-        logger.debug(
-            "Insert requested for device_id=%s; stamping logs as canonical %s",
-            device_id,
-            canonical_device_id,
-        )
-    duplicate_window = timedelta(seconds=settings.duplicate_punch_window_seconds)
     prepared: list[dict] = []
-    # Track near-dups within this batch so we don't need a round-trip per row.
-    batch_seen: dict[tuple[str, str], datetime] = {}
+    # Exact keys already prepared in this batch (same as unique constraint).
+    batch_seen: set[tuple[str, datetime, str]] = set()
 
     for r in records:
         employee_code = r.user_id
         punch_type = device_attendance_punch_type(status=r.status, punch=r.punch)
-        if duplicate_window.total_seconds() > 0:
-            batch_key = (employee_code, punch_type)
-            prev_batch = batch_seen.get(batch_key)
-            if prev_batch is not None and abs((r.timestamp - prev_batch).total_seconds()) <= duplicate_window.total_seconds():
-                continue
-            existing_near_duplicate = db.execute(
-                select(AttendanceLog.id).where(
-                    AttendanceLog.employee_code == employee_code,
-                    AttendanceLog.punch_type == punch_type,
-                    AttendanceLog.timestamp >= r.timestamp - duplicate_window,
-                    AttendanceLog.timestamp <= r.timestamp + duplicate_window,
-                ).limit(1)
-            ).scalar_one_or_none()
-            if existing_near_duplicate is not None:
-                logger.info(
-                    "Skipping near-duplicate punch device=%s employee=%s ts=%s punch=%s",
-                    canonical_device_id,
-                    employee_code,
-                    r.timestamp.isoformat(),
-                    punch_type,
-                )
-                continue
-            batch_seen[batch_key] = r.timestamp
-        mapping = _resolve_mapping_for_punch(
+        batch_key = (employee_code, r.timestamp, punch_type)
+        if batch_key in batch_seen:
+            continue
+        batch_seen.add(batch_key)
+        mapping = _resolve_mapping_with_legacy_fallback(
             db,
-            device_id=canonical_device_id,
+            device_id=stamp_device_id,
             device_user_id=employee_code,
             at_time=r.timestamp,
+            canonical_device_id=canonical_device_id,
         )
         prepared.append(
             {
                 "employee_code": employee_code,
                 "timestamp": r.timestamp,
-                "device_id": canonical_device_id,
+                "device_id": stamp_device_id,
                 "employee_uuid": mapping.employee_uuid if mapping else None,
                 "device_mapping_id": mapping.id if mapping else None,
                 "punch_type": punch_type,
@@ -290,7 +332,9 @@ def insert_attendance_logs_idempotent(
         stmt = (
             pg_insert(AttendanceLog)
             .values(chunk)
-            .on_conflict_do_nothing(index_elements=["device_id", "employee_code", "timestamp"])
+            .on_conflict_do_nothing(
+                index_elements=["device_id", "employee_code", "timestamp", "punch_type"]
+            )
             .returning(AttendanceLog.id)
         )
         res = db.execute(stmt)
@@ -355,7 +399,7 @@ def prune_recent_duplicate_logs(db: Session, *, settings: Settings, days: int | 
 
 def run_device_sync(
     db: Session,
-    device: DeviceService | None = None,
+    device: AttendanceFetchSource | None = None,
     settings: Settings | None = None,
     *,
     full_resync: bool = False,
@@ -382,7 +426,7 @@ def run_device_sync(
     fetched_records = device.fetch_attendance()
     if floor is not None:
         fetched_records = [row for row in fetched_records if row.timestamp >= floor]
-    records = _dedupe_device_records(fetched_records, settings=settings)
+    records = _dedupe_device_records(fetched_records)
 
     tz = ZoneInfo(settings.timezone)
     protected_days = load_corrected_employee_days(db, device_id=resolved_device_id)
@@ -454,7 +498,7 @@ def run_device_sync(
 
 def run_user_sync(
     db: Session,
-    device: DeviceService | None = None,
+    device: UserFetchSource | None = None,
     settings: Settings | None = None,
     *,
     device_id: str | None = None,
@@ -470,6 +514,8 @@ def run_user_sync(
 
 # Re-export for callers that still import from attendance_service
 __all__ = [
+    "MergedAttendanceSource",
+    "MergedUserSource",
     "backfill_employees_from_orphan_logs",
     "insert_attendance_logs_idempotent",
     "prune_recent_duplicate_logs",

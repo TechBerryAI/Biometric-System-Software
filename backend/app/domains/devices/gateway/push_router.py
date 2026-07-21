@@ -69,9 +69,24 @@ async def receive_device_push(
 
     sync_result = None
     if body.trigger_sync:
-        sync_result = sync_device(db, device, full_resync=False)
-        connector.clear_buffer()
-        device.offline_buffer = None
+        try:
+            # Persist buffer onto the device row before sync so PushConnector reads it.
+            db.flush()
+            sync_result = sync_device(db, device, full_resync=False)
+            if sync_result.get("skipped"):
+                # Lock/correction deferral — keep buffer for a later attempt.
+                logger.warning(
+                    "Push sync deferred for %s; retaining offline_buffer",
+                    device_id,
+                )
+            else:
+                connector.clear_buffer()
+                device.offline_buffer = None
+        except Exception:
+            # Leave offline_buffer intact so punches are not discarded.
+            logger.exception("Push sync failed for %s; retaining offline_buffer", device_id)
+            db.commit()
+            raise
 
     db.commit()
     return PushResponse(accepted=True, device_id=device_id, buffered=buffered, sync=sync_result)

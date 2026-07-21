@@ -78,7 +78,7 @@ export default function App() {
                 <Route
                   path="/reports"
                   element={
-                    <RequireAuth permission="anomaly:manage">
+                    <RequireAuth permission="reports:read">
                       <Reports />
                     </RequireAuth>
                   }

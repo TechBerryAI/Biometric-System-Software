@@ -32,7 +32,7 @@ const items = [
   { to: "/employees", label: "Employees", icon: Users, permission: "employee:view" as Permission },
   { to: "/attendance", label: "Attendance", icon: ClipboardList, permission: "reports:read" as Permission },
   { to: "/monitoring", label: "Live Monitor", icon: Activity, permission: "reports:read" as Permission },
-  { to: "/reports", label: "Reports", icon: FileBarChart2, permission: "anomaly:manage" as Permission },
+  { to: "/reports", label: "Reports", icon: FileBarChart2, permission: "reports:read" as Permission },
   { to: "/operations", label: "Operations", icon: ShieldCheck, permission: "device:manage" as Permission },
   { to: "/settings", label: "Settings", icon: Settings, permission: "metrics:read" as Permission },
 ] as const;

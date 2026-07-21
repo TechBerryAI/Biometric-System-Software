@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -36,8 +36,8 @@ def test_duplicate_punch_insert_keeps_single_row(db_session: Session) -> None:
 
 @pytest.mark.integration
 @pytest.mark.testid("BE-INT-DUP-002")
-def test_near_duplicate_within_window_is_skipped(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Same employee + punch direction within the duplicate window must not create a second row."""
+def test_near_duplicate_within_window_is_stored(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same employee + punch direction within 30s must both store (distinct timestamps)."""
     from app.core.config import get_settings
 
     monkeypatch.setenv("DUPLICATE_PUNCH_WINDOW_SECONDS", "30")
@@ -61,16 +61,16 @@ def test_near_duplicate_within_window_is_skipped(db_session: Session, monkeypatc
         "main-entrance",
     )
     assert first == 1
-    assert near == 0
+    assert near == 1
     count = db_session.execute(select(func.count()).select_from(AttendanceLog)).scalar_one()
-    assert count == 1
+    assert count == 2
     get_settings.cache_clear()
 
 
 @pytest.mark.integration
 @pytest.mark.testid("BE-INT-DUP-003")
 def test_in_then_out_within_window_both_kept(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Real In→Out within 30s must both store — only same-direction near-dups are collapsed."""
+    """Real In→Out within 30s must both store."""
     from app.core.config import get_settings
 
     monkeypatch.setenv("DUPLICATE_PUNCH_WINDOW_SECONDS", "30")
@@ -96,3 +96,42 @@ def test_in_then_out_within_window_both_kept(db_session: Session, monkeypatch: p
     count = db_session.execute(select(func.count()).select_from(AttendanceLog)).scalar_one()
     assert count == 2
     get_settings.cache_clear()
+
+
+@pytest.mark.integration
+@pytest.mark.testid("BE-INT-DUP-004")
+def test_same_second_different_punch_types_both_kept(db_session: Session) -> None:
+    emp = make_employee(device_user_id="TBIDUP4")
+    db_session.add(emp)
+    db_session.commit()
+
+    ts = datetime(2026, 7, 14, 9, 0, 0, tzinfo=ZoneInfo("UTC"))
+    inserted = insert_attendance_logs_idempotent(
+        db_session,
+        [
+            DeviceAttendanceRecord(user_id="TBIDUP4", timestamp=ts, punch=0, status=0),
+            DeviceAttendanceRecord(user_id="TBIDUP4", timestamp=ts, punch=0, status=1),
+        ],
+        "main-entrance",
+    )
+    assert inserted == 2
+    count = db_session.execute(select(func.count()).select_from(AttendanceLog)).scalar_one()
+    assert count == 2
+
+
+@pytest.mark.integration
+@pytest.mark.testid("BE-INT-DUP-005")
+def test_multi_device_same_timestamp_both_stored(db_session: Session) -> None:
+    emp = make_employee(device_user_id="TBIDUP5")
+    db_session.add(emp)
+    db_session.commit()
+
+    ts = datetime(2026, 7, 14, 9, 0, 0, tzinfo=ZoneInfo("UTC"))
+    record = DeviceAttendanceRecord(user_id="TBIDUP5", timestamp=ts, punch=0, status=0)
+    a = insert_attendance_logs_idempotent(db_session, [record], "gate-a")
+    b = insert_attendance_logs_idempotent(db_session, [record], "gate-b")
+    assert a == 1
+    assert b == 1
+    logs = db_session.execute(select(AttendanceLog)).scalars().all()
+    assert len(logs) == 2
+    assert {log.device_id for log in logs} == {"gate-a", "gate-b"}

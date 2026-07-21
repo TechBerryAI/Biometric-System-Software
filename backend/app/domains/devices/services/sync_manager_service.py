@@ -10,7 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.domains.attendance.services.attendance_service import run_device_sync, run_user_sync
+from app.domains.attendance.services.attendance_service import (
+    MergedAttendanceSource,
+    MergedUserSource,
+    run_device_sync,
+    run_user_sync,
+)
 from app.domains.devices.gateway.router import DeviceGateway, get_device_gateway
 from app.domains.devices.models.device import Device
 from app.domains.devices.models.device_sync_state import DeviceSyncState
@@ -35,6 +40,24 @@ def get_or_create_sync_state(db: Session, device_id: str) -> DeviceSyncState:
     return row
 
 
+def _sync_sources_for_device(
+    gateway: DeviceGateway,
+    device: Device,
+) -> tuple[object, object]:
+    """Return (user_source, attendance_source) for the device connectivity mode."""
+    mode = (device.connectivity_mode or "pull").lower()
+    if mode == "push":
+        push = gateway.get_push_connector(device)
+        return push, push
+    if mode == "both":
+        pull = gateway.get_connector(device)
+        push = gateway.get_push_connector(device)
+        pull_svc = pull.service
+        return MergedUserSource(pull_svc, push), MergedAttendanceSource(pull_svc, push)
+    pull = gateway.get_connector(device)
+    return pull.service, pull.service
+
+
 def sync_device(
     db: Session,
     device: Device,
@@ -50,25 +73,38 @@ def sync_device(
 
     if not wait_for_correction_commands_clear(db, device_id, settings=settings):
         logger.warning("Deferring sync for %s: active correction commands", device_id)
-        return {"skipped": 1, "users_fetched": 0, "users_upserted": 0, "fetched": 0, "inserted": 0, "placeholder_employees": 0}
+        return {
+            "skipped": 1,
+            "users_fetched": 0,
+            "users_upserted": 0,
+            "fetched": 0,
+            "inserted": 0,
+            "placeholder_employees": 0,
+        }
 
-    connector = gateway.get_connector(device)
-    device_service = connector.service
+    user_source, attendance_source = _sync_sources_for_device(gateway, device)
 
     try:
         with device_session_lock(device_id, settings):
             users_fetched, users_upserted = run_user_sync(
-                db, device=device_service, settings=settings, device_id=device_id
+                db, device=user_source, settings=settings, device_id=device_id
             )
             fetched, inserted, placeholders = run_device_sync(
                 db,
-                device=device_service,
+                device=attendance_source,
                 settings=settings,
                 full_resync=full_resync,
                 device_id=device_id,
             )
     except DeviceLockContentionError:
-        return {"skipped": 1, "users_fetched": 0, "users_upserted": 0, "fetched": 0, "inserted": 0, "placeholder_employees": 0}
+        return {
+            "skipped": 1,
+            "users_fetched": 0,
+            "users_upserted": 0,
+            "fetched": 0,
+            "inserted": 0,
+            "placeholder_employees": 0,
+        }
 
     sync_state = get_or_create_sync_state(db, device_id)
     now = _utcnow()
@@ -76,7 +112,8 @@ def sync_device(
     sync_state.last_attendance_sync_at = now
     sync_state.sync_generation += 1
     update_device_health_for_device(db, device, status="ONLINE", detail="sync_ok")
-    gateway.invalidate(device_id)
+    if (device.connectivity_mode or "pull").lower() in {"pull", "both"}:
+        gateway.invalidate(device_id)
 
     return {
         "users_fetched": users_fetched,
