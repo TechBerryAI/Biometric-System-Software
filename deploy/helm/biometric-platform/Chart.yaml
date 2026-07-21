@@ -1,6 +1,0 @@
-apiVersion: v2
-name: biometric-platform
-description: Biometric attendance platform — API, workers, frontend, Postgres, Redis
-type: application
-version: 0.1.0
-appVersion: "1.0.0"

@@ -65,7 +65,7 @@ e2e/
   playwright.config.ts
   scenarios/
 scripts/check_traceability_matrix.py
-.github/workflows/test.yml
+.github/workflows/ci.yml
 Makefile
 ```
 

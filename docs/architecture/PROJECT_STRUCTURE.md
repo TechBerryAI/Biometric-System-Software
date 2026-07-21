@@ -32,8 +32,8 @@
 | Device I/O | `pyzk` (wrapped; dangerous methods blocked) |
 | AI (optional) | xAI Grok — advisory insights only (`XAI_API_KEY`) |
 | Data | PostgreSQL (canonical), Redis (Celery + locks), SQLite in-memory for tests |
-| E2E / CI | Playwright (`e2e/`), GitHub Actions (`.github/workflows/test.yml`), Makefile |
-| Bootstrap | Root `start-vm.js` for VM; local via `make install` + manual processes (no Docker/compose today) |
+| E2E / CI | Playwright (`e2e/`), GitHub Actions (`.github/workflows/ci.yml`), Makefile |
+| Bootstrap | `make install` + `make start` locally; `make start-vm` on the VM |
 
 ---
 
@@ -45,7 +45,7 @@ Biometric-System-Software/
 ├── Makefile                  # install / test targets
 ├── package.json              # npm workspaces root + Playwright
 ├── scripts/                  # start-vm.js, traceability check
-├── .github/workflows/test.yml
+├── .github/workflows/ci.yml
 ├── backend/                  # FastAPI app + Alembic + pytest
 ├── frontend/                 # Vite React app (workspace package)
 ├── docs/                     # architecture / api / operations / testing
@@ -253,7 +253,7 @@ Use these as the backlog for “make it premium,” not as moral judgments.
 
 1. **Docs drift** — Root README and several `docs/*` still describe firmware certification, forensics APIs, reconciliation job tables removed in migration `0018`. Metrics stubs returning `0` reinforce the narrative gap.
 2. **VM vs local bootstrap** — VM uses `start-vm.js`; local uses Makefile + separate processes.
-3. **No Docker** while deployment docs talk production topology (nginx snippets only).
+3. **Bootstrap split** — VM uses `start-vm.js`; local uses `make start`.
 4. **Dual npm lockfiles** — root (Playwright) + `frontend/` — workable but easy to confuse.
 5. **Site-specific ops in product tree** — `constants/keep_list.py`, `backend/scripts/purge_departed_employees.py`.
 
@@ -301,12 +301,12 @@ When planning a “premium” structure, decide explicitly along these axes:
 | Backend domain split | Flat `services/` | `domains/{attendance,device,identity,auth,ops}/` with api·service·model per domain |
 | FE feature modules | Pages monolith + thin components | Feature folders (`features/attendance/{api,hooks,components,pages}`) |
 | API client | Single `api.ts` | Per-domain clients or OpenAPI-generated SDK |
-| Bootstrap | Two Node scripts | One script + env/profile; or Docker Compose for local |
+| Bootstrap | `make start` / `make start-vm` |
 | Docs as SoT | Partly stale | Single current architecture snapshot (this file) + slim narrative docs |
 | Multi-device | Model yes / config mostly single | First-class fleet config vs intentional single-device product |
 | Authz | Permissions + capabilities | Unify into one capability/permission model |
 | Ops scripts | Inside `backend/scripts` + constants | `ops/` or private tooling repo / tagged “site-local” |
-| Deploy story | Script + nginx docs | Compose / k8s manifests aligned with simplified schema |
+| Deploy story | `make start-vm` + nginx snippets in `docs/operations/deployment.md` | Keep script-based deploy; no container manifests |
 
 **Non-goals unless requested:** rewriting pyzk protocol, adding biometric template storage, restoring dropped forensics tables without a product decision.
 

@@ -80,7 +80,9 @@ sync-full: $(PYTHON)
 
 clean:
 	rm -rf "$(BACKEND)/.pytest_cache" "$(BACKEND)/htmlcov" "$(BACKEND)/.coverage"
-	rm -rf "$(FRONTEND)/coverage" "$(ROOT)playwright-report" "$(ROOT)test-results" "$(ROOT)e2e/playwright-report"
+	rm -rf "$(FRONTEND)/coverage" "$(FRONTEND)/dist"
+	rm -rf "$(ROOT)playwright-report" "$(ROOT)test-results" "$(ROOT)e2e/playwright-report" "$(ROOT)e2e/test-results"
+	rm -f "$(BACKEND)/celerybeat-schedule" "$(BACKEND)/celerybeat-schedule.db"
 	find "$(BACKEND)" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 
 $(PYTHON) $(PYTEST):
