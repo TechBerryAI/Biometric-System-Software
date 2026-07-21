@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
@@ -17,6 +18,8 @@ from app.domains.devices.models.device import Device
 from app.domains.devices.models.device_sync_state import DeviceSyncState
 from app.domains.employees.models.device_user_mapping import DeviceUserMapping
 from app.domains.devices.services.device_service import DeviceService
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -233,9 +236,14 @@ def reconcile_all_devices(db: Session, settings: Settings | None = None) -> list
     settings = settings or get_settings()
     results: list[dict[str, int | str]] = []
     for device in list_devices(db, active_only=True):
+        device_id = device.name
         try:
             counts = reconcile_device_mappings(db, device, settings=settings)
-            results.append({"device_id": device.name, **counts})
+            results.append({"device_id": device_id, **counts})
         except Exception as exc:  # noqa: BLE001
-            results.append({"device_id": device.name, "error": str(exc)})
+            try:
+                db.rollback()
+            except Exception:  # noqa: BLE001
+                logger.debug("Rollback after reconcile failure failed device=%s", device_id, exc_info=True)
+            results.append({"device_id": device_id, "error": str(exc)})
     return results

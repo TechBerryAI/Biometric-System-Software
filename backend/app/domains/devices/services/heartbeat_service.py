@@ -30,6 +30,7 @@ def probe_device_heartbeat(
     """Probe a single device and update health status."""
     settings = settings or get_settings()
     gateway = gateway or get_device_gateway(settings)
+    device_id = device.name
     try:
         ok, detail = gateway.probe_device(device)
         status = "ONLINE" if ok else "OFFLINE"
@@ -42,11 +43,22 @@ def probe_device_heartbeat(
             serial = fingerprint.get("serial_number")
             if serial:
                 device.serial_number = str(serial)
-        return {"device_id": device.name, "online": ok, "detail": detail, "probed_at": _utcnow().isoformat()}
+        return {"device_id": device_id, "online": ok, "detail": detail, "probed_at": _utcnow().isoformat()}
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Heartbeat probe failed for %s: %s", device.name, exc)
-        update_device_health_for_device(db, device, status="OFFLINE", detail=str(exc))
-        return {"device_id": device.name, "online": False, "detail": str(exc), "probed_at": _utcnow().isoformat()}
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            logger.debug("Rollback after heartbeat failure failed device=%s", device_id, exc_info=True)
+        logger.warning("Heartbeat probe failed for %s: %s", device_id, exc)
+        try:
+            update_device_health_for_device(db, device, status="OFFLINE", detail=str(exc))
+        except Exception:  # noqa: BLE001
+            logger.debug("Health update after heartbeat failure failed device=%s", device_id, exc_info=True)
+            try:
+                db.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+        return {"device_id": device_id, "online": False, "detail": str(exc), "probed_at": _utcnow().isoformat()}
 
 
 def probe_all_devices(

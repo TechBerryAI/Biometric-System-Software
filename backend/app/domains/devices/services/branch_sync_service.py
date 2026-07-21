@@ -49,12 +49,17 @@ def sync_branch(
     ordered = stagger_order(devices, seed=branch_id or "default")
     results: list[dict[str, int | str]] = []
     for device in ordered:
+        device_id = device.name
         try:
             counts = sync_device(db, device, full_resync=full_resync, settings=settings, gateway=gateway)
-            results.append({"device_id": device.name, "branch_id": branch_id or "", **counts})
+            results.append({"device_id": device_id, "branch_id": branch_id or "", **counts})
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Branch sync failed for %s: %s", device.name, exc)
-            results.append({"device_id": device.name, "branch_id": branch_id or "", "error": str(exc)})
+            try:
+                db.rollback()
+            except Exception:  # noqa: BLE001
+                logger.debug("Rollback after branch sync failure failed device=%s", device_id, exc_info=True)
+            logger.exception("Branch sync failed for %s: %s", device_id, exc)
+            results.append({"device_id": device_id, "branch_id": branch_id or "", "error": str(exc)})
     return results
 
 

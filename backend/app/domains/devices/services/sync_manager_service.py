@@ -136,11 +136,23 @@ def sync_all_pull_devices(
     gateway = gateway or get_device_gateway(settings)
     results: list[dict[str, int | str]] = []
     for device in gateway.list_pull_devices(db, branch_id=branch_id):
+        device_id = device.name
         try:
             counts = sync_device(db, device, settings=settings, gateway=gateway)
-            results.append({"device_id": device.name, **counts})
+            results.append({"device_id": device_id, **counts})
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Sync failed for device %s: %s", device.name, exc)
-            update_device_health_for_device(db, device, status="OFFLINE", detail=str(exc))
-            results.append({"device_id": device.name, "error": str(exc)})
+            try:
+                db.rollback()
+            except Exception:  # noqa: BLE001
+                logger.debug("Rollback after sync failure failed device=%s", device_id, exc_info=True)
+            logger.exception("Sync failed for device %s: %s", device_id, exc)
+            try:
+                update_device_health_for_device(db, device, status="OFFLINE", detail=str(exc))
+            except Exception:  # noqa: BLE001
+                logger.debug("Health update after sync failure failed device=%s", device_id, exc_info=True)
+                try:
+                    db.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+            results.append({"device_id": device_id, "error": str(exc)})
     return results
