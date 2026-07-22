@@ -154,8 +154,8 @@ def test_push_buffer_ingested_then_cleared(db_session: Session, client, monkeypa
             return_value=True,
         ),
         patch(
-            "app.domains.attendance.services.attendance_correction_service.load_corrected_employee_days",
-            return_value=set(),
+            "app.domains.attendance.services.attendance_correction_service.load_corrected_day_guards",
+            return_value={},
         ),
         patch(
             "app.domains.devices.gateway.device_auth.DeviceAuthService.is_replay",
@@ -198,6 +198,93 @@ def test_push_buffer_ingested_then_cleared(db_session: Session, client, monkeypa
 
 
 @pytest.mark.integration
+@pytest.mark.testid("BE-INT-PUNCH-007")
+def test_push_buffer_retained_when_punches_missing_after_insert(
+    db_session: Session, client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Do not clear offline_buffer when reconcile reports missing punches."""
+    from app.domains.devices.gateway.router import reset_device_gateway
+
+    reset_device_gateway()
+    secret = generate_device_secret()
+    device = make_device(name="push-retain", connectivity_mode="push", ip_address="10.0.0.11")
+    device.device_secret_hash = hash_device_secret(secret)
+    emp = make_employee(device_user_id="TBIPUSH2")
+    db_session.add(device)
+    db_session.add(emp)
+    db_session.commit()
+
+    ts = datetime(2026, 7, 14, 11, 0, 0, tzinfo=UTC).isoformat()
+    body_obj = {
+        "attendance": [{"user_id": "TBIPUSH2", "timestamp": ts, "punch": 0, "status": 0}],
+        "trigger_sync": True,
+    }
+    raw = json.dumps(body_obj).encode()
+    stamp = str(int(time.time()))
+    nonce = "push-nonce-retain"
+    payload = build_signature_payload(
+        device_id="push-retain",
+        timestamp=stamp,
+        nonce=nonce,
+        body=raw,
+    )
+    sig = sign_request(secret, payload)
+
+    with (
+        patch(
+            "app.domains.devices.services.sync_manager_service.device_session_lock",
+        ) as lock_mock,
+        patch(
+            "app.domains.devices.services.sync_manager_service.wait_for_correction_commands_clear",
+            return_value=True,
+        ),
+        patch(
+            "app.domains.devices.services.sync_manager_service.run_user_sync",
+            return_value=(1, 0),
+        ),
+        patch(
+            "app.domains.devices.services.sync_manager_service.run_device_sync_detailed",
+            return_value=MagicMock(
+                fetched=1,
+                inserted=0,
+                placeholders=0,
+                skipped_corrected_punches=0,
+                punches_missing_after_insert=1,
+                skipped_reason=None,
+            ),
+        ),
+        patch(
+            "app.domains.devices.gateway.device_auth.DeviceAuthService.is_replay",
+            return_value=False,
+        ),
+        patch("app.ai.cache.redis_cache.AIResponseCache"),
+    ):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _noop_lock(*_a, **_k):
+            yield
+
+        lock_mock.side_effect = _noop_lock
+        response = client.post(
+            "/devices/gateway/push/push-retain",
+            content=raw,
+            headers={
+                "Content-Type": "application/json",
+                "X-Device-Timestamp": stamp,
+                "X-Device-Nonce": nonce,
+                "X-Device-Signature": sig,
+                "X-Device-Secret": secret,
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    db_session.refresh(device)
+    assert device.offline_buffer is not None
+    assert len(device.offline_buffer.get("attendance") or []) >= 1
+
+
+@pytest.mark.integration
 @pytest.mark.testid("BE-INT-PUNCH-006")
 def test_push_sync_failure_retains_buffer(db_session: Session) -> None:
     device = make_device(name="push-fail", connectivity_mode="push")
@@ -233,7 +320,7 @@ def test_push_sync_failure_retains_buffer(db_session: Session) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.testid("BE-INT-PUNCH-007")
+@pytest.mark.testid("BE-INT-PUNCH-008")
 def test_run_device_sync_stamps_real_device_id(db_session: Session) -> None:
     emp = make_employee(device_user_id="TBISTAMP1")
     db_session.add(emp)
@@ -251,8 +338,8 @@ def test_run_device_sync_stamps_real_device_id(db_session: Session) -> None:
             return_value=True,
         ),
         patch(
-            "app.domains.attendance.services.attendance_correction_service.load_corrected_employee_days",
-            return_value=set(),
+            "app.domains.attendance.services.attendance_correction_service.load_corrected_day_guards",
+            return_value={},
         ),
         patch("app.ai.cache.redis_cache.AIResponseCache"),
     ):

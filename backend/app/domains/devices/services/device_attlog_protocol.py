@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.core import device_policy
 from app.domains.devices.services.device_attlog_codec import (
     AttlogCapabilities,
     AttlogRecord,
@@ -18,6 +19,15 @@ from app.shared.device_exceptions import AttlogCorrectionError, AttlogCorrection
 logger = logging.getLogger(__name__)
 
 _TS_TOLERANCE = timedelta(seconds=2)
+
+
+def refuse_device_attlog_clear(*, reason: str = "policy") -> None:
+    """Raise unless site policy explicitly allows wiping device attendance memory."""
+    if not device_policy.ALLOW_DEVICE_ATTLOG_CLEAR:
+        raise AttlogCorrectionNotSupported(
+            "Device attendance clear is refused: punches must remain on the terminal "
+            f"until confirmed in attendance_logs ({reason})."
+        )
 
 
 def _device_local_naive(dt: datetime, tz_name: str) -> datetime:
@@ -195,9 +205,9 @@ def apply_attlog_correction(
                         punch=nr.punch,
                     )
         elif caps.supports_full_rewrite:
-            # pyzk exposes clear_attendance + _send_with_buffer but buffer upload
-            # does not commit attlog on real ZK firmware. Never clear first —
-            # that would wipe device memory without a way to restore punches.
+            # Never wipe device memory: buffer upload does not reliably commit on ZK firmware,
+            # and site policy forbids clear until punches are confirmed in Postgres.
+            refuse_device_attlog_clear(reason="tier_b_full_rewrite")
             raise AttlogCorrectionNotSupported(
                 "Tier B full attlog rewrite is not safe on this firmware: "
                 "buffer upload does not persist punches. Device clear is refused."

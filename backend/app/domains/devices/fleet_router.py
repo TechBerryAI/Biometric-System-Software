@@ -23,7 +23,7 @@ class DeviceCreateRequest(BaseModel):
     location: str | None = None
     timezone: str | None = None
     branch_id: str | None = None
-    connectivity_mode: str = Field(default="pull", pattern="^(pull|push|both)$")
+    connectivity_mode: str = Field(default="both", pattern="^(pull|push|both)$")
 
 
 class DeviceUpdateRequest(BaseModel):

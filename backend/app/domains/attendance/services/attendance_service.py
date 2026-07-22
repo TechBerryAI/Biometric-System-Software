@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Protocol, Sequence
 from uuid import uuid4
@@ -27,6 +28,18 @@ from app.domains.employees.services.employee_offboard_service import enqueue_del
 from app.domains.attendance.services.punch_classification import device_attendance_punch_type
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceSyncResult:
+    """Outcome of a single attendance pull + insert cycle."""
+
+    fetched: int
+    inserted: int
+    placeholders: int
+    skipped_corrected_punches: int = 0
+    punches_missing_after_insert: int = 0
+    skipped_reason: str | None = None
 
 
 class AttendanceFetchSource(Protocol):
@@ -397,6 +410,77 @@ def prune_recent_duplicate_logs(db: Session, *, settings: Settings, days: int | 
     return 0
 
 
+def _aware_timestamp(ts: datetime, *, tz: ZoneInfo) -> datetime:
+    if ts.tzinfo is not None:
+        return ts
+    return ts.replace(tzinfo=tz)
+
+
+def _record_epoch_key(record: DeviceAttendanceRecord, punch_type: str, *, tz: ZoneInfo) -> tuple[str, int, str]:
+    ts = record.timestamp
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=tz)
+    return (str(record.user_id).strip(), int(ts.timestamp()), punch_type)
+
+
+def _naive_epoch_candidates(ts: datetime, *, tz: ZoneInfo) -> set[int]:
+    """SQLite may persist either UTC or local wall as naive; accept both interpretations."""
+    if ts.tzinfo is not None:
+        return {int(ts.timestamp())}
+    return {
+        int(ts.replace(tzinfo=ZoneInfo("UTC")).timestamp()),
+        int(ts.replace(tzinfo=tz).timestamp()),
+    }
+
+
+def count_fetched_missing_in_db(
+    db: Session,
+    records: Sequence[DeviceAttendanceRecord],
+    device_id: str,
+) -> int:
+    """How many fetched device punches are still absent from attendance_logs."""
+    if not records:
+        return 0
+    settings = get_settings()
+    tz = ZoneInfo(settings.timezone)
+    keys = {
+        _record_epoch_key(
+            row,
+            device_attendance_punch_type(status=row.status, punch=row.punch),
+            tz=tz,
+        )
+        for row in records
+    }
+    codes = {k[0] for k in keys}
+    aware_bounds = [
+        row.timestamp if row.timestamp.tzinfo is not None else row.timestamp.replace(tzinfo=tz)
+        for row in records
+    ]
+    min_ts = min(aware_bounds)
+    max_ts = max(aware_bounds)
+    # Wide pad: naive SQLite reinterpretation can shift by timezone offset.
+    pad = timedelta(hours=14)
+    db_pairs: list[tuple[str, set[int], str]] = []
+    for code, ts, punch_type in db.execute(
+        select(AttendanceLog.employee_code, AttendanceLog.timestamp, AttendanceLog.punch_type).where(
+            AttendanceLog.device_id == device_id,
+            AttendanceLog.employee_code.in_(codes),
+            AttendanceLog.timestamp >= min_ts - pad,
+            AttendanceLog.timestamp <= max_ts + pad,
+        )
+    ).all():
+        db_pairs.append((str(code).strip(), _naive_epoch_candidates(ts, tz=tz), str(punch_type)))
+
+    missing = 0
+    for code, epoch, punch_type in keys:
+        if not any(
+            code == db_code and punch_type == db_punch and epoch in epochs
+            for db_code, epochs, db_punch in db_pairs
+        ):
+            missing += 1
+    return missing
+
+
 def run_device_sync(
     db: Session,
     device: AttendanceFetchSource | None = None,
@@ -409,8 +493,32 @@ def run_device_sync(
     Fetch attendance from device, insert logs, backfill employees, rebuild sessions.
 
     Returns (device_row_count, newly_inserted_log_rows, placeholder_employees_created).
+    Prefer ``run_device_sync_detailed`` when skip/reconcile metrics are needed.
     """
-    from app.domains.attendance.services.attendance_correction_service import load_corrected_employee_days
+    result = run_device_sync_detailed(
+        db, device=device, settings=settings, full_resync=full_resync, device_id=device_id
+    )
+    return result.fetched, result.inserted, result.placeholders
+
+
+def run_device_sync_detailed(
+    db: Session,
+    device: AttendanceFetchSource | None = None,
+    settings: Settings | None = None,
+    *,
+    full_resync: bool = False,
+    device_id: str | None = None,
+) -> DeviceSyncResult:
+    """
+    Fetch attendance from device, insert logs, backfill employees, rebuild sessions.
+
+    Mid-day attendance corrections only block punches at or before protect_until so
+    later genuine punches (evening OUT) still sync.
+    """
+    from app.domains.attendance.services.attendance_correction_service import (
+        is_punch_blocked_by_correction,
+        load_corrected_day_guards,
+    )
     from app.domains.devices.services.device_command_service import wait_for_correction_commands_clear
 
     settings = settings or get_settings()
@@ -420,32 +528,51 @@ def run_device_sync(
             "Deferring device sync: CORRECT_ATTENDANCE still active for device %s",
             resolved_device_id,
         )
-        return 0, 0, 0
+        return DeviceSyncResult(
+            fetched=0,
+            inserted=0,
+            placeholders=0,
+            skipped_reason="correction_active",
+        )
     device = device or DeviceService(settings=settings)
     floor = None if full_resync else _incremental_sync_floor(db, device_id=resolved_device_id, settings=settings)
     fetched_records = device.fetch_attendance()
+    fetched_count = len(fetched_records)
     if floor is not None:
         fetched_records = [row for row in fetched_records if row.timestamp >= floor]
     records = _dedupe_device_records(fetched_records)
 
     tz = ZoneInfo(settings.timezone)
-    protected_days = load_corrected_employee_days(db, device_id=resolved_device_id)
-    if protected_days:
-        before_count = len(records)
-        records = [
-            row
-            for row in records
-            if (str(row.user_id).strip(), _local_date(row.timestamp, tz)) not in protected_days
-        ]
-        skipped = before_count - len(records)
-        if skipped:
+    guards = load_corrected_day_guards(db, device_id=resolved_device_id)
+    skipped_corrected = 0
+    if guards:
+        kept: list[DeviceAttendanceRecord] = []
+        for row in records:
+            day = _local_date(row.timestamp, tz)
+            if is_punch_blocked_by_correction(
+                user_id=str(row.user_id).strip(),
+                timestamp=row.timestamp,
+                local_day=day,
+                guards=guards,
+            ):
+                skipped_corrected += 1
+                continue
+            kept.append(row)
+        if skipped_corrected:
             logger.info(
-                "Sync skipped %s device punch(es) on %s corrected employee-day(s)",
-                skipped,
-                len(protected_days),
+                "Sync skipped %s device punch(es) on corrected employee-days (post-correction punches kept)",
+                skipped_corrected,
             )
+        records = kept
 
     n = insert_attendance_logs_idempotent(db, records, resolved_device_id)
+    missing_after = count_fetched_missing_in_db(db, records, resolved_device_id)
+    if missing_after:
+        logger.error(
+            "Punch reconciliation failed for device %s: %s fetched punches still missing after insert",
+            resolved_device_id,
+            missing_after,
+        )
     placeholders = backfill_employees_from_orphan_logs(db)
 
     today = datetime.now(tz).date()
@@ -493,7 +620,13 @@ def run_device_sync(
     except Exception as exc:  # noqa: BLE001
         logger.warning("AI cache invalidation skipped: %s", exc)
 
-    return len(fetched_records), n, placeholders
+    return DeviceSyncResult(
+        fetched=fetched_count,
+        inserted=n,
+        placeholders=placeholders,
+        skipped_corrected_punches=skipped_corrected,
+        punches_missing_after_insert=missing_after,
+    )
 
 
 def run_user_sync(
@@ -514,13 +647,16 @@ def run_user_sync(
 
 # Re-export for callers that still import from attendance_service
 __all__ = [
+    "DeviceSyncResult",
     "MergedAttendanceSource",
     "MergedUserSource",
     "backfill_employees_from_orphan_logs",
+    "count_fetched_missing_in_db",
     "insert_attendance_logs_idempotent",
     "prune_recent_duplicate_logs",
     "rebuild_sessions_for_local_date",
     "run_device_sync",
+    "run_device_sync_detailed",
     "run_user_sync",
     "sync_employees_from_device_users",
 ]

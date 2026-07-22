@@ -57,7 +57,10 @@ export function Sidebar() {
   const retryPressure = (opsMetrics.data?.stale_commands ?? 0) + (opsMetrics.data?.dead_letter_commands ?? 0);
   const manualSyncMode = opsMetrics.data?.device_auto_sync_enabled === false;
   const deviceHealth = opsMetrics.data?.device_health_status ?? "UNKNOWN";
+  const incompleteDays = opsMetrics.data?.incomplete_attendance_days ?? 0;
+  const syncStale = opsMetrics.data?.attendance_sync_stale === true;
   const queueOk = failingDevices === 0 && retryPressure === 0;
+  // Primary badge reflects live device connectivity + queue — not historical incomplete days.
   const syncHealthy = manualSyncMode ? queueOk : deviceHealth === "ONLINE" && queueOk;
   const showOffline = !manualSyncMode && deviceHealth === "OFFLINE";
   const statusLabel = manualSyncMode
@@ -73,6 +76,7 @@ export function Sidebar() {
     opsMetrics.data?.device_ip && opsMetrics.data?.device_port
       ? `${opsMetrics.data.device_ip}:${opsMetrics.data.device_port}`
       : null;
+  const connectivityMode = opsMetrics.data?.device_connectivity_mode ?? "both";
 
   const refreshWorkforceViews = async () => {
     await Promise.all([
@@ -92,10 +96,20 @@ export function Sidebar() {
       const result = await syncFromDevice();
       await refreshWorkforceViews();
       window.dispatchEvent(new Event("biometrica:device-sync"));
+      const parts = [
+        `Synced ${result.new_attendance_logs} new logs from ${result.attendance_records_fetched} device records.`,
+      ];
+      if (result.skipped_corrected_punches) {
+        parts.push(`${result.skipped_corrected_punches} pre-correction punch(es) kept blocked.`);
+      }
+      if (result.punches_missing_after_insert) {
+        parts.push(`Warning: ${result.punches_missing_after_insert} punch(es) still missing after insert.`);
+      }
       setSyncState({
-        tone: "ok",
-        message: `Synced ${result.new_attendance_logs} new logs from ${result.attendance_records_fetched} device records.`,
+        tone: result.punches_missing_after_insert ? "warn" : "ok",
+        message: parts.join(" "),
       });
+
     } catch (error: unknown) {
       setSyncState({
         tone: "warn",
@@ -268,10 +282,31 @@ export function Sidebar() {
                   ? "Checking live device status..."
                   : manualSyncMode
                     ? "Manual sync — Sync now pulls all punches still on the terminal"
-                    : syncHealthy
-                      ? `${failingDevices} devices failing, ${retryPressure} sync retries pending`
-                      : `Device offline${deviceTarget ? ` (${deviceTarget})` : ""} — check connectivity`}
+                    : showOffline
+                      ? `Device offline${deviceTarget ? ` (${deviceTarget})` : ""} — check connectivity`
+                      : syncHealthy
+                        ? `Connected${deviceTarget ? ` (${deviceTarget})` : ""} · mode ${connectivityMode}`
+                        : retryPressure > 0
+                          ? `${retryPressure} sync retries pending`
+                          : failingDevices > 0
+                            ? `${failingDevices} active device(s) need attention`
+                            : `Device status: ${deviceHealth}`}
               </p>
+              {opsMetrics.data?.last_attendance_sync_at ? (
+                <p className="mt-1 text-[10px] text-ink-muted">
+                  Last successful sync:{" "}
+                  {new Date(opsMetrics.data.last_attendance_sync_at).toLocaleString()}
+                  {syncStale ? " (behind schedule — auto-sync will catch up)" : ""}
+                </p>
+              ) : (
+                <p className="mt-1 text-[10px] text-ink-muted">Waiting for first attendance sync…</p>
+              )}
+              {incompleteDays > 0 ? (
+                <p className="mt-1 text-[10px] text-ink-muted">
+                  {incompleteDays} incomplete day(s) on record — review in Operations (does not block
+                  live sync).
+                </p>
+              ) : null}
             </div>
             <div className="grid grid-cols-1 gap-2">
               <Button

@@ -58,6 +58,11 @@ export const mockOpsMetrics = {
   device_ip: "192.168.1.200",
   device_port: 4370,
   device_auto_sync_enabled: true,
+  incomplete_attendance_days: 0,
+  last_attendance_sync_at: "2026-07-22T04:46:00Z",
+  incomplete_attendance_samples: [],
+  attendance_sync_stale: false,
+  device_connectivity_mode: "both",
 };
 
 export const handlers = [

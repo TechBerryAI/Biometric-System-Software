@@ -53,7 +53,7 @@ def create_device(
     location: str | None = None,
     timezone: str | None = None,
     branch_id: str | None = None,
-    connectivity_mode: str = "pull",
+    connectivity_mode: str = "both",
     settings: Settings | None = None,
 ) -> Device:
     settings = settings or get_settings()
@@ -119,6 +119,10 @@ def ensure_default_device(db: Session, settings: Settings | None = None) -> Devi
         existing.port = settings.zk_device_port
         existing.timezone = settings.timezone
         existing.active = True
+        # Prefer push+pull so ADMS real-time punches and Celery pull both apply.
+        mode = (existing.connectivity_mode or "pull").lower()
+        if mode == "pull":
+            existing.connectivity_mode = "both"
         for sibling in db.execute(
             select(Device).where(
                 Device.ip_address == existing.ip_address,
@@ -138,7 +142,7 @@ def ensure_default_device(db: Session, settings: Settings | None = None) -> Devi
         timezone=settings.timezone,
         active=True,
         health_status="UNKNOWN",
-        connectivity_mode="pull",
+        connectivity_mode="both",
     )
     db.add(row)
     db.flush()

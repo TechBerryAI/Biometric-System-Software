@@ -13,7 +13,7 @@ from app.core.config import Settings, get_settings
 from app.domains.attendance.services.attendance_service import (
     MergedAttendanceSource,
     MergedUserSource,
-    run_device_sync,
+    run_device_sync_detailed,
     run_user_sync,
 )
 from app.domains.devices.gateway.router import DeviceGateway, get_device_gateway
@@ -75,11 +75,14 @@ def sync_device(
         logger.warning("Deferring sync for %s: active correction commands", device_id)
         return {
             "skipped": 1,
+            "skipped_reason": "correction_active",
             "users_fetched": 0,
             "users_upserted": 0,
             "fetched": 0,
             "inserted": 0,
             "placeholder_employees": 0,
+            "skipped_corrected_punches": 0,
+            "punches_missing_after_insert": 0,
         }
 
     user_source, attendance_source = _sync_sources_for_device(gateway, device)
@@ -89,7 +92,7 @@ def sync_device(
             users_fetched, users_upserted = run_user_sync(
                 db, device=user_source, settings=settings, device_id=device_id
             )
-            fetched, inserted, placeholders = run_device_sync(
+            sync_result = run_device_sync_detailed(
                 db,
                 device=attendance_source,
                 settings=settings,
@@ -99,11 +102,14 @@ def sync_device(
     except DeviceLockContentionError:
         return {
             "skipped": 1,
+            "skipped_reason": "lock_contention",
             "users_fetched": 0,
             "users_upserted": 0,
             "fetched": 0,
             "inserted": 0,
             "placeholder_employees": 0,
+            "skipped_corrected_punches": 0,
+            "punches_missing_after_insert": 0,
         }
 
     sync_state = get_or_create_sync_state(db, device_id)
@@ -118,9 +124,12 @@ def sync_device(
     return {
         "users_fetched": users_fetched,
         "users_upserted": users_upserted,
-        "fetched": fetched,
-        "inserted": inserted,
-        "placeholder_employees": placeholders,
+        "fetched": sync_result.fetched,
+        "inserted": sync_result.inserted,
+        "placeholder_employees": sync_result.placeholders,
+        "skipped_corrected_punches": sync_result.skipped_corrected_punches,
+        "punches_missing_after_insert": sync_result.punches_missing_after_insert,
+        "skipped_reason": sync_result.skipped_reason,
     }
 
 

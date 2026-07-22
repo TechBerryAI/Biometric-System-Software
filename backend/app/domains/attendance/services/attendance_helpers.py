@@ -109,6 +109,7 @@ def load_logs_for_employee_day(
     settings = settings or get_settings()
     start_utc, end_utc = day_bounds_utc(local_date, settings.timezone)
     employee_code = str(employee.device_user_id)
+    # Match profile loader: key off device user id only so remapped UUIDs cannot hide punches.
     q = (
         select(AttendanceLog)
         .where(
@@ -118,13 +119,6 @@ def load_logs_for_employee_day(
         )
         .order_by(AttendanceLog.timestamp)
     )
-    if employee.employee_uuid:
-        q = q.where(
-            or_(
-                AttendanceLog.employee_uuid == employee.employee_uuid,
-                AttendanceLog.employee_uuid.is_(None),
-            )
-        )
     return list(db.execute(q).scalars().all())
 
 
@@ -140,7 +134,6 @@ def load_day_snapshot(
     first_in, last_out, _ = summarize_day_punches(
         logs,
         tz_name=settings.timezone,
-        duplicate_window_seconds=settings.duplicate_punch_window_seconds,
     )
     return DayAttendanceSnapshot(
         first_check_in=first_in,
@@ -165,7 +158,6 @@ def summarize_employee_day_from_logs(
     first_in, last_out, total_min = summarize_day_punches(
         day_logs,
         tz_name=settings.timezone,
-        duplicate_window_seconds=settings.duplicate_punch_window_seconds,
     )
     return first_in, last_out, total_min, len(day_logs)
 
@@ -321,7 +313,7 @@ def rebuild_sessions_for_employee_date(
     pairs = pair_logs_for_day(
         logs,
         tz,
-        duplicate_window_seconds=settings.duplicate_punch_window_seconds,
+        duplicate_window_seconds=settings.session_pair_duplicate_window_seconds,
     )
     created = 0
     for cin_log, cout_log, status in pairs:

@@ -11,6 +11,10 @@ from __future__ import annotations
 # would wipe device memory without restoring punches).
 ATTLOG_TIER_B_REWRITE: bool = False
 
+# Hard stop: never call clear_attendance / clear_data on the terminal.
+# Punches must remain on the device until confirmed in attendance_logs via sync.
+ALLOW_DEVICE_ATTLOG_CLEAR: bool = False
+
 # When False, all device write / enqueue paths are blocked (cutover freeze).
 DEVICE_WRITES_ENABLED: bool = True
 

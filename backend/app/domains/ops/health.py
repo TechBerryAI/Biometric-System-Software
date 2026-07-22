@@ -63,7 +63,12 @@ def health_devices(db: Session = Depends(get_db)) -> dict[str, object]:
     registered.capabilities = {"platform": fingerprint.get("platform"), "supports_user_write": True}
     db.commit()
     failing_devices = (
-        db.execute(select(func.count()).where(Device.health_status.in_(["OFFLINE", "DEGRADED"]))).scalar_one()
+        db.execute(
+            select(func.count()).where(
+                Device.active.is_(True),
+                Device.health_status.in_(["OFFLINE", "DEGRADED"]),
+            )
+        ).scalar_one()
         or 0
     )
     return {

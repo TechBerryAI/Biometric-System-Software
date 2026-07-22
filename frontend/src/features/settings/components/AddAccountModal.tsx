@@ -22,7 +22,6 @@ type Props = {
 };
 
 const accountRoles: Array<{ value: AppUserRole; label: string }> = [
-  { value: "CEO", label: "CEO" },
   { value: "HR_ADMIN", label: "HR Admin" },
   { value: "IT_ADMIN", label: "IT Admin" },
 ];

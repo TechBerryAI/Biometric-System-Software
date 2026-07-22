@@ -48,8 +48,8 @@ def test_run_device_sync_inserts_logs(
             return_value=True,
         ),
         patch(
-            "app.domains.attendance.services.attendance_correction_service.load_corrected_employee_days",
-            return_value=set(),
+            "app.domains.attendance.services.attendance_correction_service.load_corrected_day_guards",
+            return_value={},
         ),
         patch("app.ai.cache.redis_cache.AIResponseCache"),
     ):

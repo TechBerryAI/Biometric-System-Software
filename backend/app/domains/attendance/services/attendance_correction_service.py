@@ -163,15 +163,47 @@ def _record_db_only_correction_command(
     return command
 
 
-def load_corrected_employee_days(
+def _local_tz() -> ZoneInfo:
+    return ZoneInfo(get_settings().timezone)
+
+
+def _parse_payload_datetime_ist(value: object) -> datetime | None:
+    """Parse a payload timestamp and normalize to configured local timezone (IST)."""
+    if value is None:
+        return None
+    try:
+        raw = str(value).strip()
+        if not raw:
+            return None
+        ts = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return None
+    tz = _local_tz()
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=tz)
+    return ts.astimezone(tz)
+
+
+def load_corrected_day_guards(
     db: Session,
     *,
     device_id: str,
-) -> set[tuple[str, date]]:
+) -> dict[tuple[str, date], datetime]:
     """
-    Return (device_user_id, local_date) pairs protected by a successful correction.
-    Sync must not re-import device punches for these days.
+    Return (device_user_id, local_date) → protect_until (configured local TZ / IST).
+
+    Device punches on that employee-day with timestamp <= protect_until are skipped
+    so intentional corrections are not overwritten. Punches *after* protect_until
+    (e.g. midday or evening after a morning IN-only correction) are still imported.
+
+    protect_until is the latest of intentional punch fields only:
+    new_check_in, new_check_out, and delete_timestamps.
+
+    completed_at / created_at are NOT used (a late-processed morning correction must
+    not create an afternoon wall that blocks midday punches). They are a last-resort
+    fallback only when no punch timestamps can be parsed from the payload.
     """
+    tz = _local_tz()
     rows = db.execute(
         select(DeviceCommand).where(
             DeviceCommand.device_id == device_id,
@@ -179,7 +211,7 @@ def load_corrected_employee_days(
             DeviceCommand.status == DeviceCommandStatus.SUCCESS.value,
         )
     ).scalars().all()
-    protected: set[tuple[str, date]] = set()
+    guards: dict[tuple[str, date], datetime] = {}
     for command in rows:
         payload = command.payload or {}
         user_id = str(payload.get("user_id") or "").strip()
@@ -187,10 +219,60 @@ def load_corrected_employee_days(
         if not user_id or not local_date_raw:
             continue
         try:
-            protected.add((user_id, date.fromisoformat(str(local_date_raw))))
+            day = date.fromisoformat(str(local_date_raw))
         except ValueError:
             continue
-    return protected
+        candidates: list[datetime] = []
+        for key in ("new_check_in", "new_check_out"):
+            ts = _parse_payload_datetime_ist(payload.get(key))
+            if ts is not None:
+                candidates.append(ts)
+        for raw in payload.get("delete_timestamps") or []:
+            ts = _parse_payload_datetime_ist(raw)
+            if ts is not None:
+                candidates.append(ts)
+        if not candidates:
+            for marker in (command.completed_at, command.created_at):
+                if marker is None:
+                    continue
+                if marker.tzinfo is None:
+                    candidates.append(marker.replace(tzinfo=tz))
+                else:
+                    candidates.append(marker.astimezone(tz))
+        if not candidates:
+            continue
+        protect_until = max(candidates)
+        key = (user_id, day)
+        existing = guards.get(key)
+        if existing is None or protect_until > existing:
+            guards[key] = protect_until
+    return guards
+
+
+def load_corrected_employee_days(
+    db: Session,
+    *,
+    device_id: str,
+) -> set[tuple[str, date]]:
+    """Return (device_user_id, local_date) pairs that have a successful correction guard."""
+    return set(load_corrected_day_guards(db, device_id=device_id).keys())
+
+
+def is_punch_blocked_by_correction(
+    *,
+    user_id: str,
+    timestamp: datetime,
+    local_day: date,
+    guards: dict[tuple[str, date], datetime],
+) -> bool:
+    """True when a device punch falls on a corrected day at or before protect_until."""
+    protect_until = guards.get((str(user_id).strip(), local_day))
+    if protect_until is None:
+        return False
+    tz = _local_tz()
+    ts = timestamp if timestamp.tzinfo is not None else timestamp.replace(tzinfo=tz)
+    protect = protect_until if protect_until.tzinfo is not None else protect_until.replace(tzinfo=tz)
+    return ts.astimezone(tz) <= protect.astimezone(tz)
 
 
 def _invalidate_ai_cache(settings: Settings) -> None:

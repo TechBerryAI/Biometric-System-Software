@@ -32,7 +32,7 @@ class PushResponse(BaseModel):
     accepted: bool
     device_id: str
     buffered: dict[str, int]
-    sync: dict[str, int] | None = None
+    sync: dict[str, int | str | None] | None = None
 
 
 @router.post("/push/{device_id}", response_model=PushResponse)
@@ -73,11 +73,19 @@ async def receive_device_push(
             # Persist buffer onto the device row before sync so PushConnector reads it.
             db.flush()
             sync_result = sync_device(db, device, full_resync=False)
+            missing = int(sync_result.get("punches_missing_after_insert") or 0)
             if sync_result.get("skipped"):
                 # Lock/correction deferral — keep buffer for a later attempt.
                 logger.warning(
                     "Push sync deferred for %s; retaining offline_buffer",
                     device_id,
+                )
+            elif missing > 0:
+                # Insert/reconcile incomplete — never drop punches from the buffer.
+                logger.error(
+                    "Push sync for %s left %s punches missing in DB; retaining offline_buffer",
+                    device_id,
+                    missing,
                 )
             else:
                 connector.clear_buffer()

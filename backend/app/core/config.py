@@ -69,7 +69,27 @@ class Settings(BaseSettings):
         description="How often Celery TCP-probes the device and updates health_status in the DB.",
     )
     device_sync_overlap_minutes: int = Field(default=15, ge=1, le=720, alias="DEVICE_SYNC_OVERLAP_MINUTES")
-    duplicate_punch_window_seconds: int = Field(default=30, ge=0, le=300, alias="DUPLICATE_PUNCH_WINDOW_SECONDS")
+    duplicate_punch_window_seconds: int = Field(
+        default=30,
+        ge=0,
+        le=300,
+        alias="DUPLICATE_PUNCH_WINDOW_SECONDS",
+        description="Legacy near-dup window; roster IN/OUT no longer collapses on this.",
+    )
+    session_pair_duplicate_window_seconds: int = Field(
+        default=2,
+        ge=0,
+        le=60,
+        alias="SESSION_PAIR_DUPLICATE_WINDOW_SECONDS",
+        description="Collapse only near-identical scans when pairing multi-session days.",
+    )
+    open_day_min_span_minutes: int = Field(
+        default=5,
+        ge=1,
+        le=240,
+        alias="OPEN_DAY_MIN_SPAN_MINUTES",
+        description="Employee-day counts as incomplete when last-first punch span is below this.",
+    )
     attendance_api_default_limit: int = Field(default=1000, ge=100, le=10000, alias="ATTENDANCE_API_DEFAULT_LIMIT")
     attendance_api_max_limit: int = Field(default=5000, ge=500, le=50000, alias="ATTENDANCE_API_MAX_LIMIT")
     # After each device pull, rebuild sessions for this many trailing local calendar days (1–62).

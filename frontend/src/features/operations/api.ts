@@ -6,6 +6,9 @@ export type DeviceSyncResponse = {
   attendance_records_fetched: number;
   new_attendance_logs: number;
   placeholder_employees_created?: number;
+  skipped_reason?: string | null;
+  skipped_corrected_punches?: number;
+  punches_missing_after_insert?: number;
 };
 
 /** Pull all users + attendance still on the terminal (full history, read-only). */
@@ -16,6 +19,14 @@ export async function syncFromDevice(): Promise<DeviceSyncResponse> {
   });
   return data;
 }
+
+export type IncompleteAttendanceSample = {
+  employee_code: string;
+  local_date: string;
+  punch_count: number;
+  first_punch: string | null;
+  last_punch: string | null;
+};
 
 export type OperationalMetrics = {
   queue_depth: number;
@@ -28,6 +39,10 @@ export type OperationalMetrics = {
   device_port?: number;
   device_auto_sync_enabled?: boolean;
   incomplete_attendance_days?: number;
+  last_attendance_sync_at?: string | null;
+  incomplete_attendance_samples?: IncompleteAttendanceSample[];
+  attendance_sync_stale?: boolean;
+  device_connectivity_mode?: string;
 };
 
 export type DeviceCommandRow = {

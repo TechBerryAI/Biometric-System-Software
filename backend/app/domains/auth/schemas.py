@@ -69,7 +69,7 @@ class UserCreateRequest(BaseModel):
     email: EmailStr
     full_name: str | None = Field(default=None, min_length=1, max_length=160)
     password: str = Field(min_length=8, max_length=128)
-    role: str = Field(pattern="^(SUPER_ADMIN|HR_ADMIN|IT_ADMIN|CEO)$")
+    role: str = Field(pattern="^(HR_ADMIN|IT_ADMIN)$")
     active: bool = True
 
 

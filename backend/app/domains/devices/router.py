@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -12,11 +15,12 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import Permission, require_permissions
 from app.domains.auth.models.user import User
-from app.domains.attendance.services.attendance_service import run_device_sync, run_user_sync
+from app.domains.attendance.services.attendance_service import run_device_sync_detailed, run_user_sync
 from app.domains.devices.services.device_command_service import device_session_lock, wait_for_correction_commands_clear
 from app.shared.device_exceptions import DeviceFetchError, DeviceLockContentionError
 from app.domains.devices.services.device_registry_service import update_device_health
 from app.domains.devices.services.device_service import format_device_connection_error
+from app.domains.devices.services.sync_manager_service import get_or_create_sync_state
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -29,6 +33,18 @@ class DeviceSyncResponse(BaseModel):
     placeholder_employees_created: int = Field(
         default=0,
         description="New employees created from orphan punch codes (no prior device_user_id row)",
+    )
+    skipped_reason: str | None = Field(
+        default=None,
+        description="Why sync inserted nothing without fetching: correction_active | lock_contention",
+    )
+    skipped_corrected_punches: int = Field(
+        default=0,
+        description="Device punches skipped because they fall at/before a mid-day correction guard",
+    )
+    punches_missing_after_insert: int = Field(
+        default=0,
+        description="Fetched punches still absent from DB after insert (should be 0)",
     )
 
 
@@ -61,7 +77,7 @@ def sync_from_device(
     try:
         with device_session_lock(settings.zk_device_id, settings):
             u_total, u_ins = run_user_sync(db, settings=settings)
-            a_fetch, a_ins, placeholders = run_device_sync(db, full_resync=full, settings=settings)
+            sync_result = run_device_sync_detailed(db, full_resync=full, settings=settings)
     except DeviceLockContentionError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -85,6 +101,11 @@ def sync_from_device(
         ) from exc
 
     update_device_health(db, status="ONLINE", detail="sync_ok", settings=settings)
+    sync_state = get_or_create_sync_state(db, settings.zk_device_id)
+    now = datetime.now(ZoneInfo("UTC"))
+    sync_state.last_user_sync_at = now
+    sync_state.last_attendance_sync_at = now
+    sync_state.sync_generation += 1
     cache = AIResponseCache(settings)
     cache.delete_prefix("ai:management:")
     cache.delete_prefix("ai:report:")
@@ -93,9 +114,12 @@ def sync_from_device(
     response = DeviceSyncResponse(
         users_on_device=u_total,
         new_employees=u_ins,
-        attendance_records_fetched=a_fetch,
-        new_attendance_logs=a_ins,
-        placeholder_employees_created=placeholders,
+        attendance_records_fetched=sync_result.fetched,
+        new_attendance_logs=sync_result.inserted,
+        placeholder_employees_created=sync_result.placeholders,
+        skipped_reason=sync_result.skipped_reason,
+        skipped_corrected_punches=sync_result.skipped_corrected_punches,
+        punches_missing_after_insert=sync_result.punches_missing_after_insert,
     )
     db.commit()
     return response
