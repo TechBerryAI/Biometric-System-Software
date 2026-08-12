@@ -8,6 +8,7 @@ from celery import Celery
 from celery.signals import worker_process_init
 
 from app.core.config import get_settings
+from app.workers.beat_schedule import OffsetInterval
 
 settings = get_settings()
 
@@ -52,15 +53,19 @@ celery_app.conf.update(
 )
 
 # expires on beat messages discards backlog when the worker was down longer than the interval.
+# initial_delay staggers the first fire so probe/sync/reconcile do not all hit ZK at once.
 _beat_schedule: dict[str, dict[str, object]] = {
     "process-device-commands": {
         "task": "app.workers.tasks.process_device_commands",
-        "schedule": timedelta(seconds=15),
+        "schedule": OffsetInterval(timedelta(seconds=15), initial_delay=5),
         "options": {"queue": "device_commands", "expires": 20},
     },
     "reconcile-devices": {
         "task": "app.workers.tasks.reconcile_devices",
-        "schedule": timedelta(seconds=settings.reconciliation_interval_seconds),
+        "schedule": OffsetInterval(
+            timedelta(seconds=settings.reconciliation_interval_seconds),
+            initial_delay=90,
+        ),
         "options": {
             "queue": "reconciliation",
             "expires": max(60, settings.reconciliation_interval_seconds),
@@ -68,12 +73,12 @@ _beat_schedule: dict[str, dict[str, object]] = {
     },
     "recover-stale-commands": {
         "task": "app.workers.tasks.recover_stale_commands",
-        "schedule": timedelta(seconds=60),
+        "schedule": OffsetInterval(timedelta(seconds=60), initial_delay=30),
         "options": {"queue": "device_commands", "expires": 55},
     },
     "archive-old-attendance": {
         "task": "app.workers.tasks.archive_old_attendance",
-        "schedule": timedelta(hours=24),
+        "schedule": OffsetInterval(timedelta(hours=24), initial_delay=120),
         "options": {"queue": "reconciliation", "expires": 3600},
     },
 }
@@ -81,7 +86,10 @@ _beat_schedule: dict[str, dict[str, object]] = {
 if settings.device_auto_sync_enabled:
     _beat_schedule["probe-device-connectivity"] = {
         "task": "app.workers.tasks.probe_device_connectivity",
-        "schedule": timedelta(seconds=settings.device_connectivity_probe_seconds),
+        "schedule": OffsetInterval(
+            timedelta(seconds=settings.device_connectivity_probe_seconds),
+            initial_delay=10,
+        ),
         "options": {
             "queue": "attendance_sync",
             "expires": max(30, settings.device_connectivity_probe_seconds),
@@ -89,7 +97,10 @@ if settings.device_auto_sync_enabled:
     }
     _beat_schedule["sync-attendance-from-device"] = {
         "task": "app.workers.tasks.sync_attendance_from_device",
-        "schedule": timedelta(seconds=settings.device_poll_interval_seconds),
+        "schedule": OffsetInterval(
+            timedelta(seconds=settings.device_poll_interval_seconds),
+            initial_delay=25,
+        ),
         "options": {
             "queue": "attendance_sync",
             "expires": max(60, settings.device_poll_interval_seconds),

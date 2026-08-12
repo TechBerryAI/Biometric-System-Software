@@ -13,6 +13,7 @@ from app.domains.devices.gateway.router import DeviceGateway, get_device_gateway
 from app.domains.devices.models.device import Device
 from app.domains.devices.services.heartbeat_service import probe_device_heartbeat
 from app.domains.devices.services.sync_manager_service import sync_device
+from app.shared.device_exceptions import DeviceFetchError
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,13 @@ def sync_branch(
         try:
             counts = sync_device(db, device, full_resync=full_resync, settings=settings, gateway=gateway)
             results.append({"device_id": device_id, "branch_id": branch_id or "", **counts})
+        except DeviceFetchError as exc:
+            try:
+                db.rollback()
+            except Exception:  # noqa: BLE001
+                logger.debug("Rollback after branch sync failure failed device=%s", device_id, exc_info=True)
+            logger.warning("Branch sync skipped for %s: %s", device_id, exc)
+            results.append({"device_id": device_id, "branch_id": branch_id or "", "error": str(exc)})
         except Exception as exc:  # noqa: BLE001
             try:
                 db.rollback()

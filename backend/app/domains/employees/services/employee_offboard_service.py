@@ -300,21 +300,24 @@ def build_offboard_report(
             )
 
     try:
+        from app.domains.devices.services.device_command_service import device_session_lock
+
         device_service = DeviceService(settings=cfg)
-        for user in device_service.fetch_users():
-            code = user.user_id.strip()
-            if not code:
-                continue
-            roster_match = match_employee_to_roster(
-                device_user_id=code,
-                name=user.name,
-                roster=active_roster,
-            )
-            if roster_match is not None:
-                continue
-            report.device_only_removals.append(
-                {"device_user_id": code, "uid": int(user.uid), "name": user.name}
-            )
+        with device_session_lock(cfg.zk_device_id, cfg, blocking_timeout=0):
+            for user in device_service.fetch_users():
+                code = user.user_id.strip()
+                if not code:
+                    continue
+                roster_match = match_employee_to_roster(
+                    device_user_id=code,
+                    name=user.name,
+                    roster=active_roster,
+                )
+                if roster_match is not None:
+                    continue
+                report.device_only_removals.append(
+                    {"device_user_id": code, "uid": int(user.uid), "name": user.name}
+                )
     except Exception:  # noqa: BLE001
         pass
 

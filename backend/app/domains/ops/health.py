@@ -52,12 +52,26 @@ def health_redis() -> dict[str, str]:
 
 @router.get("/health/devices", dependencies=[Depends(require_permissions(Permission.METRICS_READ))])
 def health_devices(db: Session = Depends(get_db)) -> dict[str, object]:
+    from app.domains.devices.services.device_command_service import device_session_lock
+    from app.shared.device_exceptions import DeviceLockContentionError
+
     device = DeviceService(settings=settings)
-    ok, detail = device.check_connection()
-    fingerprint = device.detect_firmware_fingerprint()
+    registered = ensure_default_device(db, settings=settings)
+    try:
+        with device_session_lock(registered.name, settings, blocking_timeout=0):
+            ok, detail = device.check_connection()
+            fingerprint = device.detect_firmware_fingerprint()
+    except DeviceLockContentionError:
+        return {
+            "status": "ok",
+            "detail": "device_busy_skip_probe",
+            "failing_devices": 0,
+            "firmware_version": registered.firmware_version,
+            "device_mode": registered.mode,
+            "skipped_reason": "device_lock_busy",
+        }
     status = "ONLINE" if ok else "OFFLINE"
     update_device_health(db, status=status, detail=detail, settings=settings)
-    registered = ensure_default_device(db, settings=settings)
     registered.firmware_version = fingerprint.get("firmware_version")
     registered.serial_number = fingerprint.get("serial_number")
     registered.capabilities = {"platform": fingerprint.get("platform"), "supports_user_write": True}

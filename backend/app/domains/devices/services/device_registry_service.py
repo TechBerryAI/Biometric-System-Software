@@ -17,7 +17,9 @@ from app.domains.devices.gateway.router import get_device_gateway
 from app.domains.devices.models.device import Device
 from app.domains.devices.models.device_sync_state import DeviceSyncState
 from app.domains.employees.models.device_user_mapping import DeviceUserMapping
+from app.domains.devices.services.device_command_service import device_session_lock
 from app.domains.devices.services.device_service import DeviceService
+from app.shared.device_exceptions import DeviceFetchError, DeviceLockContentionError
 
 logger = logging.getLogger(__name__)
 
@@ -191,13 +193,55 @@ def reconcile_device_mappings(
     db: Session,
     device: Device | None = None,
     settings: Settings | None = None,
-) -> dict[str, int]:
+) -> dict[str, int | str]:
+    """Compare device users vs mappings. Serializes ZK TCP via device_session_lock.
+
+    Non-blocking lock: if sync/command already holds the terminal, skip instead of
+    opening a second pyzk session (ZK devices typically allow one client).
+    """
     settings = settings or get_settings()
     if device is None:
         device = ensure_default_device(db, settings)
-    connection = DeviceConnectionConfig.from_device(device, settings)
-    device_users = {user.user_id for user in DeviceService(connection=connection).fetch_users()}
     device_id = device.name
+    connection = DeviceConnectionConfig.from_device(device, settings)
+    tcp_ok, tcp_detail = DeviceService(settings=settings, connection=connection).probe_tcp_connection()
+    if not tcp_ok:
+        logger.info(
+            "Skipping reconcile for %s — device TCP unreachable: %s",
+            device_id,
+            tcp_detail,
+        )
+        return {
+            "missing_on_device": 0,
+            "missing_mapping": 0,
+            "skipped": 1,
+            "skipped_reason": "device_unreachable",
+            "detail": tcp_detail,
+        }
+    try:
+        with device_session_lock(device_id, settings, blocking_timeout=0):
+            device_users = {user.user_id for user in DeviceService(connection=connection).fetch_users()}
+    except DeviceLockContentionError:
+        logger.info(
+            "Skipping reconcile for %s — device I/O lock busy (sync or write in progress)",
+            device_id,
+        )
+        return {
+            "missing_on_device": 0,
+            "missing_mapping": 0,
+            "skipped": 1,
+            "skipped_reason": "device_lock_busy",
+        }
+    except DeviceFetchError as exc:
+        detail = str(exc)
+        logger.warning("Skipping reconcile for %s — device fetch failed: %s", device_id, detail)
+        return {
+            "missing_on_device": 0,
+            "missing_mapping": 0,
+            "skipped": 1,
+            "skipped_reason": "device_fetch_failed",
+            "detail": detail,
+        }
     mapped_users = {
         row[0]
         for row in db.execute(
