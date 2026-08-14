@@ -3,7 +3,7 @@
  * Intended for VM app server use where dependencies are already present.
  *
  * Usage: npm run start:vm | node start-vm.js | node scripts/start-vm.js
- * Env:   VM_HOST=192.168.1.117
+ * Env:   VM_HOST=192.168.1.60
  *        API_PORT=8000 FRONTEND_PORT=5173
  *        API_BIND_HOST=0.0.0.0 FRONTEND_BIND_HOST=0.0.0.0
  *        START_CELERY=1 SKIP_OPEN_BROWSER=1
@@ -35,7 +35,7 @@ const FRONTEND = path.join(ROOT, "frontend");
 const children = [];
 const isWin = process.platform === "win32";
 
-const VM_HOST = process.env.VM_HOST || "192.168.1.117";
+const VM_HOST = process.env.VM_HOST || "192.168.1.60";
 const API_PORT = process.env.API_PORT || "8000";
 const FRONTEND_PORT = process.env.FRONTEND_PORT || "5173";
 const API_BIND_HOST = process.env.API_BIND_HOST || "0.0.0.0";
@@ -89,6 +89,15 @@ function ensureBackendEnv() {
   if (!fs.existsSync(envPath) && fs.existsSync(example)) {
     fs.copyFileSync(example, envPath);
     log("Created backend/.env from .env.example; set real database and device values before continuing.");
+  }
+}
+
+function ensureFrontendEnv() {
+  const envPath = path.join(FRONTEND, ".env");
+  const example = path.join(FRONTEND, ".env.example");
+  if (!fs.existsSync(envPath) && fs.existsSync(example)) {
+    fs.copyFileSync(example, envPath);
+    log("Created frontend/.env from .env.example (VITE_API_URL=/api via Vite proxy).");
   }
 }
 
@@ -272,6 +281,7 @@ async function main() {
   }
 
   ensureBackendEnv();
+  ensureFrontendEnv();
   const backendPython = await preflightChecks();
 
   const envPath = path.join(BACKEND, ".env");
