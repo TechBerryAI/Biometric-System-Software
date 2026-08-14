@@ -235,9 +235,13 @@ class DeviceService:
             self._adapter.run("check_connection", lambda _conn: True, max_attempts=2)
             return True, "connected"
         except (ZKError, OSError, TimeoutError) as exc:
-            return False, format_device_connection_error(exc, settings=self._settings)
+            return False, format_device_connection_error(
+                exc, settings=self._settings, connection=self._connection
+            )
         except RuntimeError as exc:
-            return False, format_device_connection_error(exc, settings=self._settings)
+            return False, format_device_connection_error(
+                exc, settings=self._settings, connection=self._connection
+            )
 
     def fetch_attendance(self) -> list[DeviceAttendanceRecord]:
         """Return attendance rows from device; empty list on failure."""
@@ -554,4 +558,8 @@ class DeviceService:
 
 
 def get_device_service(settings: Settings | None = None) -> DeviceService:
+    """Bootstrap/CLI helper using env connection.
+
+    Prefer ``device_service_for(db)`` for runtime paths so Settings/DB IP is used.
+    """
     return DeviceService(settings=settings)

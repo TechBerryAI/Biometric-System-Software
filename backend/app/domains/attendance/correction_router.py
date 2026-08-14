@@ -23,7 +23,6 @@ from app.domains.attendance.services.attendance_correction_service import (
 )
 from app.domains.attendance.services.attendance_helpers import load_day_snapshot
 from app.shared.device_exceptions import AttlogCorrectionError, AttlogCorrectionNotSupported, DeviceLockContentionError
-from app.domains.devices.services.device_service import DeviceService
 
 router = APIRouter(prefix="/attendance/adjust", tags=["attendance-adjust"])
 
@@ -88,8 +87,9 @@ def _adjustment_read(result: AttendanceAdjustmentResult) -> AttendanceAdjustment
 @router.get("/capabilities", response_model=CorrectionCapabilitiesRead)
 def get_correction_capabilities(
     _operator: User = Depends(require_operator_account),
+    db: Session = Depends(get_db),
 ) -> CorrectionCapabilitiesRead:
-    caps = probe_correction_capabilities(DeviceService())
+    caps = probe_correction_capabilities(db=db)
     writable = bool(caps.get("supports_write"))
     return CorrectionCapabilitiesRead(
         tier=str(caps.get("tier") or "C"),

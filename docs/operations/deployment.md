@@ -26,7 +26,8 @@ Minimum production components:
   - `CORS_ALLOW_ORIGIN_REGEX` (optional regex)
   - `CORS_ALLOW_PRIVATE_NETWORK_ORIGINS` (`true` to allow LAN/VM origins like `192.168.x.x`)
 - Device:
-  - `ZK_DEVICE_IP`, `ZK_DEVICE_PORT`, `ZK_DEVICE_PASSWORD`, `ZK_DEVICE_TIMEOUT_SECONDS`, `ZK_DEVICE_ID`
+  - `ZK_DEVICE_IP`, `ZK_DEVICE_PORT`, `TIMEZONE` — **bootstrap only** when seeding the first device row. Runtime IP, port, and timezone come from the Settings UI (`devices` table). Changing Settings does not require updating these env vars.
+  - `ZK_DEVICE_PASSWORD`, `ZK_DEVICE_TIMEOUT_SECONDS`, `ZK_DEVICE_ID`
   - `ZK_OMIT_PING`, `DEVICE_AUTO_SYNC_ENABLED`
 - Locale / auth:
   - `TIMEZONE`

@@ -62,9 +62,9 @@ def test_company_operations_day(client: TestClient, db_session: Session) -> None
     # 6) Offboard / delete employee
     with (
         patch("app.domains.employees.services.employee_offboard_service.process_command"),
-        patch("app.domains.employees.services.employee_offboard_service.DeviceService") as device_cls,
+        patch("app.domains.employees.services.employee_offboard_service.device_service_for") as svc_for,
     ):
-        device_cls.return_value.resolve_uid_for_user_id.return_value = 1
+        svc_for.return_value.resolve_uid_for_user_id.return_value = 1
         deleted = client.delete(f"/employees/{employee_id}", headers=headers)
     assert deleted.status_code == 204
 

@@ -39,25 +39,33 @@ def test_health_redis(client: TestClient, admin_headers: dict[str, str]) -> None
 @pytest.mark.testid("BE-API-HLTH-004")
 def test_health_devices(client: TestClient, admin_headers: dict[str, str]) -> None:
     with (
-        patch("app.domains.ops.health.DeviceService") as device_cls,
+        patch("app.domains.ops.health.device_service_for") as svc_for,
         patch("app.domains.ops.health.update_device_health") as _update,
         patch("app.domains.ops.health.ensure_default_device") as ensure,
     ):
-        instance = device_cls.return_value
+        instance = MagicMock()
         instance.check_connection.return_value = (True, "ok")
         instance.detect_firmware_fingerprint.return_value = {
             "firmware_version": "1.0.0",
             "serial_number": "SN-TEST",
             "platform": "test",
         }
+        instance.connection.ip_address = "192.168.1.85"
+        instance.connection.port = 4370
+        svc_for.return_value = instance
         registered = MagicMock()
+        registered.name = "main-entrance"
         registered.mode = "NORMAL"
+        registered.ip_address = "192.168.1.85"
         ensure.return_value = registered
         response = client.get("/health/devices", headers=admin_headers)
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
     assert body["firmware_version"] == "1.0.0"
+    svc_for.assert_called_once()
+    called_kwargs = svc_for.call_args.kwargs
+    assert called_kwargs.get("device_name") == "main-entrance"
 
 
 @pytest.mark.testid("BE-API-HLTH-005")

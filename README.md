@@ -101,8 +101,9 @@ Update at minimum:
 
 - `DATABASE_URL`
 - `REDIS_URL`
-- `ZK_DEVICE_IP`
 - `JWT_SECRET_KEY`
+
+Device IP/port/timezone are managed in the Settings UI after first run. Optional `ZK_DEVICE_IP` / `ZK_DEVICE_PORT` / `TIMEZONE` only seed the first device row.
 
 ### 2) Install and run tests
 

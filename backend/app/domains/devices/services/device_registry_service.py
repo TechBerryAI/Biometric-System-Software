@@ -165,6 +165,31 @@ def ensure_default_device(db: Session, settings: Settings | None = None) -> Devi
     return row
 
 
+def device_service_for(
+    db: Session,
+    *,
+    device_name: str | None = None,
+    settings: Settings | None = None,
+) -> DeviceService:
+    """Build a DeviceService from the Settings/DB device row (never env IP alone).
+
+    Runtime TCP and operator-facing errors must use devices.ip_address from
+    PostgreSQL. Env ZK_DEVICE_IP is only used when ensure_default_device seeds
+    the first row.
+    """
+    settings = settings or get_settings()
+    if device_name:
+        device = get_device_by_name(db, device_name)
+        if device is None:
+            raise ValueError(f"Device '{device_name}' not found in registry.")
+    else:
+        device = ensure_default_device(db, settings)
+    return DeviceService(
+        settings=settings,
+        connection=DeviceConnectionConfig.from_device(device, settings),
+    )
+
+
 def update_device_health_for_device(
     db: Session,
     device: Device,

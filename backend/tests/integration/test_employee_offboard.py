@@ -26,11 +26,10 @@ def test_offboard_employee_sets_departed_at(db_session: Session) -> None:
     db_session.refresh(actor)
 
     with (
-        patch("app.domains.employees.services.employee_offboard_service.DeviceService") as device_cls,
+        patch("app.domains.employees.services.employee_offboard_service.device_service_for") as svc_for,
         patch("app.domains.employees.services.employee_offboard_service.process_command"),
     ):
-        device_cls.return_value.resolve_uid_for_user_id.return_value = 1
-        device_cls.return_value = MagicMock(resolve_uid_for_user_id=MagicMock(return_value=1))
+        svc_for.return_value = MagicMock(resolve_uid_for_user_id=MagicMock(return_value=1))
         applied = offboard_employee(
             db_session,
             emp,

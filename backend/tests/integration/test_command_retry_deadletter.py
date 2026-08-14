@@ -17,7 +17,7 @@ from app.domains.devices.services.device_command_service import (
     claim_pending_commands,
     process_command,
 )
-from tests.factories import make_control_state, make_device_command
+from tests.factories import make_control_state, make_device, make_device_command
 
 
 @pytest.mark.integration
@@ -72,6 +72,7 @@ def test_process_command_failure_transitions_to_retry_then_dead_letter(
 ) -> None:
     db_session.add(make_control_state())
     settings = get_settings()
+    db_session.add(make_device(name="main-entrance", ip_address="192.168.1.85"))
     cmd = make_device_command(
         command_type="UPSERT_USER",
         payload={"user_id": "TBIFAIL", "name": "Fail Me"},

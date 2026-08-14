@@ -16,8 +16,11 @@ from app.core.database import get_db
 from app.core.security import Permission, require_permissions
 from app.domains.devices.models.device import Device
 from app.domains.devices.models.device_command import DeviceCommand, DeviceCommandStatus
-from app.domains.devices.services.device_registry_service import ensure_default_device, update_device_health
-from app.domains.devices.services.device_service import DeviceService
+from app.domains.devices.services.device_registry_service import (
+    device_service_for,
+    ensure_default_device,
+    update_device_health,
+)
 from app.domains.ops.services.sync_state_metrics import (
     count_reconciliation_completed,
     count_reconciliation_pending,
@@ -55,8 +58,8 @@ def health_devices(db: Session = Depends(get_db)) -> dict[str, object]:
     from app.domains.devices.services.device_command_service import device_session_lock
     from app.shared.device_exceptions import DeviceLockContentionError
 
-    device = DeviceService(settings=settings)
     registered = ensure_default_device(db, settings=settings)
+    device = device_service_for(db, device_name=registered.name, settings=settings)
     try:
         with device_session_lock(registered.name, settings, blocking_timeout=0):
             ok, detail = device.check_connection()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probe the configured biometric device for attlog correction tier (A/B/C)."""
+"""Probe the Settings/DB biometric device for attlog correction tier (A/B/C)."""
 
 from __future__ import annotations
 
@@ -11,22 +11,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core import device_policy
 from app.core.config import get_settings
-from app.domains.devices.services.device_service import DeviceService
+from app.core.database import SessionLocal
+from app.domains.devices.services.device_registry_service import device_service_for
 
 
 def main() -> int:
     settings = get_settings()
-    device = DeviceService(settings=settings)
+    db = SessionLocal()
     try:
+        device = device_service_for(db, settings=settings)
+        conn = device.connection
         caps = device.probe_attlog_capabilities()
     except Exception as exc:  # noqa: BLE001
         print(json.dumps({"error": str(exc), "tier": "unknown"}, indent=2))
         return 1
+    finally:
+        db.close()
 
     tier = str(caps.get("tier") or "C")
     payload = {
-        "device_id": settings.zk_device_id,
-        "device_ip": settings.zk_device_ip,
+        "device_id": conn.device_id,
+        "device_ip": conn.ip_address,
         "tier": tier,
         "supports_write": bool(caps.get("supports_write")),
         "supports_selective_delete": bool(caps.get("supports_selective_delete")),

@@ -109,9 +109,9 @@ def test_delete_offboard_employee(
 
     with (
         patch("app.domains.employees.services.employee_offboard_service.process_command"),
-        patch("app.domains.employees.services.employee_offboard_service.DeviceService") as device_cls,
+        patch("app.domains.employees.services.employee_offboard_service.device_service_for") as svc_for,
     ):
-        device_cls.return_value.resolve_uid_for_user_id.return_value = 1
+        svc_for.return_value.resolve_uid_for_user_id.return_value = 1
         response = client.delete(f"/employees/{emp_id}", headers=admin_headers)
     assert response.status_code == 204
 

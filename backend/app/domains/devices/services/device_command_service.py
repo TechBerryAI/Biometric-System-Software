@@ -614,9 +614,12 @@ def _mark_correction_failed_if_needed(db: Session, command: DeviceCommand, *, er
 
 def _device_service_for_command(db: Session, command: DeviceCommand, settings: Settings) -> DeviceService:
     device = db.execute(select(Device).where(Device.name == command.device_id)).scalar_one_or_none()
-    if device is not None:
-        return DeviceService(connection=DeviceConnectionConfig.from_device(device, settings))
-    return DeviceService(settings=settings)
+    if device is None:
+        raise ValueError(
+            f"Device '{command.device_id}' not found in registry; "
+            "refusing env IP fallback."
+        )
+    return DeviceService(connection=DeviceConnectionConfig.from_device(device, settings))
 
 
 def process_command(
@@ -673,7 +676,6 @@ def process_command(
             _mark_correction_failed_if_needed(db, command, error_message=command.last_error)
         return
 
-    device_service = _device_service_for_command(db, command, settings)
     lock_heartbeat = _LockHeartbeat(
         lock,
         period_seconds=settings.command_heartbeat_seconds,
@@ -681,6 +683,14 @@ def process_command(
     )
     lock_heartbeat.start()
     try:
+        try:
+            device_service = _device_service_for_command(db, command, settings)
+        except ValueError as exc:
+            command.status = DeviceCommandStatus.FAILED.value
+            command.completed_at = _utcnow()
+            command.last_error = str(exc)
+            _mark_correction_failed_if_needed(db, command, error_message=command.last_error)
+            return
         allowlist = DeviceService.safe_command_allowlist()
         if command.command_type not in allowlist:
             command.status = DeviceCommandStatus.FAILED.value

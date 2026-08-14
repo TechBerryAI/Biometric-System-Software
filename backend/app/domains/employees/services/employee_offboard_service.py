@@ -21,6 +21,7 @@ from app.domains.devices.models.device import Device
 from app.domains.employees.models.device_user_mapping import DeviceUserMapping
 from app.domains.employees.models.employee import Employee
 from app.domains.devices.services.device_command_service import enqueue_device_command, process_command
+from app.domains.devices.services.device_registry_service import device_service_for
 from app.domains.devices.services.device_service import DeviceService
 
 logger = logging.getLogger(__name__)
@@ -128,7 +129,7 @@ def offboard_employee(
 
     uid: int | None = None
     try:
-        device_service = DeviceService(settings=cfg)
+        device_service = device_service_for(db, settings=cfg)
         uid = _resolve_device_uid(employee, device_service=device_service)
     except Exception:  # noqa: BLE001
         uid = _resolve_device_uid(employee)
@@ -167,7 +168,7 @@ def offboard_device_user_only(
     cfg = settings or get_settings()
     resolved_uid = uid
     if resolved_uid is None or resolved_uid <= 0:
-        device_service = DeviceService(settings=cfg)
+        device_service = device_service_for(db, settings=cfg)
         resolved_uid = device_service.resolve_uid_for_user_id(user_id)
     try:
         enqueue_delete_user_command(
@@ -203,6 +204,7 @@ def restore_device_writable_state(db: Session, *, device_id: str | None = None) 
 
 
 def delete_device_user_verified(
+    db: Session,
     *,
     user_id: str,
     uid: int | None = None,
@@ -212,7 +214,7 @@ def delete_device_user_verified(
     from app.domains.devices.services.device_command_service import device_session_lock
 
     cfg = settings or get_settings()
-    service = DeviceService(settings=cfg)
+    service = device_service_for(db, settings=cfg)
     normalized_id = user_id.strip()
     with device_session_lock(cfg.zk_device_id, cfg):
         already_gone, _ = service.verify_user_deleted(user_id=normalized_id)
@@ -302,7 +304,7 @@ def build_offboard_report(
     try:
         from app.domains.devices.services.device_command_service import device_session_lock
 
-        device_service = DeviceService(settings=cfg)
+        device_service = device_service_for(db, settings=cfg)
         with device_session_lock(cfg.zk_device_id, cfg, blocking_timeout=0):
             for user in device_service.fetch_users():
                 code = user.user_id.strip()
@@ -403,7 +405,7 @@ def offboard_device_remnants_only(
         user_id = str(row["device_user_id"])
         uid = int(row["uid"]) if row.get("uid") is not None else None
         try:
-            if delete_device_user_verified(user_id=user_id, uid=uid, settings=cfg):
+            if delete_device_user_verified(db, user_id=user_id, uid=uid, settings=cfg):
                 verified += 1
             else:
                 failed += 1

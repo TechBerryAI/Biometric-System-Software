@@ -99,7 +99,7 @@ def sync_from_device(
             detail=str(exc),
         ) from exc
     except (ZKError, DeviceFetchError) as exc:
-        detail = format_device_connection_error(exc, settings=settings)
+        detail = format_device_connection_error(exc, settings=settings, connection=connection)
         update_device_health(db, status="OFFLINE", detail=detail, settings=settings)
         db.commit()
         raise HTTPException(
@@ -107,7 +107,7 @@ def sync_from_device(
             detail=detail,
         ) from exc
     except OSError as exc:
-        detail = format_device_connection_error(exc, settings=settings)
+        detail = format_device_connection_error(exc, settings=settings, connection=connection)
         update_device_health(db, status="OFFLINE", detail=detail, settings=settings)
         db.commit()
         raise HTTPException(

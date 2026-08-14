@@ -23,7 +23,8 @@ from app.domains.attendance.services.attendance_helpers import (
     rebuild_sessions_for_local_date,
     resolve_mapping_for_punch as _resolve_mapping_for_punch,
 )
-from app.domains.devices.services.device_service import DeviceAttendanceRecord, DeviceService, DeviceUser
+from app.domains.devices.services.device_service import DeviceAttendanceRecord, DeviceUser
+from app.domains.devices.services.device_registry_service import device_service_for
 from app.domains.employees.services.employee_offboard_service import enqueue_delete_user_command
 from app.domains.attendance.services.punch_classification import device_attendance_punch_type
 
@@ -534,7 +535,7 @@ def run_device_sync_detailed(
             placeholders=0,
             skipped_reason="correction_active",
         )
-    device = device or DeviceService(settings=settings)
+    device = device or device_service_for(db, device_name=resolved_device_id, settings=settings)
     floor = None if full_resync else _incremental_sync_floor(db, device_id=resolved_device_id, settings=settings)
     fetched_records = device.fetch_attendance()
     fetched_count = len(fetched_records)
@@ -639,7 +640,7 @@ def run_user_sync(
     """Fetch users from device and insert new employees."""
     settings = settings or get_settings()
     resolved_device_id = device_id or settings.zk_device_id
-    device = device or DeviceService(settings=settings)
+    device = device or device_service_for(db, device_name=resolved_device_id, settings=settings)
     users = device.fetch_users()
     inserted = sync_employees_from_device_users(db, users, device_id=resolved_device_id)
     return len(users), inserted

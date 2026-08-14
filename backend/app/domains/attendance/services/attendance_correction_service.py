@@ -29,6 +29,7 @@ from app.domains.devices.services.device_command_service import (
     process_command,
 )
 from app.shared.device_exceptions import AttlogCorrectionError, AttlogCorrectionNotSupported
+from app.domains.devices.services.device_registry_service import device_service_for
 from app.domains.devices.services.device_service import DeviceService
 
 logger = logging.getLogger(__name__)
@@ -439,7 +440,7 @@ def apply_attendance_correction(
 
     with employee_day_lock(employee_id, local_date, settings):
         before = load_day_snapshot(db, employee=employee, local_date=local_date, settings=settings)
-        device = device_service or DeviceService(settings=settings)
+        device = device_service or device_service_for(db, settings=settings)
 
         cache_key = settings.zk_device_id
         cached = _CAPS_PROBE_CACHE.get(cache_key)
@@ -634,6 +635,7 @@ def get_adjustment_command_status(
 def probe_correction_capabilities(
     device_service: DeviceService | None = None,
     settings: Settings | None = None,
+    db: Session | None = None,
 ) -> dict[str, object]:
     settings = settings or get_settings()
     cache_key = settings.zk_device_id
@@ -642,7 +644,12 @@ def probe_correction_capabilities(
     if cached is not None and now - cached[0] < _CAPS_PROBE_CACHE_TTL:
         return dict(cached[1])
 
-    device = device_service or DeviceService(settings=settings)
+    if device_service is None:
+        if db is None:
+            raise ValueError("db is required when device_service is omitted so Settings/DB IP is used.")
+        device = device_service_for(db, settings=settings)
+    else:
+        device = device_service
     with device_session_lock(settings.zk_device_id, settings):
         caps = _probe_device_caps(device, settings)
     writable = bool(caps.get("supports_write"))
