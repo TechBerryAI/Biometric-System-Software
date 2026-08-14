@@ -76,7 +76,7 @@ class AnomalyService:
         self._cache = AIResponseCache(settings)
 
     def detect_and_explain(self, db: Session, *, lookback_days: int = 30) -> AnomalyDetectionResponse:
-        tz = ZoneInfo(self._settings.timezone)
+        tz = ZoneInfo(self._settings.resolved_timezone())
         end_day = datetime.now(tz).date()
         start_day = end_day - timedelta(days=max(lookback_days - 1, 1))
 
@@ -99,7 +99,7 @@ class AnomalyService:
 
     def _build_features(self, db: Session, *, start_day: date, end_day: date) -> list[_DayFeatures]:
         out: list[_DayFeatures] = []
-        tz = ZoneInfo(self._settings.timezone)
+        tz = ZoneInfo(self._settings.resolved_timezone())
         summaries_by_day = compute_daily_summaries_range(db, start_day, end_day, self._settings)
         current = start_day
         while current <= end_day:
@@ -281,7 +281,7 @@ class AnomalyService:
             explanation=None,
             recommendation=None,
             metadata={"unit": "percent", "delta": round(float(value - baseline), 3)},
-            created_at=datetime.now(ZoneInfo(self._settings.timezone)),
+            created_at=datetime.now(ZoneInfo(self._settings.resolved_timezone())),
         )
 
     def _attach_ai_explanations(

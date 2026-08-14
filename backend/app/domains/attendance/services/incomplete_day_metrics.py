@@ -29,7 +29,7 @@ def count_incomplete_attendance_days(
     span_minutes = (
         settings.open_day_min_span_minutes if min_span_minutes is None else max(int(min_span_minutes), 1)
     )
-    tz_name = settings.timezone
+    tz_name = settings.resolved_timezone()
     tz = ZoneInfo(tz_name)
     now_local = datetime.now(tz)
     end_day = now_local.date() if include_today else now_local.date() - timedelta(days=1)
@@ -117,7 +117,7 @@ def list_incomplete_attendance_days(
     span_minutes = (
         settings.open_day_min_span_minutes if min_span_minutes is None else max(int(min_span_minutes), 1)
     )
-    tz_name = settings.timezone
+    tz_name = settings.resolved_timezone()
     tz = ZoneInfo(tz_name)
     now_local = datetime.now(tz)
     end_day = now_local.date() if include_today else now_local.date() - timedelta(days=1)

@@ -24,6 +24,25 @@ def test_ensure_default_device_upgrades_pull_to_both(db_session: Session) -> Non
     assert ensured.connectivity_mode == "both"
 
 
+@pytest.mark.testid("BE-UNIT-CAPTURE-004")
+def test_ensure_default_device_preserves_saved_connection(db_session: Session) -> None:
+    settings = get_settings()
+    device = make_device(
+        name=settings.zk_device_id,
+        ip_address="10.20.30.40",
+        port=5000,
+        connectivity_mode="both",
+    )
+    device.timezone = "Asia/Kolkata"
+    db_session.add(device)
+    db_session.commit()
+
+    ensured = ensure_default_device(db_session, settings=settings)
+    assert ensured.ip_address == "10.20.30.40"
+    assert ensured.port == 5000
+    assert ensured.timezone == "Asia/Kolkata"
+
+
 @pytest.mark.testid("BE-UNIT-CAPTURE-002")
 def test_create_device_defaults_to_both(db_session: Session) -> None:
     row = create_device(db_session, name="lobby-both", ip_address="10.0.0.50")

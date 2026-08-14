@@ -31,7 +31,7 @@ class DeviceConnectionConfig:
             timeout_seconds=settings.zk_device_timeout_seconds,
             force_udp=settings.zk_force_udp,
             omit_ping=settings.zk_omit_ping,
-            timezone=settings.timezone,
+            timezone=settings.resolved_timezone(),
         )
 
     @classmethod
@@ -55,5 +55,5 @@ class DeviceConnectionConfig:
             timeout_seconds=cfg.zk_device_timeout_seconds,
             force_udp=cfg.zk_force_udp,
             omit_ping=cfg.zk_omit_ping,
-            timezone=device.timezone or cfg.timezone,
+            timezone=device.timezone or cfg.resolved_timezone(),
         )

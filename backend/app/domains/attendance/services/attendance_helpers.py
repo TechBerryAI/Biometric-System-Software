@@ -107,7 +107,7 @@ def load_logs_for_employee_day(
     settings: Settings | None = None,
 ) -> list[AttendanceLog]:
     settings = settings or get_settings()
-    start_utc, end_utc = day_bounds_utc(local_date, settings.timezone)
+    start_utc, end_utc = day_bounds_utc(local_date, settings.resolved_timezone())
     employee_code = str(employee.device_user_id)
     # Match profile loader: key off device user id only so remapped UUIDs cannot hide punches.
     q = (
@@ -133,7 +133,7 @@ def load_day_snapshot(
     logs = load_logs_for_employee_day(db, employee=employee, local_date=local_date, settings=settings)
     first_in, last_out, _ = summarize_day_punches(
         logs,
-        tz_name=settings.timezone,
+        tz_name=settings.resolved_timezone(),
     )
     return DayAttendanceSnapshot(
         first_check_in=first_in,
@@ -157,7 +157,7 @@ def summarize_employee_day_from_logs(
     )
     first_in, last_out, total_min = summarize_day_punches(
         day_logs,
-        tz_name=settings.timezone,
+        tz_name=settings.resolved_timezone(),
     )
     return first_in, last_out, total_min, len(day_logs)
 
@@ -174,9 +174,9 @@ def load_raw_punches_for_dates(
     settings = settings or get_settings()
     if not employees or end_date < start_date:
         return {}
-    tz = ZoneInfo(settings.timezone)
-    start_utc, _ = day_bounds_utc(start_date, settings.timezone)
-    _, end_utc = day_bounds_utc(end_date, settings.timezone)
+    tz = ZoneInfo(settings.resolved_timezone())
+    start_utc, _ = day_bounds_utc(start_date, settings.resolved_timezone())
+    _, end_utc = day_bounds_utc(end_date, settings.resolved_timezone())
     code_to_emp = {str(e.device_user_id): e for e in employees if e.device_user_id}
     codes = list(code_to_emp.keys())
     if not codes:
@@ -291,8 +291,8 @@ def rebuild_sessions_for_employee_date(
     employee = db.get(Employee, employee_id)
     if employee is None:
         return 0
-    tz = ZoneInfo(settings.timezone)
-    start_utc, end_utc = day_bounds_utc(local_date, settings.timezone)
+    tz = ZoneInfo(settings.resolved_timezone())
+    start_utc, end_utc = day_bounds_utc(local_date, settings.resolved_timezone())
 
     db.execute(
         delete(AttendanceSession).where(
@@ -371,7 +371,7 @@ def replace_employee_day_logs(
 ) -> None:
     """Delete all logs for employee+day and insert the corrected IN/OUT punches."""
     settings = settings or get_settings()
-    start_utc, end_utc = day_bounds_utc(local_date, settings.timezone)
+    start_utc, end_utc = day_bounds_utc(local_date, settings.resolved_timezone())
     employee_code = str(employee.device_user_id)
 
     existing = list(

@@ -53,7 +53,7 @@ class DashboardService:
                 cached["cache_hit"] = True
                 return DashboardKpis.model_validate(cached)
 
-        tz = ZoneInfo(self._settings.timezone)
+        tz = ZoneInfo(self._settings.resolved_timezone())
         now = datetime.now(tz)
         end_day = now.date()
         start_day = end_day - timedelta(days=max(days - 1, 0))

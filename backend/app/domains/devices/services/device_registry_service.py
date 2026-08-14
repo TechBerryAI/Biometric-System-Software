@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.app_timezone import set_app_timezone
 from app.domains.devices.connection import DeviceConnectionConfig
 from app.domains.devices.gateway.router import get_device_gateway
 from app.domains.devices.models.device import Device
@@ -98,6 +99,8 @@ def update_device(db: Session, device: Device, **fields: Any) -> Device:
         if key in allowed and value is not None:
             setattr(device, key, value)
     db.flush()
+    if device.timezone:
+        set_app_timezone(device.timezone)
     get_device_gateway().invalidate(device.name)
     return device
 
@@ -113,29 +116,37 @@ def deactivate_device(db: Session, device: Device, *, reason: str | None = None)
     return device
 
 
+def _deactivate_duplicate_ip_siblings(db: Session, device: Device) -> None:
+    for sibling in db.execute(
+        select(Device).where(
+            Device.ip_address == device.ip_address,
+            Device.id != device.id,
+            Device.active.is_(True),
+        )
+    ).scalars().all():
+        sibling.active = False
+        sibling.health_status = "OFFLINE"
+        sibling.mode = "OFFLINE"
+        sibling.quarantine_reason = sibling.quarantine_reason or "Duplicate IP merged into canonical device"
+
+
 def ensure_default_device(db: Session, settings: Settings | None = None) -> Device:
+    """Ensure the canonical device row exists.
+
+    Seeds IP/port/timezone from env only on first create. Existing rows keep
+    values saved via the Settings UI / fleet PATCH so env no longer overwrites them.
+    """
     settings = settings or get_settings()
     existing = db.execute(select(Device).where(Device.name == settings.zk_device_id)).scalar_one_or_none()
     if existing is not None:
-        existing.ip_address = settings.zk_device_ip
-        existing.port = settings.zk_device_port
-        existing.timezone = settings.timezone
         existing.active = True
         # Prefer push+pull so ADMS real-time punches and Celery pull both apply.
         mode = (existing.connectivity_mode or "pull").lower()
         if mode == "pull":
             existing.connectivity_mode = "both"
-        for sibling in db.execute(
-            select(Device).where(
-                Device.ip_address == existing.ip_address,
-                Device.id != existing.id,
-                Device.active.is_(True),
-            )
-        ).scalars().all():
-            sibling.active = False
-            sibling.health_status = "OFFLINE"
-            sibling.mode = "OFFLINE"
-            sibling.quarantine_reason = sibling.quarantine_reason or "Duplicate IP merged into canonical device"
+        _deactivate_duplicate_ip_siblings(db, existing)
+        if existing.timezone:
+            set_app_timezone(existing.timezone)
         return existing
     row = Device(
         name=settings.zk_device_id,
@@ -149,17 +160,8 @@ def ensure_default_device(db: Session, settings: Settings | None = None) -> Devi
     db.add(row)
     db.flush()
     db.add(DeviceSyncState(device_id=row.name))
-    for sibling in db.execute(
-        select(Device).where(
-            Device.ip_address == row.ip_address,
-            Device.id != row.id,
-            Device.active.is_(True),
-        )
-    ).scalars().all():
-        sibling.active = False
-        sibling.health_status = "OFFLINE"
-        sibling.mode = "OFFLINE"
-        sibling.quarantine_reason = sibling.quarantine_reason or "Duplicate IP merged into canonical device"
+    _deactivate_duplicate_ip_siblings(db, row)
+    set_app_timezone(row.timezone)
     return row
 
 

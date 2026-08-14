@@ -73,7 +73,7 @@ def compute_daily_summaries_range(
     raw_by_day = load_raw_punches_for_dates(
         db, start_date=start_date, end_date=end_date, employees=employees, settings=cfg
     )
-    sessions = _load_sessions_for_dates(db, start_date=start_date, end_date=end_date, tz_name=cfg.timezone)
+    sessions = _load_sessions_for_dates(db, start_date=start_date, end_date=end_date, tz_name=cfg.resolved_timezone())
 
     out: dict[date, list[DailySummaryRow]] = {}
     d = start_date

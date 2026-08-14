@@ -67,7 +67,7 @@ def _validate_correction_times(
     new_check_out: datetime | None,
     settings: Settings,
 ) -> None:
-    tz = ZoneInfo(settings.timezone)
+    tz = ZoneInfo(settings.resolved_timezone())
     start_local = datetime.combine(local_date, dt_time.min, tzinfo=tz)
     end_local = start_local + timedelta(days=1)
     for label, ts in (("check_in", new_check_in), ("check_out", new_check_out)):
@@ -75,7 +75,7 @@ def _validate_correction_times(
             continue
         local = ts.astimezone(tz)
         if local < start_local or local >= end_local:
-            raise ValueError(f"{label} must fall on {local_date.isoformat()} in configured TIMEZONE.")
+            raise ValueError(f"{label} must fall on {local_date.isoformat()} in the configured timezone.")
     if new_check_out is not None and new_check_out <= new_check_in:
         raise ValueError("check_out must be after check_in.")
 
@@ -164,7 +164,7 @@ def _record_db_only_correction_command(
 
 
 def _local_tz() -> ZoneInfo:
-    return ZoneInfo(get_settings().timezone)
+    return ZoneInfo(get_settings().resolved_timezone())
 
 
 def _parse_payload_datetime_ist(value: object) -> datetime | None:

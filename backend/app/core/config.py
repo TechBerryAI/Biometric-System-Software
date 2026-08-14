@@ -46,15 +46,27 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     redis_namespace: str = Field(default="biometric", alias="REDIS_NAMESPACE")
 
-    zk_device_ip: str = Field(default="192.168.1.200", alias="ZK_DEVICE_IP")
-    zk_device_port: int = Field(default=4370, alias="ZK_DEVICE_PORT")
+    zk_device_ip: str = Field(
+        default="192.168.1.200",
+        alias="ZK_DEVICE_IP",
+        description="Bootstrap only when seeding the first device row; runtime IP is managed in Settings.",
+    )
+    zk_device_port: int = Field(
+        default=4370,
+        alias="ZK_DEVICE_PORT",
+        description="Bootstrap only when seeding the first device row; runtime port is managed in Settings.",
+    )
     zk_device_password: int = Field(default=0, alias="ZK_DEVICE_PASSWORD")
     zk_device_timeout_seconds: int = Field(default=30, alias="ZK_DEVICE_TIMEOUT_SECONDS")
     zk_device_id: str = Field(default="main-entrance", alias="ZK_DEVICE_ID")
     zk_force_udp: bool = Field(default=False, alias="ZK_FORCE_UDP")
     zk_omit_ping: bool = Field(default=False, alias="ZK_OMIT_PING")
 
-    timezone: str = Field(default="UTC", alias="TIMEZONE")
+    timezone: str = Field(
+        default="UTC",
+        alias="TIMEZONE",
+        description="Bootstrap only; runtime timezone follows the primary device (Settings UI).",
+    )
     device_poll_interval_seconds: int = Field(default=120, alias="DEVICE_POLL_INTERVAL_SECONDS")
     device_auto_sync_enabled: bool = Field(
         default=True,
@@ -209,6 +221,12 @@ class Settings(BaseSettings):
             seen.add(origin)
             deduped.append(origin)
         return deduped
+
+    def resolved_timezone(self) -> str:
+        """Timezone for attendance rollups: Settings UI / device row, else bootstrap default."""
+        from app.core.app_timezone import get_timezone_override
+
+        return get_timezone_override() or self.timezone
 
 
 @lru_cache

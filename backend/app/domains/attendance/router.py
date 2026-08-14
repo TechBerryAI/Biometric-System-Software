@@ -48,7 +48,7 @@ def list_attendance_logs(
 ) -> list[AttendanceLogRead]:
     """Attendance punches from attendance_logs (single source of truth)."""
     settings = get_settings()
-    tz = settings.timezone
+    tz = settings.resolved_timezone()
     max_limit = settings.attendance_api_max_limit
     applied_limit = min(limit if limit is not None else settings.attendance_api_default_limit, max_limit)
     q = select(AttendanceLog).order_by(AttendanceLog.timestamp.desc()).offset(offset).limit(applied_limit)
@@ -88,7 +88,7 @@ def list_attendance_sessions(
     db: Session = Depends(get_db),
 ) -> list[AttendanceSession]:
     settings = get_settings()
-    tz = settings.timezone
+    tz = settings.resolved_timezone()
     max_limit = settings.attendance_api_max_limit
     applied_limit = min(limit if limit is not None else settings.attendance_api_default_limit, max_limit)
     q = select(AttendanceSession).order_by(AttendanceSession.check_in.desc()).limit(applied_limit)
@@ -109,7 +109,7 @@ def daily_summary(
     db: Session = Depends(get_db),
 ) -> list[DailySummaryRow]:
     settings = get_settings()
-    tz_name = settings.timezone
+    tz_name = settings.resolved_timezone()
     if summary_date is None:
         summary_date = datetime.now(ZoneInfo(tz_name)).date()
     return compute_daily_summary(db, summary_date, settings)
@@ -210,7 +210,7 @@ def list_employee_attendance(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
 
     settings = get_settings()
-    tz = settings.timezone
+    tz = settings.resolved_timezone()
     q = select(AttendanceSession).where(AttendanceSession.employee_id == employee_id)
     if date_from is not None:
         start, _ = day_bounds_utc(date_from, tz)

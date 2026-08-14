@@ -442,7 +442,7 @@ def count_fetched_missing_in_db(
     if not records:
         return 0
     settings = get_settings()
-    tz = ZoneInfo(settings.timezone)
+    tz = ZoneInfo(settings.resolved_timezone())
     keys = {
         _record_epoch_key(
             row,
@@ -542,7 +542,7 @@ def run_device_sync_detailed(
         fetched_records = [row for row in fetched_records if row.timestamp >= floor]
     records = _dedupe_device_records(fetched_records)
 
-    tz = ZoneInfo(settings.timezone)
+    tz = ZoneInfo(settings.resolved_timezone())
     guards = load_corrected_day_guards(db, device_id=resolved_device_id)
     skipped_corrected = 0
     if guards:

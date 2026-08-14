@@ -19,7 +19,7 @@ class DeviceFailurePredictionService:
         self._settings = settings
 
     def predict(self, db: Session) -> DeviceFailurePredictionResponse:
-        tz = ZoneInfo(self._settings.timezone)
+        tz = ZoneInfo(self._settings.resolved_timezone())
         generated_at = datetime.now(tz)
         stale_threshold = generated_at - timedelta(hours=6)
 

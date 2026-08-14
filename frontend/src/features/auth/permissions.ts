@@ -32,6 +32,7 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     "user:manage",
     "employee:view",
     "employee:edit",
+    "device:manage",
     "sync:trigger",
     "reports:read",
     "anomaly:manage",

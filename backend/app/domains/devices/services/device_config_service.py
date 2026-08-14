@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.app_timezone import set_app_timezone
 from app.domains.devices.models.device import Device
 from app.domains.devices.services.device_command_service import enqueue_device_command
 
@@ -121,6 +122,7 @@ def update_device_config(
 
     if "timezone" in config:
         device.timezone = str(config["timezone"])
+        set_app_timezone(device.timezone)
 
     device.config_version += 1
     db.flush()

@@ -115,7 +115,7 @@ class InsightService:
         self._cache.delete_prefix("ai:management:")
 
     def get_payroll_insights(self, db: Session, *, days: int = 14) -> PayrollInsightsResponse:
-        tz = ZoneInfo(self._settings.timezone)
+        tz = ZoneInfo(self._settings.resolved_timezone())
         end_day = datetime.now(tz).date()
         start_day = end_day - timedelta(days=max(days - 1, 1))
 

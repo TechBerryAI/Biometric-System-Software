@@ -39,7 +39,7 @@ def format_device_connection_error(
         if exc.errno == errno.EHOSTUNREACH:
             return (
                 f"Device unreachable at {target} (no route to host). "
-                "Confirm ZK_DEVICE_IP and ZK_DEVICE_PORT in backend/.env, then ensure nothing else is blocking TCP."
+                "Confirm the device IP and port in Settings, then ensure nothing else is blocking TCP."
             )
         if exc.errno == errno.ECONNREFUSED:
             return (

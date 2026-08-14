@@ -18,8 +18,9 @@ from app.domains.auth.models.user import User
 from app.domains.attendance.services.attendance_service import run_device_sync_detailed, run_user_sync
 from app.domains.devices.services.device_command_service import device_session_lock, wait_for_correction_commands_clear
 from app.shared.device_exceptions import DeviceFetchError, DeviceLockContentionError
-from app.domains.devices.services.device_registry_service import update_device_health
-from app.domains.devices.services.device_service import format_device_connection_error
+from app.domains.devices.connection import DeviceConnectionConfig
+from app.domains.devices.services.device_registry_service import ensure_default_device, update_device_health
+from app.domains.devices.services.device_service import DeviceService, format_device_connection_error
 from app.domains.devices.services.sync_manager_service import get_or_create_sync_state
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -66,18 +67,32 @@ def sync_from_device(
     """
     del request, user  # auth + request context still required via Depends
     settings = get_settings()
-    if not wait_for_correction_commands_clear(db, settings.zk_device_id, settings=settings):
+    registered = ensure_default_device(db, settings)
+    connection = DeviceConnectionConfig.from_device(registered, settings)
+    device_service = DeviceService(settings=settings, connection=connection)
+    if not wait_for_correction_commands_clear(db, registered.name, settings=settings):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"Device '{settings.zk_device_id}' is applying an attendance correction. "
+                f"Device '{registered.name}' is applying an attendance correction. "
                 "Wait a few seconds and retry sync."
             ),
         )
     try:
-        with device_session_lock(settings.zk_device_id, settings):
-            u_total, u_ins = run_user_sync(db, settings=settings)
-            sync_result = run_device_sync_detailed(db, full_resync=full, settings=settings)
+        with device_session_lock(registered.name, settings):
+            u_total, u_ins = run_user_sync(
+                db,
+                device=device_service,
+                settings=settings,
+                device_id=registered.name,
+            )
+            sync_result = run_device_sync_detailed(
+                db,
+                device=device_service,
+                full_resync=full,
+                settings=settings,
+                device_id=registered.name,
+            )
     except DeviceLockContentionError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -101,7 +116,7 @@ def sync_from_device(
         ) from exc
 
     update_device_health(db, status="ONLINE", detail="sync_ok", settings=settings)
-    sync_state = get_or_create_sync_state(db, settings.zk_device_id)
+    sync_state = get_or_create_sync_state(db, registered.name)
     now = datetime.now(ZoneInfo("UTC"))
     sync_state.last_user_sync_at = now
     sync_state.last_attendance_sync_at = now

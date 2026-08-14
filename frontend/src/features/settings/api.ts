@@ -29,3 +29,47 @@ export async function changeMyPassword(payload: {
   configureApiAuth(data.access_token);
   return data;
 }
+
+export type FleetDevice = {
+  id: number;
+  device_uuid: string;
+  name: string;
+  ip_address: string;
+  port: number;
+  location: string | null;
+  timezone: string;
+  branch_id: string | null;
+  connectivity_mode: string;
+  firmware_version: string | null;
+  serial_number: string | null;
+  active: boolean;
+  health_status: string;
+  mode: string;
+  last_seen: string | null;
+  config_version: number;
+};
+
+export type DeviceBridgeUpdate = {
+  ip_address: string;
+  port: number;
+  timezone: string;
+};
+
+export async function listFleetDevices(): Promise<FleetDevice[]> {
+  const { data } = await api.get<FleetDevice[]>("/devices", {
+    params: { active_only: true },
+  });
+  return data;
+}
+
+export async function updateFleetDevice(
+  deviceName: string,
+  payload: DeviceBridgeUpdate,
+): Promise<FleetDevice> {
+  const { data } = await api.patch<FleetDevice>(`/devices/${encodeURIComponent(deviceName)}`, {
+    ip_address: payload.ip_address.trim(),
+    port: payload.port,
+    timezone: payload.timezone.trim(),
+  });
+  return data;
+}

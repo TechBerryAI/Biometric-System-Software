@@ -30,7 +30,7 @@ class BuddyPunchService:
         self._window_seconds = window_seconds
 
     def detect(self, db: Session, *, lookback_days: int = 14) -> BuddyPunchResponse:
-        tz = ZoneInfo(self._settings.timezone)
+        tz = ZoneInfo(self._settings.resolved_timezone())
         end_at = datetime.now(tz)
         start_at = end_at - timedelta(days=max(lookback_days, 1))
 

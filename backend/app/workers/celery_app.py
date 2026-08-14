@@ -35,7 +35,7 @@ celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
-    timezone=settings.timezone,
+    timezone=settings.resolved_timezone(),
     enable_utc=True,
     worker_prefetch_multiplier=1,
     task_acks_late=True,
@@ -113,9 +113,18 @@ celery_app.conf.beat_schedule = _beat_schedule
 @worker_process_init.connect
 def _dispose_db_connections_on_fork(**_kwargs: object) -> None:
     """Drop inherited parent connections so each prefork child opens its own pool."""
-    from app.core.database import dispose_engines
+    from app.core.database import SessionLocal, dispose_engines
+    from app.domains.devices.services.device_registry_service import ensure_default_device
 
     dispose_engines()
+    try:
+        with SessionLocal() as db:
+            device = ensure_default_device(db, settings)
+            db.commit()
+            if device.timezone:
+                celery_app.conf.timezone = device.timezone
+    except Exception:  # noqa: BLE001
+        pass
 
 
 import app.workers.tasks  # noqa: E402, F401 — register task definitions

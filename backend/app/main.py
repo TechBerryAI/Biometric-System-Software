@@ -41,6 +41,15 @@ logger = get_logger("http.request")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_telemetry(app, settings)
+    try:
+        from app.core.database import SessionLocal
+        from app.domains.devices.services.device_registry_service import ensure_default_device
+
+        with SessionLocal() as db:
+            ensure_default_device(db, settings)
+            db.commit()
+    except Exception:  # noqa: BLE001
+        logger.warning("device_timezone_bootstrap_failed", exc_info=True)
     logger.info("app_started", service=settings.app_name, environment=settings.environment)
     try:
         yield

@@ -15,7 +15,7 @@ from app.domains.attendance.services.daily_summary_service import compute_daily_
 
 
 def _trailing_dates(settings: Settings, count: int) -> list[date]:
-    tz = ZoneInfo(settings.timezone)
+    tz = ZoneInfo(settings.resolved_timezone())
     today = datetime.now(tz).date()
     return [today - timedelta(days=count - 1 - i) for i in range(count)]
 
@@ -99,7 +99,7 @@ def build_management_insight_context(db: Session, settings: Settings, trend_days
         today_rows = summaries_by_day.get(dates[-1], [])
 
     return {
-        "timezone": settings.timezone,
+        "timezone": settings.resolved_timezone(),
         "roster_size": len(employees),
         "trend_days": trend_days,
         "daily_trend": trend,

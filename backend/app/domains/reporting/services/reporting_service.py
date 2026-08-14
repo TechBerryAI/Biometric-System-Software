@@ -29,7 +29,7 @@ class ReportingService:
         self._settings = settings
 
     def attendance_heatmap(self, db: Session, *, days: int = 14) -> AttendanceHeatmapResponse:
-        tz = ZoneInfo(self._settings.timezone)
+        tz = ZoneInfo(self._settings.resolved_timezone())
         end_day = datetime.now(tz).date()
         start_day = end_day - timedelta(days=max(days - 1, 1))
         generated_at = datetime.now(tz)
@@ -63,7 +63,7 @@ class ReportingService:
         )
 
     def branch_comparison(self, db: Session, *, days: int = 14) -> BranchComparisonResponse:
-        tz = ZoneInfo(self._settings.timezone)
+        tz = ZoneInfo(self._settings.resolved_timezone())
         end_day = datetime.now(tz).date()
         start_day = end_day - timedelta(days=max(days - 1, 1))
         generated_at = datetime.now(tz)
@@ -122,7 +122,7 @@ class ReportingService:
         )
 
     def device_uptime(self, db: Session, *, days: int = 7) -> DeviceUptimeResponse:
-        tz = ZoneInfo(self._settings.timezone)
+        tz = ZoneInfo(self._settings.resolved_timezone())
         end_day = datetime.now(tz).date()
         start_day = end_day - timedelta(days=max(days - 1, 1))
         generated_at = datetime.now(tz)

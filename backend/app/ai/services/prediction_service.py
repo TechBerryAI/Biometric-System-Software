@@ -23,7 +23,7 @@ class PredictionService:
         history_days: int = 14,
         horizon_days: int = 7,
     ) -> AttendancePredictionResponse:
-        tz = ZoneInfo(self._settings.timezone)
+        tz = ZoneInfo(self._settings.resolved_timezone())
         end_day = datetime.now(tz).date()
         start_day = end_day - timedelta(days=max(history_days - 1, 1))
         generated_at = datetime.now(tz)
