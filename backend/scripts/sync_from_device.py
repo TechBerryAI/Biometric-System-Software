@@ -4,7 +4,7 @@ Read-only copy from the ZKTeco terminal into PostgreSQL:
   1) Users → employees table (upsert / refresh device fields)
   2) Attendance → attendance_logs + session pairing for today/yesterday
 
-Requires backend/.env ZK_DEVICE_IP, ZK_DEVICE_PORT, etc.
+Requires a registered device (Settings UI) or bootstrap ZK_DEVICE_* defaults.
 Run from repo:
   cd backend && .venv/bin/python scripts/sync_from_device.py
   cd backend && .venv/bin/python scripts/sync_from_device.py --incremental

@@ -30,8 +30,8 @@ All detailed docs are in `docs/`.
 ├── frontend/      # React + Vite + TypeScript + Tailwind (npm workspace)
 ├── e2e/           # Playwright end-to-end scenarios
 ├── docs/          # Architecture, API, operations, testing
-├── scripts/       # Repo automation (start, start-vm, traceability check)
-├── Makefile       # install / test targets
+├── scripts/       # Repo automation (start-vm, traceability check)
+├── Makefile       # install / start / start-vm / test / clean
 ├── package.json   # npm workspaces root + Playwright
 └── README.md
 ```
@@ -45,37 +45,39 @@ All detailed docs are in `docs/`.
 
 ## Quick Start (Recommended)
 
-From repository root:
+### Local development
 
 ```bash
-npm start
+make install   # once
+make start     # API :8000 + Celery + Vite :5173 (Ctrl+C stops all)
+```
+
+Run the test suite with:
+
+```bash
+make test
+```
+
+### VM app server
+
+```bash
+make start-vm
 ```
 
 or:
-
-```bash
-node start.js
-```
-
-or:
-
-```bash
-node scripts/start.js
-```
-
-For VM app-server startup (example VM IP `192.168.1.117`):
 
 ```bash
 npm run start:vm
 ```
 
-This will:
+`start-vm.js` will:
 
 - create backend virtual environment if missing
 - install backend and frontend dependencies
 - run Alembic migrations
 - start FastAPI API server
 - start frontend Vite server
+- start Celery worker + beat when configured
 
 Default URLs:
 
@@ -84,9 +86,7 @@ Default URLs:
 
 ## Enable Celery Worker + Beat
 
-```bash
-START_CELERY=1 npm start
-```
+On the VM, Celery is started by `npm run start:vm` when Redis is available. Locally, use separate terminals (see Manual Setup below).
 
 ## Manual Setup (Backend + Frontend)
 

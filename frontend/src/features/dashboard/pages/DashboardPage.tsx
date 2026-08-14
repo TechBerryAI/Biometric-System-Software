@@ -83,7 +83,9 @@ import {
 } from "@/features/dashboard/utils/formatters";
 import { fetchAttendanceAnomalies, fetchManagementInsights } from "@/features/dashboard/api";
 import { fetchOperationalMetrics } from "@/features/operations/api";
+import { fetchTenants } from "@/features/tenancy/api";
 import { useAuth } from "@/features/auth/AuthContext";
+import { useTenantStore } from "@/stores/tenant-store";
 import { cn } from "@/lib/cn";
 import { fmtDisplayDate } from "@/lib/dates";
 
@@ -91,6 +93,8 @@ export function Dashboard() {
   const { can } = useAuth();
   const canInsights = can("reports:read");
   const canManageDevice = can("device:manage");
+  const selectedTenantId = useTenantStore((s) => s.selectedTenantId);
+  const setSelectedTenantId = useTenantStore((s) => s.setSelectedTenantId);
   const dash = useDashboard();
   const [dateRange, setDateRange] = useState("Last 14 days");
   const trendDays = dateRangeToDays(dateRange);
@@ -99,6 +103,12 @@ export function Dashboard() {
   const [departmentFilter, setDepartmentFilter] = useState("All departments");
   const [shiftFilter, setShiftFilter] = useState("All shifts");
   const [deviceFilter, setDeviceFilter] = useState("All devices");
+  const tenantsQuery = useQuery({
+    queryKey: ["tenants"],
+    queryFn: fetchTenants,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
   const [viewMode, setViewMode] = useState<"live" | "today" | "weekly">("live");
   const [aiEnabled, setAiEnabled] = useState(false);
   const [expandedInsight, setExpandedInsight] = useState<string | null>(null);
@@ -109,7 +119,7 @@ export function Dashboard() {
   const insightsBaseReady = !dash.loading && !dash.error && !trend.isLoading;
 
   const grokInsights = useQuery({
-    queryKey: ["management-insights", trendDays],
+    queryKey: ["management-insights", trendDays, selectedTenantId],
     queryFn: () => fetchManagementInsights(trendDays),
     staleTime: 5 * 60 * 1000,
     retry: false,
@@ -117,7 +127,7 @@ export function Dashboard() {
   });
 
   const anomalyQuery = useQuery({
-    queryKey: ["attendance-anomalies", 30],
+    queryKey: ["attendance-anomalies", 30, selectedTenantId],
     queryFn: () => fetchAttendanceAnomalies(30),
     enabled: canInsights && insightsBaseReady,
     staleTime: 5 * 60 * 1000,
@@ -125,7 +135,7 @@ export function Dashboard() {
   });
 
   const opsQuery = useQuery({
-    queryKey: ["operational-metrics"],
+    queryKey: ["operational-metrics", selectedTenantId],
     queryFn: fetchOperationalMetrics,
     enabled: !dash.loading && !dash.error,
     staleTime: 45 * 1000,
@@ -930,6 +940,21 @@ export function Dashboard() {
               ))}
             </select>
           </div>
+          <select
+            className="rounded-xl border border-line/60 bg-white px-3 py-2 text-xs text-ink"
+            value={selectedTenantId ?? ""}
+            onChange={(e) => {
+              const value = e.target.value;
+              setSelectedTenantId(value ? Number(value) : null);
+            }}
+          >
+            <option value="">All tenants</option>
+            {(tenantsQuery.data ?? []).map((tenant) => (
+              <option key={tenant.id} value={tenant.id}>
+                {tenant.name}
+              </option>
+            ))}
+          </select>
           <select
             className="rounded-xl border border-line/60 bg-white px-3 py-2 text-xs text-ink"
             value={departmentFilter}

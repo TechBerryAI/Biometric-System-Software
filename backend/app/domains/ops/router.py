@@ -20,8 +20,15 @@ from app.domains.ops.models.system_control_state import SystemControlState
 from app.domains.auth.models.user import User
 from app.domains.devices.schemas import DeviceCommandRead
 from app.domains.devices.services.device_command_service import INTERNAL_COMMAND_TYPES, reprocess_device_command
-from app.domains.devices.services.device_registry_service import ensure_default_device
-from app.domains.attendance.services.incomplete_day_metrics import count_incomplete_attendance_days
+from app.domains.devices.services.device_registry_service import (
+    ensure_default_device,
+    update_device_health_for_device,
+)
+from app.domains.attendance.services.incomplete_day_metrics import (
+    count_incomplete_attendance_days,
+    list_incomplete_attendance_days,
+)
+from app.domains.devices.models.device_sync_state import DeviceSyncState
 
 router = APIRouter(prefix="/ops", tags=["operations"])
 
@@ -45,6 +52,10 @@ class OperationalMetricsRead(BaseModel):
     device_port: int
     device_auto_sync_enabled: bool
     incomplete_attendance_days: int = 0
+    last_attendance_sync_at: datetime | None = None
+    incomplete_attendance_samples: list[dict[str, object]] = []
+    attendance_sync_stale: bool = False
+    device_connectivity_mode: str = "both"
 
 
 @router.get(
@@ -96,6 +107,12 @@ def process_device_command_now(
     dependencies=[Depends(require_permissions(Permission.METRICS_READ))],
 )
 def operational_metrics(db: Session = Depends(get_db)) -> OperationalMetricsRead:
+    settings = get_settings()
+    # Canonicalize default device + deactivate same-IP duplicates before health counts.
+    registered_device = ensure_default_device(db, settings=settings)
+    db.commit()
+    db.refresh(registered_device)
+
     stale_cutoff = datetime.now(ZoneInfo("UTC")) - timedelta(minutes=15)
     queue_depth = (
         db.execute(
@@ -130,7 +147,12 @@ def operational_metrics(db: Session = Depends(get_db)) -> OperationalMetricsRead
         or 0
     )
     failing_devices = (
-        db.execute(select(func.count()).where(Device.health_status.in_(["OFFLINE", "DEGRADED"]))).scalar_one()
+        db.execute(
+            select(func.count()).where(
+                Device.active.is_(True),
+                Device.health_status.in_(["OFFLINE", "DEGRADED"]),
+            )
+        ).scalar_one()
         or 0
     )
     verification_failures = (
@@ -155,15 +177,40 @@ def operational_metrics(db: Session = Depends(get_db)) -> OperationalMetricsRead
         ).scalar_one()
         or 0
     )
-    settings = get_settings()
-    registered_device = db.execute(select(Device).where(Device.name == settings.zk_device_id)).scalar_one_or_none()
-    if registered_device is None:
-        registered_device = ensure_default_device(db, settings=settings)
-    else:
-        # Keep duplicate same-IP rows inactive whenever metrics are polled.
-        ensure_default_device(db, settings=settings)
-        db.flush()
     incomplete_days = count_incomplete_attendance_days(db, lookback_days=30, settings=settings)
+    incomplete_samples = list_incomplete_attendance_days(db, lookback_days=14, limit=10, settings=settings)
+    sync_state = db.execute(
+        select(DeviceSyncState).where(DeviceSyncState.device_id == registered_device.name)
+    ).scalar_one_or_none()
+    last_sync = sync_state.last_attendance_sync_at if sync_state else None
+    # Stale if no successful sync within 3× poll interval (or 10 minutes minimum).
+    stale_after = timedelta(seconds=max(settings.device_poll_interval_seconds * 3, 600))
+    now_utc = datetime.now(ZoneInfo("UTC"))
+    if last_sync is None:
+        attendance_sync_stale = bool(settings.device_auto_sync_enabled)
+    else:
+        aware = last_sync if last_sync.tzinfo is not None else last_sync.replace(tzinfo=ZoneInfo("UTC"))
+        attendance_sync_stale = (now_utc - aware.astimezone(ZoneInfo("UTC"))) > stale_after
+        # Self-heal: a recent successful sync proves the device is up — don't leave UI on Offline.
+        if (
+            settings.device_auto_sync_enabled
+            and not attendance_sync_stale
+            and (registered_device.health_status or "").upper() in {"OFFLINE", "DEGRADED", "UNKNOWN"}
+        ):
+            update_device_health_for_device(
+                db, registered_device, status="ONLINE", detail="metrics_heal_from_recent_sync"
+            )
+            db.commit()
+            db.refresh(registered_device)
+            failing_devices = (
+                db.execute(
+                    select(func.count()).where(
+                        Device.active.is_(True),
+                        Device.health_status.in_(["OFFLINE", "DEGRADED"]),
+                    )
+                ).scalar_one()
+                or 0
+            )
     device_health_status = (
         "MANUAL" if not settings.device_auto_sync_enabled else registered_device.health_status
     )
@@ -189,4 +236,8 @@ def operational_metrics(db: Session = Depends(get_db)) -> OperationalMetricsRead
         device_port=registered_device.port,
         device_auto_sync_enabled=settings.device_auto_sync_enabled,
         incomplete_attendance_days=incomplete_days,
+        last_attendance_sync_at=last_sync,
+        incomplete_attendance_samples=incomplete_samples,
+        attendance_sync_stale=attendance_sync_stale,
+        device_connectivity_mode=(registered_device.connectivity_mode or "both"),
     )

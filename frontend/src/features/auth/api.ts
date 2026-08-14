@@ -11,6 +11,7 @@ export type CurrentUserResponse = {
   full_name?: string | null;
   role: "SUPER_ADMIN" | "HR_ADMIN" | "IT_ADMIN" | "CEO";
   active: boolean;
+  mfa_enabled?: boolean;
   capabilities?: UserCapabilities;
 };
 
@@ -25,32 +26,60 @@ export type AccountCreatePayload = {
 };
 
 export type AuthTokens = {
-  access_token: string;
+  access_token?: string | null;
   token_type: "bearer";
-  refresh_token: string;
-  refresh_expires_at: string;
+  refresh_token?: string | null;
+  refresh_expires_at?: string | null;
+  role: string;
+  mfa_required?: boolean;
+};
+
+export type LoginChallengeResponse = {
+  mfa_required: true;
+  challenge_token: string;
   role: string;
 };
 
-export async function loginWithPassword(email: string, password: string): Promise<AuthTokens> {
-  const { data } = await rawApi.post<AuthTokens>("/auth/login", { email, password });
-  configureApiAuth(data.access_token);
+export async function loginWithPassword(
+  email: string,
+  password: string,
+  mfaCode?: string
+): Promise<AuthTokens | LoginChallengeResponse> {
+  const payload: Record<string, string> = { email, password };
+  if (mfaCode) payload.mfa_code = mfaCode;
+  const { data } = await rawApi.post<AuthTokens | LoginChallengeResponse>("/auth/login", payload);
+  if ("access_token" in data && data.access_token) configureApiAuth(data.access_token);
   return data;
 }
 
-export async function refreshSession(refreshToken: string): Promise<AuthTokens | null> {
+export async function verifyMfaLogin(challengeToken: string, mfaCode: string): Promise<AuthTokens | null> {
   try {
-    const { data } = await rawApi.post<AuthTokens>("/auth/refresh", { refresh_token: refreshToken });
-    configureApiAuth(data.access_token);
+    const { data } = await rawApi.post<AuthTokens>("/auth/mfa/verify", {
+      challenge_token: challengeToken,
+      mfa_code: mfaCode,
+    });
+    if (data.access_token) configureApiAuth(data.access_token);
     return data;
   } catch {
     return null;
   }
 }
 
-export async function logoutSession(refreshToken: string): Promise<void> {
+export async function refreshSession(refreshToken?: string): Promise<AuthTokens | null> {
   try {
-    await api.post("/auth/logout", { refresh_token: refreshToken });
+    const payload = refreshToken ? { refresh_token: refreshToken } : {};
+    const { data } = await rawApi.post<AuthTokens>("/auth/refresh", payload);
+    if (data.access_token) configureApiAuth(data.access_token);
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function logoutSession(refreshToken?: string): Promise<void> {
+  try {
+    const payload = refreshToken ? { refresh_token: refreshToken } : {};
+    await api.post("/auth/logout", payload);
   } catch {
     // no-op, local session should still be cleared
   }

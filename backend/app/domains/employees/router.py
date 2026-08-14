@@ -131,7 +131,7 @@ def get_employee(employee_id: int, db: Session = Depends(get_db)) -> EmployeeDet
             .order_by(AttendanceLog.timestamp)
         )
     )
-    tz = ZoneInfo(get_settings().timezone)
+    tz = ZoneInfo(get_settings().resolved_timezone())
     days: dict[date, list[str]] = {}
     for ts, punch_type in log_rows:
         d = ts.astimezone(tz).date()
@@ -176,7 +176,7 @@ def get_employee_daily_attendance(
         db.refresh(emp)
 
     settings = get_settings()
-    tz = ZoneInfo(settings.timezone)
+    tz = ZoneInfo(settings.resolved_timezone())
     local_today = datetime.now(tz).date()
     start_date = date_from or (local_today - timedelta(days=30))
     end_date = date_to or local_today

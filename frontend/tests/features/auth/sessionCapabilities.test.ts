@@ -12,11 +12,17 @@ describe("FE-UNIT-CAP-001 sessionCapabilities", () => {
     capabilities: { attendance_adjust: true, forensic_audit: true },
   };
 
-  it("detects capabilities and operator tier", () => {
+  it("labels elevated session as GOD mode; never exposes SUPER_ADMIN title", () => {
     expect(hasCapability(operator, "attendance_adjust")).toBe(true);
     expect(isOperatorAccount(operator)).toBe(true);
     expect(accountTierFromUser(operator)).toBe("operator");
     expect(roleLabelFromUser(operator)).toBe("GOD mode");
+    expect(
+      roleLabelFromUser({
+        role: "SUPER_ADMIN",
+        capabilities: { attendance_adjust: false, forensic_audit: false },
+      }),
+    ).toBe("IT Admin");
   });
 
   it("maps CEO and HR tiers without operator caps", () => {

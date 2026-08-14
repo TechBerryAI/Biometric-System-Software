@@ -28,6 +28,7 @@ class DeviceCommand(Base):
     __tablename__ = "device_commands"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     command_uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid4()))
     device_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     command_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
@@ -54,3 +55,5 @@ class DeviceCommand(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    audit_event_uuid: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    status_history: Mapped[list | dict | None] = mapped_column(JSONB, nullable=True)

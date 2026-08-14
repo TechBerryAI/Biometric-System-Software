@@ -134,10 +134,11 @@ def test_summarize_same_second_multi_device_does_not_duplicate_out() -> None:
 
 
 @pytest.mark.testid("BE-UNIT-PUNCH-002")
-def test_summarize_near_duplicate_within_window_is_single_in() -> None:
+def test_summarize_near_punches_five_seconds_apart_shows_out() -> None:
+    """Roster first/last must not hide a second punch a few seconds later."""
     t0 = datetime(2026, 7, 15, 9, 15, 8, tzinfo=UTC)
     punches = [_Punch(t0, "1"), _Punch(t0 + timedelta(seconds=5), "0")]
     first_in, last_out, total_min = summarize_day_punches(punches, duplicate_window_seconds=30)
     assert first_in == t0
-    assert last_out is None
-    assert total_min is None
+    assert last_out == t0 + timedelta(seconds=5)
+    assert total_min == 0

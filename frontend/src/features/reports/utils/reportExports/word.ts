@@ -20,7 +20,7 @@ import type {
   DashboardReportPayload,
   EmployeeReportPayload,
 } from "./types";
-import { fmtMinutes, safeFilename, triggerBlobDownload } from "./shared";
+import { fmtMinutes, mapRowsWithDaySeparators, safeFilename, triggerBlobDownload } from "./shared";
 
 function headerCell(text: string): TableCell {
   return new TableCell({
@@ -113,7 +113,7 @@ export async function downloadAttendanceSummaryWord(args: AttendanceSummaryPaylo
           new Paragraph(`Coverage · ${periodLabel} · ${rows.length} row(s)`),
           buildTable(
             ["Date", "Day", "Employee", "Device ID", "In time", "Out time", "Total work", "Absent"],
-            rows.map((r) => [
+            mapRowsWithDaySeparators(rows, (r) => [
               fmtDisplayDate(r.summary_date),
               fmtDayOfWeek(r.summary_date),
               r.employee_name,
@@ -122,7 +122,7 @@ export async function downloadAttendanceSummaryWord(args: AttendanceSummaryPaylo
               fmtDisplayDateTime(r.last_check_out),
               fmtMinutes(r.total_work_minutes),
               r.first_check_in ? "No" : "Yes",
-            ])
+            ]).map((cells) => cells.map(String))
           ),
         ],
       },

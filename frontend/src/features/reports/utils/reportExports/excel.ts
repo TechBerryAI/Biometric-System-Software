@@ -10,7 +10,7 @@ import type {
   DashboardReportPayload,
   EmployeeReportPayload,
 } from "./types";
-import { fmtMinutes, safeFilename } from "./shared";
+import { fmtMinutes, mapRowsWithDaySeparators, safeFilename } from "./shared";
 
 function writeWorkbook(workbook: XLSX.WorkBook, filename: string): void {
   XLSX.writeFile(workbook, filename);
@@ -63,6 +63,17 @@ export function downloadAttendanceSummaryExcel(args: AttendanceSummaryPayload): 
   const { periodLabel, rows } = args;
   const workbook = XLSX.utils.book_new();
 
+  const dataRows = mapRowsWithDaySeparators(rows, (r) => [
+    fmtDisplayDate(r.summary_date),
+    fmtDayOfWeek(r.summary_date),
+    r.employee_name,
+    r.device_user_id,
+    fmtDisplayDateTime(r.first_check_in),
+    fmtDisplayDateTime(r.last_check_out),
+    fmtMinutes(r.total_work_minutes),
+    r.first_check_in ? "No" : "Yes",
+  ]);
+
   const sheet = XLSX.utils.aoa_to_sheet([
     ["Attendance summary · all employees"],
     ["Generated", fmtGeneratedTimestamp()],
@@ -70,16 +81,7 @@ export function downloadAttendanceSummaryExcel(args: AttendanceSummaryPayload): 
     ["Row count", rows.length],
     [],
     ["Date", "Day", "Employee", "Device ID", "In time", "Out time", "Total work", "Absent"],
-    ...rows.map((r) => [
-      fmtDisplayDate(r.summary_date),
-      fmtDayOfWeek(r.summary_date),
-      r.employee_name,
-      r.device_user_id,
-      fmtDisplayDateTime(r.first_check_in),
-      fmtDisplayDateTime(r.last_check_out),
-      fmtMinutes(r.total_work_minutes),
-      r.first_check_in ? "No" : "Yes",
-    ]),
+    ...dataRows,
   ]);
   XLSX.utils.book_append_sheet(workbook, sheet, "Summary");
 

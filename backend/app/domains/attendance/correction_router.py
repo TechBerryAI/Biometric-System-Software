@@ -147,7 +147,7 @@ def apply_attendance_adjustment(
     db: Session = Depends(get_db),
 ) -> AttendanceAdjustmentRead:
     settings = get_settings()
-    tz = ZoneInfo(settings.timezone)
+    tz = ZoneInfo(settings.resolved_timezone())
     check_in = payload.new_check_in if payload.new_check_in.tzinfo else payload.new_check_in.replace(tzinfo=tz)
     check_out = None
     if payload.new_check_out is not None:

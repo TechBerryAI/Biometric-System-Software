@@ -120,7 +120,7 @@ def summarize_day_punches(
     punches: Sequence[PunchLike],
     *,
     tz_name: str | None = None,
-    duplicate_window_seconds: int = 30,
+    duplicate_window_seconds: int = 0,
 ) -> tuple[datetime | None, datetime | None, int | None]:
     """
     Derive In-Time, Out-Time, and span minutes for one local day.
@@ -128,32 +128,22 @@ def summarize_day_punches(
     Device punch_type codes are unreliable (ZK auto-toggle often labels the early
     arrival as OUT). Roster times therefore use chronological first/last punch:
 
-    - 1 distinct punch  → In = that punch, Out empty, duration empty
-    - 2+ distinct punches → In = earliest, Out = latest, duration = last - first
+    - 1 distinct punch timestamp → In = that punch, Out empty, duration empty
+    - 2+ distinct timestamps → In = earliest, Out = latest, duration = last - first
 
-    Exact same-second rows (e.g. multi-device double-insert) and near-duplicates
-    within ``duplicate_window_seconds`` collapse to one punch for In/Out only;
-    raw logs remain unchanged in storage.
+    Exact same-second rows (e.g. multi-device double-insert) do not create an Out.
+    Near-duplicate time windows are intentionally NOT applied here so a real second
+    punch a few seconds later still appears as Out. Session pairing may still use a
+    narrow collapse window separately.
     """
     del tz_name  # reserved for callers that pass local timezone context
+    del duplicate_window_seconds  # roster first/last must not hide stored punches
     if not punches:
         return None, None, None
 
     ordered = sorted(punches, key=lambda p: p.timestamp)
-    window = max(int(duplicate_window_seconds), 0)
-    distinct: list[PunchLike] = []
-    for punch in ordered:
-        if distinct:
-            gap = (punch.timestamp - distinct[-1].timestamp).total_seconds()
-            if gap <= window:
-                continue
-        distinct.append(punch)
-
-    first_in = distinct[0].timestamp
-    if len(distinct) == 1:
-        return first_in, None, None
-
-    last_out = distinct[-1].timestamp
+    first_in = ordered[0].timestamp
+    last_out = ordered[-1].timestamp
     if last_out <= first_in:
         return first_in, None, None
 

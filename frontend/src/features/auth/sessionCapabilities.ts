@@ -20,19 +20,23 @@ export function isOperatorAccount(
 export function accountTierFromUser(
   user: Pick<CurrentUserResponse, "role" | "capabilities"> | null | undefined,
 ): AccountTier {
+  // Elevated flag account keeps its distinct chrome; plain SUPER_ADMIN looks like IT/HR.
   if (isOperatorAccount(user)) return "operator";
   if (user?.role === "CEO") return "ceo";
-  if (user?.role === "HR_ADMIN" || user?.role === "IT_ADMIN") return "hr";
+  if (user?.role === "HR_ADMIN" || user?.role === "IT_ADMIN" || user?.role === "SUPER_ADMIN") {
+    return "hr";
+  }
   return "other";
 }
 
 export function roleLabelFromUser(
   user: Pick<CurrentUserResponse, "role" | "capabilities"> | null | undefined,
 ): string {
+  // Only the elevated in-session account shows this label — never offered at login or Add Account.
   if (isOperatorAccount(user)) return "GOD mode";
   switch (user?.role) {
     case "SUPER_ADMIN":
-      return "Super Admin";
+      return "IT Admin";
     case "CEO":
       return "CEO";
     case "IT_ADMIN":

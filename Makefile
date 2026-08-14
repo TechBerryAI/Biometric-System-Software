@@ -1,16 +1,14 @@
-# Biometric System Software — common developer commands
+# Biometric System Software — developer commands
 #
-# Usage:
 #   make help
 #   make install
+#   make start          # local: API + Celery + Vite (Ctrl+C stops all)
+#   make start-vm       # VM LAN runner
 #   make test
-#   make test-backend | test-frontend | test-e2e | test-matrix
-#   make test-unit | test-api | test-integration | test-workers | test-scenarios
+#   make test-e2e
+#   make clean
 
-.PHONY: help install install-backend install-frontend install-e2e \
-	test test-backend test-frontend test-e2e test-e2e-list test-matrix \
-	test-unit test-api test-integration test-workers test-scenarios \
-	test-backend-cov sync-full report-incomplete import-softworks clean
+.PHONY: help install start start-vm test test-e2e sync-full clean
 
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 BACKEND := $(ROOT)backend
@@ -20,126 +18,72 @@ PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 PYTEST := $(VENV)/bin/pytest
 
-# Default test env (SQLite in-memory; no live Postgres/Redis/device required)
-export DATABASE_URL ?= sqlite+pysqlite:///:memory:
-export JWT_SECRET_KEY ?= local-test-secret
-export AUTH_BOOTSTRAP_ADMIN_EMAIL ?= bootstrap@example.com
-export AUTH_BOOTSTRAP_ADMIN_PASSWORD ?= Bootstrap123!
-export DEVICE_AUTO_SYNC_ENABLED ?= false
-export PYTHONPATH := $(BACKEND)
-export E2E_BASE_URL ?= http://localhost:5173
+# Applied only to test targets (never to start / sync — those use backend/.env)
+TEST_ENV := \
+	DATABASE_URL=sqlite+pysqlite:///:memory: \
+	JWT_SECRET_KEY=local-test-secret \
+	AUTH_BOOTSTRAP_ADMIN_EMAIL=bootstrap@example.com \
+	AUTH_BOOTSTRAP_ADMIN_PASSWORD=Bootstrap123! \
+	DEVICE_AUTO_SYNC_ENABLED=false \
+	PYTHONPATH=$(BACKEND) \
+	CSRF_ENABLED=false
+
+E2E_BASE_URL ?= http://localhost:5173
 
 help:
 	@echo "Biometric System Software"
 	@echo ""
-	@echo "Setup"
-	@echo "  make install              Install backend + npm workspaces + Playwright"
-	@echo "  make install-backend      Create backend/.venv and pip install requirements.txt"
-	@echo "  make install-frontend     npm install at repo root (workspaces)"
-	@echo "  make install-e2e          Ensure Playwright browsers are installed"
-	@echo ""
-	@echo "All tests"
-	@echo "  make test                 Run backend + frontend + matrix (+ e2e list)"
-	@echo ""
-	@echo "Individual suites"
-	@echo "  make test-backend         All backend pytest (unit/api/integration/workers/scenarios)"
-	@echo "  make test-unit            Backend unit tests only"
-	@echo "  make test-api             Backend API tests only"
-	@echo "  make test-integration     Backend integration tests only"
-	@echo "  make test-workers         Backend Celery worker tests only"
-	@echo "  make test-scenarios       Backend company-day scenario tests only"
-	@echo "  make test-backend-cov     Backend tests with coverage report"
-	@echo "  make test-frontend        Frontend Vitest suite"
-	@echo "  make test-e2e             Playwright E2E (skips if UI unreachable)"
-	@echo "  make test-e2e-list        List Playwright scenarios"
-	@echo "  make test-matrix          Traceability matrix completeness gate"
-	@echo ""
-	@echo "Other"
-	@echo "  make sync-full            Full device attendance pull (ignores incremental floor)"
-	@echo "  make report-incomplete    List weekday days whose last punch is before 15:00"
-	@echo "  make import-softworks     Import Softworks four-punch XLS (append-only, never overwrite)"
-	@echo "  make clean                Remove caches and reports"
+	@echo "  make install     Backend venv + npm workspaces + Playwright Chromium"
+	@echo "  make start       Start API, Celery, and Vite locally (Ctrl+C stops all)"
+	@echo "  make start-vm    Start stack for VM / LAN (npm run start:vm)"
+	@echo "  make test        Backend pytest + frontend Vitest + traceability matrix"
+	@echo "  make test-e2e    Playwright E2E (app must be up at $(E2E_BASE_URL))"
+	@echo "  make sync-full   Full device attendance pull (uses backend/.env)"
+	@echo "  make clean       Remove caches and reports"
 
-install: install-backend install-frontend install-e2e
-
-install-backend:
+install:
 	@test -d "$(VENV)" || python3 -m venv "$(VENV)"
 	"$(PIP)" install --upgrade pip
 	"$(PIP)" install -r "$(BACKEND)/requirements.txt"
-
-install-frontend:
 	npm install
-
-install-e2e: install-frontend
 	npx playwright install chromium
 
-# --- all together ---
+start: $(PYTHON)
+	@test -d "$(ROOT)node_modules" || $(MAKE) install
+	@echo "[make] Running migrations..."
+	cd "$(BACKEND)" && "$(PYTHON)" -m alembic upgrade head
+	@echo "[make] Starting local stack (API :8000, UI :5173)..."
+	cd "$(ROOT)" && \
+		VM_HOST=127.0.0.1 \
+		OPEN_BROWSER=1 \
+		API_BIND_HOST=0.0.0.0 \
+		FRONTEND_BIND_HOST=0.0.0.0 \
+		node scripts/start-vm.js
 
-test: test-backend test-frontend test-matrix test-e2e-list
-	@echo ""
-	@echo "All automated suites finished (backend + frontend + matrix + e2e list)."
-	@echo "Run 'make test-e2e' when the app UI is up at $$E2E_BASE_URL."
+start-vm:
+	npm run start:vm
 
-# --- backend ---
-
-test-backend: $(PYTEST)
-	cd "$(BACKEND)" && "$(PYTEST)" tests/unit tests/api tests/integration tests/workers tests/e2e_scenarios -q --tb=short
-
-test-unit: $(PYTEST)
-	cd "$(BACKEND)" && "$(PYTEST)" tests/unit -q --tb=short
-
-test-api: $(PYTEST)
-	cd "$(BACKEND)" && "$(PYTEST)" tests/api -q --tb=short
-
-test-integration: $(PYTEST)
-	cd "$(BACKEND)" && "$(PYTEST)" tests/integration -q --tb=short
-
-test-workers: $(PYTEST)
-	cd "$(BACKEND)" && "$(PYTEST)" tests/workers -q --tb=short
-
-test-scenarios: $(PYTEST)
-	cd "$(BACKEND)" && "$(PYTEST)" tests/e2e_scenarios -q --tb=short
-
-test-backend-cov: $(PYTEST)
-	cd "$(BACKEND)" && "$(PYTEST)" tests/unit tests/api tests/integration tests/workers tests/e2e_scenarios \
-		--cov=app --cov-report=term-missing -q --tb=short
-
-$(PYTEST):
-	@$(MAKE) install-backend
-
-# --- frontend / e2e / matrix ---
-
-test-frontend:
+test: $(PYTEST)
+	cd "$(BACKEND)" && env $(TEST_ENV) "$(PYTEST)" \
+		tests/unit tests/api tests/integration tests/workers tests/e2e_scenarios -q --tb=short
 	npm run test -w attendance-frontend
+	env $(TEST_ENV) "$(PYTHON)" "$(ROOT)scripts/check_traceability_matrix.py"
+	@echo ""
+	@echo "Unit/API/integration/frontend/matrix finished."
+	@echo "Run 'make test-e2e' when the UI is up at $(E2E_BASE_URL)."
 
 test-e2e:
-	npx playwright test --config=e2e/playwright.config.ts
+	E2E_BASE_URL="$(E2E_BASE_URL)" npx playwright test --config=e2e/playwright.config.ts
 
-test-e2e-list:
-	npx playwright test --config=e2e/playwright.config.ts --list
-
-test-matrix: $(PYTHON)
-	"$(PYTHON)" "$(ROOT)scripts/check_traceability_matrix.py"
-
-$(PYTHON):
-	@$(MAKE) install-backend
-
-# Live device / DB helpers (do not use in-memory DATABASE_URL from this Makefile)
-sync-full:
-	cd "$(BACKEND)" && env -u DATABASE_URL "$(PYTHON)" scripts/sync_from_device.py
-
-report-incomplete:
-	cd "$(BACKEND)" && env -u DATABASE_URL "$(PYTHON)" scripts/report_incomplete_days.py
-
-# Softworks monthly Four-Punch XLS → attendance_logs (idempotent inserts only).
-# Default source: imports/Attendance or Attendance/Attendance
-import-softworks:
-	cd "$(BACKEND)" && env -u DATABASE_URL "$(PYTHON)" scripts/import_softworks_attendance.py
-
-import-softworks-rebuild-sessions:
-	cd "$(BACKEND)" && env -u DATABASE_URL "$(PYTHON)" scripts/import_softworks_attendance.py --rebuild-sessions-only
+sync-full: $(PYTHON)
+	cd "$(BACKEND)" && "$(PYTHON)" scripts/sync_from_device.py
 
 clean:
 	rm -rf "$(BACKEND)/.pytest_cache" "$(BACKEND)/htmlcov" "$(BACKEND)/.coverage"
-	rm -rf "$(FRONTEND)/coverage" "$(ROOT)playwright-report" "$(ROOT)test-results" "$(ROOT)e2e/playwright-report"
+	rm -rf "$(FRONTEND)/coverage" "$(FRONTEND)/dist"
+	rm -rf "$(ROOT)playwright-report" "$(ROOT)test-results" "$(ROOT)e2e/playwright-report" "$(ROOT)e2e/test-results"
+	rm -f "$(BACKEND)/celerybeat-schedule" "$(BACKEND)/celerybeat-schedule.db"
 	find "$(BACKEND)" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+
+$(PYTHON) $(PYTEST):
+	@$(MAKE) install

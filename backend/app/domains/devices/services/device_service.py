@@ -16,6 +16,7 @@ from zk.exception import ZKError
 
 from app.core.config import Settings, get_settings
 from app.core import device_policy
+from app.domains.devices.connection import DeviceConnectionConfig
 from app.domains.devices.services.device_attlog_codec import AttlogRecord
 from app.domains.devices.services.device_attlog_protocol import apply_attlog_correction, probe_attlog_capabilities
 from app.shared.device_exceptions import AttlogCorrectionError, AttlogCorrectionNotSupported, DeviceFetchError
@@ -24,15 +25,21 @@ from app.domains.devices.services.pyzk_adapter import PyZKAdapter
 logger = logging.getLogger(__name__)
 
 
-def format_device_connection_error(exc: BaseException, *, settings: Settings | None = None) -> str:
+def format_device_connection_error(
+    exc: BaseException, *, settings: Settings | None = None, connection: DeviceConnectionConfig | None = None
+) -> str:
     """Map low-level socket/pyzk failures to operator-facing sync messages."""
+    if connection is not None:
+        target = f"{connection.ip_address}:{connection.port}"
+    else:
+        cfg = settings or get_settings()
+        target = f"{cfg.zk_device_ip}:{cfg.zk_device_port}"
     cfg = settings or get_settings()
-    target = f"{cfg.zk_device_ip}:{cfg.zk_device_port}"
     if isinstance(exc, OSError):
         if exc.errno == errno.EHOSTUNREACH:
             return (
                 f"Device unreachable at {target} (no route to host). "
-                "Confirm ZK_DEVICE_IP and ZK_DEVICE_PORT in backend/.env, then ensure nothing else is blocking TCP."
+                "Confirm the device IP and port in Settings, then ensure nothing else is blocking TCP."
             )
         if exc.errno == errno.ECONNREFUSED:
             return (
@@ -97,34 +104,55 @@ class DeviceService:
     TCP connection to the terminal for users and attendance.
     """
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        connection: DeviceConnectionConfig | None = None,
+    ) -> None:
         self._settings = settings or get_settings()
-        self._adapter = PyZKAdapter(self._settings)
+        self._connection = connection or DeviceConnectionConfig.from_settings(self._settings)
+        self._adapter = PyZKAdapter(self._settings, connection=self._connection)
+
+    @property
+    def connection(self) -> DeviceConnectionConfig:
+        return self._connection
 
     def _make_zk(self) -> ZK:
         return ZK(
-            self._settings.zk_device_ip,
-            port=self._settings.zk_device_port,
-            timeout=self._settings.zk_device_timeout_seconds,
-            password=self._settings.zk_device_password,
-            force_udp=self._settings.zk_force_udp,
-            ommit_ping=self._settings.zk_omit_ping,
+            self._connection.ip_address,
+            port=self._connection.port,
+            timeout=self._connection.timeout_seconds,
+            password=self._connection.password,
+            force_udp=self._connection.force_udp,
+            ommit_ping=self._connection.omit_ping,
         )
 
     def probe_tcp_connection(self) -> tuple[bool, str]:
         """Fast TCP reachability check without pyzk handshake."""
         try:
             with socket.create_connection(
-                (self._settings.zk_device_ip, self._settings.zk_device_port),
-                timeout=min(self._settings.zk_device_timeout_seconds, 15),
+                (self._connection.ip_address, self._connection.port),
+                timeout=min(self._connection.timeout_seconds, 15),
             ):
                 return True, "tcp_connected"
         except OSError as exc:
-            return False, format_device_connection_error(exc, settings=self._settings)
+            return False, format_device_connection_error(exc, settings=self._settings, connection=self._connection)
 
     @staticmethod
     def safe_command_allowlist() -> set[str]:
-        return {"UPSERT_USER", "CORRECT_ATTENDANCE", "DELETE_USER"}
+        return {
+            "UPSERT_USER",
+            "CORRECT_ATTENDANCE",
+            "DELETE_USER",
+            "RESTART",
+            "SYNC_TIME",
+            "REMOTE_CONFIG",
+            "REMOTE_ENROLL",
+            "REMOTE_DELETE",
+            "FORCE_SYNC",
+            "FIRMWARE_CHECK",
+        }
 
     def detect_firmware_fingerprint(self) -> dict[str, Any]:
         """Best-effort firmware/platform fingerprint for safe profile selection."""
@@ -237,7 +265,7 @@ class DeviceService:
                 punch = int(getattr(row, "punch", 0))
                 status = int(getattr(row, "status", 0))
                 if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=ZoneInfo(self._settings.timezone))
+                    ts = ts.replace(tzinfo=ZoneInfo(self._connection.timezone))
                 out.append(
                     DeviceAttendanceRecord(
                         user_id=user_id,
@@ -470,7 +498,7 @@ class DeviceService:
                 user_id=user_id,
                 delete_timestamps=delete_timestamps,
                 new_records=new_records,
-                tz_name=self._settings.timezone,
+                tz_name=self._connection.timezone,
                 allow_tier_b_write=device_policy.ATTLOG_TIER_B_REWRITE,
             )
 
@@ -480,6 +508,49 @@ class DeviceService:
             raise
         except Exception as exc:  # noqa: BLE001
             raise AttlogCorrectionError(f"Device attlog correction failed: {exc}") from exc
+
+    def restart_device(self) -> None:
+        """Remotely restart the biometric terminal."""
+
+        def _restart(conn: Any) -> None:
+            if not hasattr(conn, "restart"):
+                raise RuntimeError("Device firmware does not support remote restart.")
+            conn.restart()
+
+        self._adapter.run("restart_device", _restart, max_attempts=1)
+
+    def sync_device_time(self) -> datetime:
+        """Synchronize device clock to server UTC time."""
+
+        def _sync(conn: Any) -> datetime:
+            now = datetime.now(ZoneInfo("UTC"))
+            if hasattr(conn, "set_time"):
+                conn.set_time(now)
+            elif hasattr(conn, "set_device_time"):
+                conn.set_device_time(now)
+            else:
+                raise RuntimeError("Device firmware does not support time synchronization.")
+            return now
+
+        return self._adapter.run("sync_device_time", _sync, max_attempts=2)
+
+    def apply_remote_config(self, config: dict[str, object]) -> dict[str, object]:
+        """Apply non-destructive remote configuration where supported by firmware."""
+        applied: dict[str, object] = {}
+
+        def _apply(conn: Any) -> dict[str, object]:
+            if "timezone" in config and hasattr(conn, "set_timezone"):
+                conn.set_timezone(str(config["timezone"]))
+                applied["timezone"] = config["timezone"]
+            if "volume" in config and hasattr(conn, "set_volume"):
+                conn.set_volume(int(config["volume"]))
+                applied["volume"] = config["volume"]
+            if "voice" in config and hasattr(conn, "set_voice"):
+                conn.set_voice(bool(config["voice"]))
+                applied["voice"] = config["voice"]
+            return applied
+
+        return self._adapter.run("apply_remote_config", _apply, max_attempts=2)
 
 
 def get_device_service(settings: Settings | None = None) -> DeviceService:

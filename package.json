@@ -1,12 +1,11 @@
 {
   "name": "biometric-system-software",
   "private": true,
-  "description": "Biometric attendance — run `npm start` or `node start.js` for local dev. Prefer `make test` for the suite.",
+  "description": "Biometric attendance — `make start` locally, `make start-vm` on the VM, `make test` for the suite.",
   "workspaces": [
     "frontend"
   ],
   "scripts": {
-    "start": "node scripts/start.js",
     "start:vm": "node scripts/start-vm.js",
     "dev": "npm run dev -w attendance-frontend",
     "build": "npm run build -w attendance-frontend",

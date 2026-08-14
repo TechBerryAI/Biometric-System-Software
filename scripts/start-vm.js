@@ -317,7 +317,7 @@ async function main() {
     (process.env.START_CELERY !== "0" && process.env.DEVICE_AUTO_SYNC_ENABLED !== "false");
   if (startCelery) {
     log("Starting Celery worker + beat (device auto-sync; needs Redis on REDIS_URL)...");
-    run(backendPython, ["-m", "celery", "-A", "app.workers.celery_app", "worker", "-l", "info", "-Q", "attendance"], {
+    run(backendPython, ["-m", "celery", "-A", "app.workers.celery_app", "worker", "-l", "info", "-Q", "attendance_sync,device_commands,reconciliation,notifications"], {
       cwd: BACKEND,
       shell: false,
       env: backendEnv,

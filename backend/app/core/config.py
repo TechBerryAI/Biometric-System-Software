@@ -17,8 +17,16 @@ class Settings(BaseSettings):
     )
 
     app_name: str = Field(default="Biometric Attendance API", alias="APP_NAME")
+    environment: str = Field(default="development", alias="ENVIRONMENT")
     debug: bool = Field(default=False, alias="DEBUG")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    json_logs: bool = Field(default=True, alias="JSON_LOGS")
+    otel_enabled: bool = Field(default=False, alias="OTEL_ENABLED")
+    otel_service_name: str = Field(default="biometric-api", alias="OTEL_SERVICE_NAME")
+    otel_exporter_otlp_endpoint: str = Field(
+        default="http://localhost:4318/v1/traces",
+        alias="OTEL_EXPORTER_OTLP_ENDPOINT",
+    )
     cors_allow_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173,http://frontend:5173",
         alias="CORS_ALLOW_ORIGINS",
@@ -38,15 +46,27 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     redis_namespace: str = Field(default="biometric", alias="REDIS_NAMESPACE")
 
-    zk_device_ip: str = Field(default="192.168.1.200", alias="ZK_DEVICE_IP")
-    zk_device_port: int = Field(default=4370, alias="ZK_DEVICE_PORT")
+    zk_device_ip: str = Field(
+        default="192.168.1.200",
+        alias="ZK_DEVICE_IP",
+        description="Bootstrap only when seeding the first device row; runtime IP is managed in Settings.",
+    )
+    zk_device_port: int = Field(
+        default=4370,
+        alias="ZK_DEVICE_PORT",
+        description="Bootstrap only when seeding the first device row; runtime port is managed in Settings.",
+    )
     zk_device_password: int = Field(default=0, alias="ZK_DEVICE_PASSWORD")
     zk_device_timeout_seconds: int = Field(default=30, alias="ZK_DEVICE_TIMEOUT_SECONDS")
     zk_device_id: str = Field(default="main-entrance", alias="ZK_DEVICE_ID")
     zk_force_udp: bool = Field(default=False, alias="ZK_FORCE_UDP")
     zk_omit_ping: bool = Field(default=False, alias="ZK_OMIT_PING")
 
-    timezone: str = Field(default="UTC", alias="TIMEZONE")
+    timezone: str = Field(
+        default="UTC",
+        alias="TIMEZONE",
+        description="Bootstrap only; runtime timezone follows the primary device (Settings UI).",
+    )
     device_poll_interval_seconds: int = Field(default=120, alias="DEVICE_POLL_INTERVAL_SECONDS")
     device_auto_sync_enabled: bool = Field(
         default=True,
@@ -61,7 +81,27 @@ class Settings(BaseSettings):
         description="How often Celery TCP-probes the device and updates health_status in the DB.",
     )
     device_sync_overlap_minutes: int = Field(default=15, ge=1, le=720, alias="DEVICE_SYNC_OVERLAP_MINUTES")
-    duplicate_punch_window_seconds: int = Field(default=30, ge=0, le=300, alias="DUPLICATE_PUNCH_WINDOW_SECONDS")
+    duplicate_punch_window_seconds: int = Field(
+        default=30,
+        ge=0,
+        le=300,
+        alias="DUPLICATE_PUNCH_WINDOW_SECONDS",
+        description="Legacy near-dup window; roster IN/OUT no longer collapses on this.",
+    )
+    session_pair_duplicate_window_seconds: int = Field(
+        default=2,
+        ge=0,
+        le=60,
+        alias="SESSION_PAIR_DUPLICATE_WINDOW_SECONDS",
+        description="Collapse only near-identical scans when pairing multi-session days.",
+    )
+    open_day_min_span_minutes: int = Field(
+        default=5,
+        ge=1,
+        le=240,
+        alias="OPEN_DAY_MIN_SPAN_MINUTES",
+        description="Employee-day counts as incomplete when last-first punch span is below this.",
+    )
     attendance_api_default_limit: int = Field(default=1000, ge=100, le=10000, alias="ATTENDANCE_API_DEFAULT_LIMIT")
     attendance_api_max_limit: int = Field(default=5000, ge=500, le=50000, alias="ATTENDANCE_API_MAX_LIMIT")
     # After each device pull, rebuild sessions for this many trailing local calendar days (1–62).
@@ -95,8 +135,45 @@ class Settings(BaseSettings):
     auth_enabled: bool = Field(default=True, alias="AUTH_ENABLED")
     auth_bootstrap_admin_email: str | None = Field(default=None, alias="AUTH_BOOTSTRAP_ADMIN_EMAIL")
     auth_bootstrap_admin_password: str | None = Field(default=None, alias="AUTH_BOOTSTRAP_ADMIN_PASSWORD")
+
+    deployment_mode: str = Field(default="saas", alias="DEPLOYMENT_MODE")
+    default_tenant_id: int = Field(default=1, alias="DEFAULT_TENANT_ID")
+    auth_cookie_enabled: bool = Field(default=True, alias="AUTH_COOKIE_ENABLED")
+    auth_cookie_only: bool = Field(default=False, alias="AUTH_COOKIE_ONLY")
+    csrf_enabled: bool = Field(default=True, alias="CSRF_ENABLED")
+    encryption_key: str | None = Field(default=None, alias="ENCRYPTION_KEY")
+    database_read_url: str | None = Field(default=None, alias="DATABASE_READ_URL")
+    db_pool_size: int = Field(default=10, ge=1, le=100, alias="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=20, ge=0, le=200, alias="DB_MAX_OVERFLOW")
+    db_pool_recycle_seconds: int = Field(default=1800, ge=60, le=7200, alias="DB_POOL_RECYCLE_SECONDS")
+    attendance_archive_retention_days: int = Field(
+        default=365,
+        ge=30,
+        le=3650,
+        alias="ATTENDANCE_ARCHIVE_RETENTION_DAYS",
+    )
+    attendance_archive_delete: bool = Field(default=False, alias="ATTENDANCE_ARCHIVE_DELETE")
+    attendance_bulk_insert_chunk_size: int = Field(
+        default=500,
+        ge=50,
+        le=5000,
+        alias="ATTENDANCE_BULK_INSERT_CHUNK_SIZE",
+    )
+    dashboard_cache_ttl_seconds: int = Field(default=60, ge=5, le=3600, alias="DASHBOARD_CACHE_TTL_SECONDS")
+    gateway_max_connectors: int = Field(default=200, ge=10, le=5000, alias="GATEWAY_MAX_CONNECTORS")
+    gateway_idle_ttl_seconds: int = Field(default=600, ge=30, le=86400, alias="GATEWAY_IDLE_TTL_SECONDS")
+    gateway_sync_semaphore: int = Field(default=8, ge=1, le=64, alias="GATEWAY_SYNC_SEMAPHORE")
+    redis_lock_urls: str = Field(default="", alias="REDIS_LOCK_URLS")
+    feature_flags: str = Field(
+        default="",
+        alias="FEATURE_FLAGS",
+        description="Comma-separated overrides, e.g. ai_insights=false,mfa_enforcement=true",
+    )
+    mfa_required: bool = Field(default=False, alias="MFA_REQUIRED")
     login_attempt_window_seconds: int = Field(default=900, ge=60, le=86400, alias="LOGIN_ATTEMPT_WINDOW_SECONDS")
     login_attempt_max: int = Field(default=5, ge=3, le=50, alias="LOGIN_ATTEMPT_MAX")
+    api_rate_limit_window_seconds: int = Field(default=60, ge=10, le=3600, alias="API_RATE_LIMIT_WINDOW_SECONDS")
+    api_rate_limit_max: int = Field(default=120, ge=10, le=10000, alias="API_RATE_LIMIT_MAX")
 
     command_queue_batch_size: int = Field(default=25, ge=1, le=250, alias="COMMAND_QUEUE_BATCH_SIZE")
     command_max_retries: int = Field(default=10, ge=1, le=20, alias="COMMAND_MAX_RETRIES")
@@ -144,6 +221,12 @@ class Settings(BaseSettings):
             seen.add(origin)
             deduped.append(origin)
         return deduped
+
+    def resolved_timezone(self) -> str:
+        """Timezone for attendance rollups: Settings UI / device row, else bootstrap default."""
+        from app.core.app_timezone import get_timezone_override
+
+        return get_timezone_override() or self.timezone
 
 
 @lru_cache

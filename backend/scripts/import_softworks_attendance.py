@@ -188,7 +188,7 @@ def main() -> None:
     print(f"Source directory: {directory}")
     for path, year, month in files:
         punches = parse_four_punch_workbook(
-            path, year=year, month=month, timezone=settings.timezone
+            path, year=year, month=month, timezone=settings.resolved_timezone()
         )
         marker = ""
         if (year, month) > through_key:
@@ -204,7 +204,7 @@ def main() -> None:
         print("Nothing to import.")
         return
 
-    tz = ZoneInfo(settings.timezone)
+    tz = ZoneInfo(settings.resolved_timezone())
     employee_days = {(p.employee_code, p.timestamp.astimezone(tz).date()) for p in all_punches}
 
     if args.rebuild_sessions_only:

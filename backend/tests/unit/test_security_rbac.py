@@ -26,8 +26,11 @@ def test_super_admin_has_all_key_permissions() -> None:
 
 
 @pytest.mark.testid("BE-UNIT-SEC-001")
-def test_viewer_has_empty_permissions() -> None:
-    assert ROLE_PERMISSIONS["VIEWER"] == set()
+def test_viewer_has_read_permissions() -> None:
+    granted = ROLE_PERMISSIONS["VIEWER"]
+    assert Permission.EMPLOYEE_VIEW in granted
+    assert Permission.REPORT_READ in granted
+    assert Permission.DEVICE_MANAGE not in granted
 
 
 @pytest.mark.testid("BE-UNIT-SEC-001")

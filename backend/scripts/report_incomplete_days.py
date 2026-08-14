@@ -30,7 +30,7 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = get_settings()
-    tz = ZoneInfo(settings.timezone)
+    tz = ZoneInfo(settings.resolved_timezone())
     start = datetime.now(tz) - timedelta(days=max(args.days, 1))
     db = SessionLocal()
     try:
@@ -63,7 +63,7 @@ def main() -> None:
                 LIMIT :limit
                 """
             ),
-            {"tz": settings.timezone, "start": start, "hour": args.hour, "limit": args.limit},
+            {"tz": settings.resolved_timezone(), "start": start, "hour": args.hour, "limit": args.limit},
         ).mappings().all()
         for row in rows:
             print(

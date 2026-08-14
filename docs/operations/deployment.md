@@ -38,20 +38,16 @@ Device write / correction policy lives in `backend/app/core/device_policy.py` (n
 
 ## Local Developer Start
 
-From repo root:
-
 ```bash
-node start.js
+make install
+make start
 ```
 
-Optional Celery startup:
+## VM Start
 
 ```bash
-set START_CELERY=1
-node start.js
+make start-vm
 ```
-
-## Production Rollout Order
 
 1. Deploy DB migrations (`alembic upgrade head`)
 2. Deploy backend API

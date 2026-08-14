@@ -18,6 +18,11 @@ from app.domains.devices.models.device import Device
 from app.domains.devices.models.device_command import DeviceCommand, DeviceCommandStatus
 from app.domains.devices.services.device_registry_service import ensure_default_device, update_device_health
 from app.domains.devices.services.device_service import DeviceService
+from app.domains.ops.services.sync_state_metrics import (
+    count_reconciliation_completed,
+    count_reconciliation_pending,
+    sum_lock_contention_events,
+)
 
 router = APIRouter(tags=["health"])
 settings = get_settings()
@@ -47,18 +52,37 @@ def health_redis() -> dict[str, str]:
 
 @router.get("/health/devices", dependencies=[Depends(require_permissions(Permission.METRICS_READ))])
 def health_devices(db: Session = Depends(get_db)) -> dict[str, object]:
+    from app.domains.devices.services.device_command_service import device_session_lock
+    from app.shared.device_exceptions import DeviceLockContentionError
+
     device = DeviceService(settings=settings)
-    ok, detail = device.check_connection()
-    fingerprint = device.detect_firmware_fingerprint()
+    registered = ensure_default_device(db, settings=settings)
+    try:
+        with device_session_lock(registered.name, settings, blocking_timeout=0):
+            ok, detail = device.check_connection()
+            fingerprint = device.detect_firmware_fingerprint()
+    except DeviceLockContentionError:
+        return {
+            "status": "ok",
+            "detail": "device_busy_skip_probe",
+            "failing_devices": 0,
+            "firmware_version": registered.firmware_version,
+            "device_mode": registered.mode,
+            "skipped_reason": "device_lock_busy",
+        }
     status = "ONLINE" if ok else "OFFLINE"
     update_device_health(db, status=status, detail=detail, settings=settings)
-    registered = ensure_default_device(db, settings=settings)
     registered.firmware_version = fingerprint.get("firmware_version")
     registered.serial_number = fingerprint.get("serial_number")
     registered.capabilities = {"platform": fingerprint.get("platform"), "supports_user_write": True}
     db.commit()
     failing_devices = (
-        db.execute(select(func.count()).where(Device.health_status.in_(["OFFLINE", "DEGRADED"]))).scalar_one()
+        db.execute(
+            select(func.count()).where(
+                Device.active.is_(True),
+                Device.health_status.in_(["OFFLINE", "DEGRADED"]),
+            )
+        ).scalar_one()
         or 0
     )
     return {
@@ -120,14 +144,14 @@ def health_queue(db: Session = Depends(get_db)) -> dict[str, int]:
         "stale_commands": int(stale_commands),
         "dead_letter_commands": int(dead_letter),
         "verification_failures": int(verification_failures),
-        "reconciliation_pending": 0,
-        "lock_contention_events": 0,
+        "reconciliation_pending": count_reconciliation_pending(db),
+        "lock_contention_events": sum_lock_contention_events(db),
     }
 
 
 @router.get("/health/reconciliation", dependencies=[Depends(require_permissions(Permission.METRICS_READ))])
-def health_reconciliation() -> dict[str, int]:
+def health_reconciliation(db: Session = Depends(get_db)) -> dict[str, int]:
     return {
-        "pending_jobs": 0,
-        "completed_jobs": 0,
+        "pending_jobs": count_reconciliation_pending(db),
+        "completed_jobs": count_reconciliation_completed(db),
     }

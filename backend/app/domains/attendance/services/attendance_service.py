@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from typing import Sequence
+from typing import Protocol, Sequence
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -29,19 +30,69 @@ from app.domains.attendance.services.punch_classification import device_attendan
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class DeviceSyncResult:
+    """Outcome of a single attendance pull + insert cycle."""
+
+    fetched: int
+    inserted: int
+    placeholders: int
+    skipped_corrected_punches: int = 0
+    punches_missing_after_insert: int = 0
+    skipped_reason: str | None = None
+
+
+class AttendanceFetchSource(Protocol):
+    """Anything that can supply attendance rows (pull DeviceService or PushConnector)."""
+
+    def fetch_attendance(self) -> list[DeviceAttendanceRecord]: ...
+
+
+class UserFetchSource(Protocol):
+    """Anything that can supply device users."""
+
+    def fetch_users(self) -> list[DeviceUser]: ...
+
+
+class MergedAttendanceSource:
+    """Merge pull + push buffer attendance; exact dedupe happens in run_device_sync."""
+
+    def __init__(self, *sources: AttendanceFetchSource) -> None:
+        self._sources = sources
+
+    def fetch_attendance(self) -> list[DeviceAttendanceRecord]:
+        out: list[DeviceAttendanceRecord] = []
+        for source in self._sources:
+            out.extend(source.fetch_attendance())
+        return out
+
+
+class MergedUserSource:
+    """Merge pull + push buffer users."""
+
+    def __init__(self, *sources: UserFetchSource) -> None:
+        self._sources = sources
+
+    def fetch_users(self) -> list[DeviceUser]:
+        out: list[DeviceUser] = []
+        for source in self._sources:
+            out.extend(source.fetch_users())
+        return out
+
+
+
 def _incremental_sync_floor(db: Session, *, device_id: str, settings: Settings) -> datetime | None:
-    """Use recent overlap window so incremental sync avoids reprocessing full history."""
+    """Use recent overlap window so incremental sync avoids reprocessing full history.
+
+    Only considers logs for this device_id. If this device has no rows yet, returns None
+    so the full fetch is imported (never fall back to another device's latest timestamp).
+    """
     latest = db.execute(
         select(AttendanceLog.timestamp)
         .where(AttendanceLog.device_id == device_id)
         .order_by(AttendanceLog.timestamp.desc())
         .limit(1)
     ).scalar_one_or_none()
-    if latest is None:
-        # Fallback: any log timestamp (e.g. remapped history under another label).
-        latest = db.execute(
-            select(AttendanceLog.timestamp).order_by(AttendanceLog.timestamp.desc()).limit(1)
-        ).scalar_one_or_none()
     if latest is None:
         return None
     return latest - timedelta(minutes=settings.device_sync_overlap_minutes)
@@ -50,22 +101,51 @@ def _incremental_sync_floor(db: Session, *, device_id: str, settings: Settings) 
 def _dedupe_device_records(
     records: Sequence[DeviceAttendanceRecord],
     *,
-    settings: Settings,
+    settings: Settings | None = None,
 ) -> list[DeviceAttendanceRecord]:
-    """Collapse noisy back-to-back duplicate punches produced by unstable device firmware."""
-    window = timedelta(seconds=settings.duplicate_punch_window_seconds)
-    if window.total_seconds() <= 0:
-        return list(records)
+    """Collapse exact duplicates within a single fetch batch (same user/ts/status/punch).
+
+    Time-window near-dup filtering is intentionally not applied here — every distinct
+    device event must reach storage. Display/session pairing may still collapse near
+    scans via DUPLICATE_PUNCH_WINDOW_SECONDS.
+    """
+    del settings  # reserved for callers that still pass settings=
+    seen: set[tuple[str, datetime, int, int]] = set()
     out: list[DeviceAttendanceRecord] = []
-    last_seen: dict[tuple[str, int], datetime] = {}
     for row in sorted(records, key=lambda r: r.timestamp):
-        key = (row.user_id, row.status)
-        prev = last_seen.get(key)
-        if prev is not None and row.timestamp - prev <= window:
+        key = (row.user_id, row.timestamp, row.status, row.punch)
+        if key in seen:
             continue
+        seen.add(key)
         out.append(row)
-        last_seen[key] = row.timestamp
     return out
+
+
+def _resolve_mapping_with_legacy_fallback(
+    db: Session,
+    *,
+    device_id: str,
+    device_user_id: str,
+    at_time: datetime,
+    canonical_device_id: str,
+):
+    """Prefer mapping for the physical device; fall back to canonical id for legacy rows."""
+    mapping = _resolve_mapping_for_punch(
+        db,
+        device_id=device_id,
+        device_user_id=device_user_id,
+        at_time=at_time,
+    )
+    if mapping is not None:
+        return mapping
+    if device_id != canonical_device_id:
+        return _resolve_mapping_for_punch(
+            db,
+            device_id=canonical_device_id,
+            device_user_id=device_user_id,
+            at_time=at_time,
+        )
+    return None
 
 
 def _ensure_active_mapping(
@@ -113,11 +193,14 @@ def _ensure_active_mapping(
     return new_mapping.id
 
 
-def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -> int:
+def sync_employees_from_device_users(
+    db: Session, users: Sequence[DeviceUser], *, device_id: str | None = None
+) -> int:
     """Upsert device users into employees. Returns number of rows affected."""
     affected = 0
     now = datetime.now(ZoneInfo("UTC"))
     settings = get_settings()
+    resolved_device_id = device_id or settings.zk_device_id
     for u in users:
         departed = db.execute(
             select(Employee).where(
@@ -129,7 +212,7 @@ def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -
             try:
                 enqueue_delete_user_command(
                     db,
-                    device_id=settings.zk_device_id,
+                    device_id=resolved_device_id,
                     user_id=u.user_id,
                     uid=u.uid,
                     initiated_from="sync:departed_cleanup",
@@ -197,7 +280,7 @@ def sync_employees_from_device_users(db: Session, users: Sequence[DeviceUser]) -
         _ensure_active_mapping(
             db,
             employee_uuid=emp.employee_uuid,
-            device_id=settings.zk_device_id,
+            device_id=resolved_device_id,
             device_user_id=u.user_id,
             effective_at=now,
         )
@@ -212,66 +295,63 @@ def insert_attendance_logs_idempotent(
 ) -> int:
     """Append-only insert of raw logs. Never updates or deletes existing rows.
 
-    Duplicates are ignored via:
-      1) unique (device_id, employee_code, timestamp) → ON CONFLICT DO NOTHING
-      2) near-duplicate skip: same employee_code + punch_type within
-         DUPLICATE_PUNCH_WINDOW_SECONDS across *any* device_id (twin terminal labels)
+    Exact replays are ignored via unique
+    (device_id, employee_code, timestamp, punch_type) → ON CONFLICT DO NOTHING.
 
-    Real In→Out pairs inside the window are both kept (different punch_type).
+    Time-window near-duplicates are NOT skipped at storage time — every distinct
+    device event is kept. Display/session pairing may still collapse near scans.
+
+    Prepared rows are inserted in chunks (ATTENDANCE_BULK_INSERT_CHUNK_SIZE)
+    via a single multi-VALUES INSERT per chunk for throughput.
     """
     rows = 0
     settings = get_settings()
+    stamp_device_id = device_id or settings.zk_device_id
     canonical_device_id = settings.zk_device_id
-    if device_id and device_id != canonical_device_id:
-        logger.debug(
-            "Insert requested for device_id=%s; stamping logs as canonical %s",
-            device_id,
-            canonical_device_id,
-        )
-    duplicate_window = timedelta(seconds=settings.duplicate_punch_window_seconds)
+    prepared: list[dict] = []
+    # Exact keys already prepared in this batch (same as unique constraint).
+    batch_seen: set[tuple[str, datetime, str]] = set()
+
     for r in records:
         employee_code = r.user_id
         punch_type = device_attendance_punch_type(status=r.status, punch=r.punch)
-        if duplicate_window.total_seconds() > 0:
-            existing_near_duplicate = db.execute(
-                select(AttendanceLog.id).where(
-                    AttendanceLog.employee_code == employee_code,
-                    AttendanceLog.punch_type == punch_type,
-                    AttendanceLog.timestamp >= r.timestamp - duplicate_window,
-                    AttendanceLog.timestamp <= r.timestamp + duplicate_window,
-                ).limit(1)
-            ).scalar_one_or_none()
-            if existing_near_duplicate is not None:
-                logger.info(
-                    "Skipping near-duplicate punch device=%s employee=%s ts=%s punch=%s",
-                    canonical_device_id,
-                    employee_code,
-                    r.timestamp.isoformat(),
-                    punch_type,
-                )
-                continue
-        mapping = _resolve_mapping_for_punch(
+        batch_key = (employee_code, r.timestamp, punch_type)
+        if batch_key in batch_seen:
+            continue
+        batch_seen.add(batch_key)
+        mapping = _resolve_mapping_with_legacy_fallback(
             db,
-            device_id=canonical_device_id,
+            device_id=stamp_device_id,
             device_user_id=employee_code,
             at_time=r.timestamp,
+            canonical_device_id=canonical_device_id,
         )
+        prepared.append(
+            {
+                "employee_code": employee_code,
+                "timestamp": r.timestamp,
+                "device_id": stamp_device_id,
+                "employee_uuid": mapping.employee_uuid if mapping else None,
+                "device_mapping_id": mapping.id if mapping else None,
+                "punch_type": punch_type,
+            }
+        )
+
+    chunk_size = settings.attendance_bulk_insert_chunk_size
+    for i in range(0, len(prepared), chunk_size):
+        chunk = prepared[i : i + chunk_size]
+        if not chunk:
+            continue
         stmt = (
             pg_insert(AttendanceLog)
-            .values(
-                employee_code=employee_code,
-                timestamp=r.timestamp,
-                device_id=canonical_device_id,
-                employee_uuid=mapping.employee_uuid if mapping else None,
-                device_mapping_id=mapping.id if mapping else None,
-                punch_type=punch_type,
+            .values(chunk)
+            .on_conflict_do_nothing(
+                index_elements=["device_id", "employee_code", "timestamp", "punch_type"]
             )
-            .on_conflict_do_nothing(index_elements=["device_id", "employee_code", "timestamp"])
             .returning(AttendanceLog.id)
         )
         res = db.execute(stmt)
-        if res.scalar_one_or_none() is not None:
-            rows += 1
+        rows += len(res.scalars().all())
     db.commit()
     return rows
 
@@ -330,53 +410,169 @@ def prune_recent_duplicate_logs(db: Session, *, settings: Settings, days: int | 
     return 0
 
 
+def _aware_timestamp(ts: datetime, *, tz: ZoneInfo) -> datetime:
+    if ts.tzinfo is not None:
+        return ts
+    return ts.replace(tzinfo=tz)
+
+
+def _record_epoch_key(record: DeviceAttendanceRecord, punch_type: str, *, tz: ZoneInfo) -> tuple[str, int, str]:
+    ts = record.timestamp
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=tz)
+    return (str(record.user_id).strip(), int(ts.timestamp()), punch_type)
+
+
+def _naive_epoch_candidates(ts: datetime, *, tz: ZoneInfo) -> set[int]:
+    """SQLite may persist either UTC or local wall as naive; accept both interpretations."""
+    if ts.tzinfo is not None:
+        return {int(ts.timestamp())}
+    return {
+        int(ts.replace(tzinfo=ZoneInfo("UTC")).timestamp()),
+        int(ts.replace(tzinfo=tz).timestamp()),
+    }
+
+
+def count_fetched_missing_in_db(
+    db: Session,
+    records: Sequence[DeviceAttendanceRecord],
+    device_id: str,
+) -> int:
+    """How many fetched device punches are still absent from attendance_logs."""
+    if not records:
+        return 0
+    settings = get_settings()
+    tz = ZoneInfo(settings.resolved_timezone())
+    keys = {
+        _record_epoch_key(
+            row,
+            device_attendance_punch_type(status=row.status, punch=row.punch),
+            tz=tz,
+        )
+        for row in records
+    }
+    codes = {k[0] for k in keys}
+    aware_bounds = [
+        row.timestamp if row.timestamp.tzinfo is not None else row.timestamp.replace(tzinfo=tz)
+        for row in records
+    ]
+    min_ts = min(aware_bounds)
+    max_ts = max(aware_bounds)
+    # Wide pad: naive SQLite reinterpretation can shift by timezone offset.
+    pad = timedelta(hours=14)
+    db_pairs: list[tuple[str, set[int], str]] = []
+    for code, ts, punch_type in db.execute(
+        select(AttendanceLog.employee_code, AttendanceLog.timestamp, AttendanceLog.punch_type).where(
+            AttendanceLog.device_id == device_id,
+            AttendanceLog.employee_code.in_(codes),
+            AttendanceLog.timestamp >= min_ts - pad,
+            AttendanceLog.timestamp <= max_ts + pad,
+        )
+    ).all():
+        db_pairs.append((str(code).strip(), _naive_epoch_candidates(ts, tz=tz), str(punch_type)))
+
+    missing = 0
+    for code, epoch, punch_type in keys:
+        if not any(
+            code == db_code and punch_type == db_punch and epoch in epochs
+            for db_code, epochs, db_punch in db_pairs
+        ):
+            missing += 1
+    return missing
+
+
 def run_device_sync(
     db: Session,
-    device: DeviceService | None = None,
+    device: AttendanceFetchSource | None = None,
     settings: Settings | None = None,
     *,
     full_resync: bool = False,
+    device_id: str | None = None,
 ) -> tuple[int, int, int]:
     """
     Fetch attendance from device, insert logs, backfill employees, rebuild sessions.
 
     Returns (device_row_count, newly_inserted_log_rows, placeholder_employees_created).
+    Prefer ``run_device_sync_detailed`` when skip/reconcile metrics are needed.
     """
-    from app.domains.attendance.services.attendance_correction_service import load_corrected_employee_days
+    result = run_device_sync_detailed(
+        db, device=device, settings=settings, full_resync=full_resync, device_id=device_id
+    )
+    return result.fetched, result.inserted, result.placeholders
+
+
+def run_device_sync_detailed(
+    db: Session,
+    device: AttendanceFetchSource | None = None,
+    settings: Settings | None = None,
+    *,
+    full_resync: bool = False,
+    device_id: str | None = None,
+) -> DeviceSyncResult:
+    """
+    Fetch attendance from device, insert logs, backfill employees, rebuild sessions.
+
+    Mid-day attendance corrections only block punches at or before protect_until so
+    later genuine punches (evening OUT) still sync.
+    """
+    from app.domains.attendance.services.attendance_correction_service import (
+        is_punch_blocked_by_correction,
+        load_corrected_day_guards,
+    )
     from app.domains.devices.services.device_command_service import wait_for_correction_commands_clear
 
     settings = settings or get_settings()
-    if not wait_for_correction_commands_clear(db, settings.zk_device_id, settings=settings):
+    resolved_device_id = device_id or settings.zk_device_id
+    if not wait_for_correction_commands_clear(db, resolved_device_id, settings=settings):
         logger.warning(
             "Deferring device sync: CORRECT_ATTENDANCE still active for device %s",
-            settings.zk_device_id,
+            resolved_device_id,
         )
-        return 0, 0, 0
+        return DeviceSyncResult(
+            fetched=0,
+            inserted=0,
+            placeholders=0,
+            skipped_reason="correction_active",
+        )
     device = device or DeviceService(settings=settings)
-    floor = None if full_resync else _incremental_sync_floor(db, device_id=settings.zk_device_id, settings=settings)
+    floor = None if full_resync else _incremental_sync_floor(db, device_id=resolved_device_id, settings=settings)
     fetched_records = device.fetch_attendance()
+    fetched_count = len(fetched_records)
     if floor is not None:
         fetched_records = [row for row in fetched_records if row.timestamp >= floor]
-    records = _dedupe_device_records(fetched_records, settings=settings)
+    records = _dedupe_device_records(fetched_records)
 
-    tz = ZoneInfo(settings.timezone)
-    protected_days = load_corrected_employee_days(db, device_id=settings.zk_device_id)
-    if protected_days:
-        before_count = len(records)
-        records = [
-            row
-            for row in records
-            if (str(row.user_id).strip(), _local_date(row.timestamp, tz)) not in protected_days
-        ]
-        skipped = before_count - len(records)
-        if skipped:
+    tz = ZoneInfo(settings.resolved_timezone())
+    guards = load_corrected_day_guards(db, device_id=resolved_device_id)
+    skipped_corrected = 0
+    if guards:
+        kept: list[DeviceAttendanceRecord] = []
+        for row in records:
+            day = _local_date(row.timestamp, tz)
+            if is_punch_blocked_by_correction(
+                user_id=str(row.user_id).strip(),
+                timestamp=row.timestamp,
+                local_day=day,
+                guards=guards,
+            ):
+                skipped_corrected += 1
+                continue
+            kept.append(row)
+        if skipped_corrected:
             logger.info(
-                "Sync skipped %s device punch(es) on %s corrected employee-day(s)",
-                skipped,
-                len(protected_days),
+                "Sync skipped %s device punch(es) on corrected employee-days (post-correction punches kept)",
+                skipped_corrected,
             )
+        records = kept
 
-    n = insert_attendance_logs_idempotent(db, records, settings.zk_device_id)
+    n = insert_attendance_logs_idempotent(db, records, resolved_device_id)
+    missing_after = count_fetched_missing_in_db(db, records, resolved_device_id)
+    if missing_after:
+        logger.error(
+            "Punch reconciliation failed for device %s: %s fetched punches still missing after insert",
+            resolved_device_id,
+            missing_after,
+        )
     placeholders = backfill_employees_from_orphan_logs(db)
 
     today = datetime.now(tz).date()
@@ -424,29 +620,43 @@ def run_device_sync(
     except Exception as exc:  # noqa: BLE001
         logger.warning("AI cache invalidation skipped: %s", exc)
 
-    return len(fetched_records), n, placeholders
+    return DeviceSyncResult(
+        fetched=fetched_count,
+        inserted=n,
+        placeholders=placeholders,
+        skipped_corrected_punches=skipped_corrected,
+        punches_missing_after_insert=missing_after,
+    )
 
 
 def run_user_sync(
     db: Session,
-    device: DeviceService | None = None,
+    device: UserFetchSource | None = None,
     settings: Settings | None = None,
+    *,
+    device_id: str | None = None,
 ) -> tuple[int, int]:
     """Fetch users from device and insert new employees."""
     settings = settings or get_settings()
+    resolved_device_id = device_id or settings.zk_device_id
     device = device or DeviceService(settings=settings)
     users = device.fetch_users()
-    inserted = sync_employees_from_device_users(db, users)
+    inserted = sync_employees_from_device_users(db, users, device_id=resolved_device_id)
     return len(users), inserted
 
 
 # Re-export for callers that still import from attendance_service
 __all__ = [
+    "DeviceSyncResult",
+    "MergedAttendanceSource",
+    "MergedUserSource",
     "backfill_employees_from_orphan_logs",
+    "count_fetched_missing_in_db",
     "insert_attendance_logs_idempotent",
     "prune_recent_duplicate_logs",
     "rebuild_sessions_for_local_date",
     "run_device_sync",
+    "run_device_sync_detailed",
     "run_user_sync",
     "sync_employees_from_device_users",
 ]

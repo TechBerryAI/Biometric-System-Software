@@ -15,6 +15,7 @@ class Employee(Base):
     __tablename__ = "employees"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     # Immutable internal identity used for all historical linkage.
     employee_uuid: Mapped[str] = mapped_column(
         String(36),

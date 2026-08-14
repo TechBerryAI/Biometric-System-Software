@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import {
+  Activity,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -30,7 +31,8 @@ const items = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: "dashboard:view" as Permission },
   { to: "/employees", label: "Employees", icon: Users, permission: "employee:view" as Permission },
   { to: "/attendance", label: "Attendance", icon: ClipboardList, permission: "reports:read" as Permission },
-  { to: "/reports", label: "Reports", icon: FileBarChart2, permission: "anomaly:manage" as Permission },
+  { to: "/monitoring", label: "Live Monitor", icon: Activity, permission: "reports:read" as Permission },
+  { to: "/reports", label: "Reports", icon: FileBarChart2, permission: "reports:read" as Permission },
   { to: "/operations", label: "Operations", icon: ShieldCheck, permission: "device:manage" as Permission },
   { to: "/settings", label: "Settings", icon: Settings, permission: "metrics:read" as Permission },
 ] as const;
@@ -56,6 +58,7 @@ export function Sidebar() {
   const manualSyncMode = opsMetrics.data?.device_auto_sync_enabled === false;
   const deviceHealth = opsMetrics.data?.device_health_status ?? "UNKNOWN";
   const queueOk = failingDevices === 0 && retryPressure === 0;
+  // Primary badge reflects live device connectivity + queue — not historical incomplete days.
   const syncHealthy = manualSyncMode ? queueOk : deviceHealth === "ONLINE" && queueOk;
   const showOffline = !manualSyncMode && deviceHealth === "OFFLINE";
   const statusLabel = manualSyncMode
@@ -71,6 +74,7 @@ export function Sidebar() {
     opsMetrics.data?.device_ip && opsMetrics.data?.device_port
       ? `${opsMetrics.data.device_ip}:${opsMetrics.data.device_port}`
       : null;
+  const connectivityMode = opsMetrics.data?.device_connectivity_mode ?? "both";
 
   const refreshWorkforceViews = async () => {
     await Promise.all([
@@ -91,9 +95,10 @@ export function Sidebar() {
       await refreshWorkforceViews();
       window.dispatchEvent(new Event("biometrica:device-sync"));
       setSyncState({
-        tone: "ok",
+        tone: result.punches_missing_after_insert ? "warn" : "ok",
         message: `Synced ${result.new_attendance_logs} new logs from ${result.attendance_records_fetched} device records.`,
       });
+
     } catch (error: unknown) {
       setSyncState({
         tone: "warn",
@@ -266,10 +271,24 @@ export function Sidebar() {
                   ? "Checking live device status..."
                   : manualSyncMode
                     ? "Manual sync — Sync now pulls all punches still on the terminal"
-                    : syncHealthy
-                      ? `${failingDevices} devices failing, ${retryPressure} sync retries pending`
-                      : `Device offline${deviceTarget ? ` (${deviceTarget})` : ""} — check connectivity`}
+                    : showOffline
+                      ? `Device offline${deviceTarget ? ` (${deviceTarget})` : ""} — check connectivity`
+                      : syncHealthy
+                        ? `Connected${deviceTarget ? ` (${deviceTarget})` : ""} · mode ${connectivityMode}`
+                        : retryPressure > 0
+                          ? `${retryPressure} sync retries pending`
+                          : failingDevices > 0
+                            ? `${failingDevices} active device(s) need attention`
+                            : `Device status: ${deviceHealth}`}
               </p>
+              {opsMetrics.data?.last_attendance_sync_at ? (
+                <p className="mt-1 text-[10px] text-ink-muted">
+                  Last successful sync:{" "}
+                  {new Date(opsMetrics.data.last_attendance_sync_at).toLocaleString()}
+                </p>
+              ) : (
+                <p className="mt-1 text-[10px] text-ink-muted">Waiting for first attendance sync…</p>
+              )}
             </div>
             <div className="grid grid-cols-1 gap-2">
               <Button

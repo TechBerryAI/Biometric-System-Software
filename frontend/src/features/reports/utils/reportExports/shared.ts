@@ -20,3 +20,21 @@ export function formatExtension(format: "pdf" | "word" | "excel"): string {
   if (format === "excel") return "xlsx";
   return "pdf";
 }
+
+/** Insert a blank row between day groups (dates must already be chronological). */
+export function mapRowsWithDaySeparators<T extends { summary_date: string }>(
+  rows: T[],
+  mapRow: (row: T) => (string | number)[],
+): (string | number)[][] {
+  const out: (string | number)[][] = [];
+  let prevDate: string | null = null;
+  for (const row of rows) {
+    if (prevDate != null && row.summary_date !== prevDate) {
+      const width = mapRow(row).length;
+      out.push(Array.from({ length: width }, () => ""));
+    }
+    out.push(mapRow(row));
+    prevDate = row.summary_date;
+  }
+  return out;
+}
