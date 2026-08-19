@@ -23,6 +23,7 @@ from app.domains.attendance.router import router as attendance_router
 from app.domains.auth.router import router as auth_router
 from app.domains.devices.router import router as sync_router
 from app.domains.devices.fleet_router import router as fleet_router
+from app.domains.devices.migration_router import router as migration_router
 from app.domains.devices.gateway.push_router import router as push_gateway_router
 from app.domains.employees.router import router as employee_router
 from app.domains.ops.health import router as health_router
@@ -127,6 +128,7 @@ app.include_router(attendance_correction_router)
 app.include_router(insights_router)
 app.include_router(sync_router)
 app.include_router(fleet_router)
+app.include_router(migration_router)
 app.include_router(push_gateway_router)
 app.include_router(auth_router)
 app.include_router(operations_router)

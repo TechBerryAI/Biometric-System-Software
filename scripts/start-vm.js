@@ -284,6 +284,17 @@ async function main() {
   ensureFrontendEnv();
   const backendPython = await preflightChecks();
 
+  log("Applying database migrations (alembic upgrade head)...");
+  try {
+    execSync(`"${backendPython}" -m alembic upgrade head`, {
+      cwd: BACKEND,
+      stdio: "inherit",
+      env: envForBackendChild(),
+    });
+  } catch (err) {
+    throw new Error(`alembic upgrade head failed: ${err.message}`);
+  }
+
   const envPath = path.join(BACKEND, ".env");
   if (fs.existsSync(envPath)) {
     const raw = fs.readFileSync(envPath, "utf8");

@@ -101,4 +101,10 @@ describe("FE-UNIT-SET-001 Settings page", () => {
     });
     expect(await screen.findByText(/device connection settings saved/i)).toBeInTheDocument();
   });
+
+  it("renders replacement cutover wizard for the primary device", async () => {
+    renderWithProviders(<Settings />, { withAuth: false, route: "/settings" });
+    expect(await screen.findByText(/replacement device cutover/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /1\. inspect/i })).toBeInTheDocument();
+  });
 });

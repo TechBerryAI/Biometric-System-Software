@@ -226,6 +226,93 @@ class DeviceService:
             )
         return out
 
+    def inspect_readonly(self) -> dict[str, Any]:
+        """Read-only firmware/users probe. Never writes, deletes, or clears."""
+        snapshot: dict[str, Any] = {
+            "connected": False,
+            "connection_detail": None,
+            "firmware_version": None,
+            "serial_number": None,
+            "platform": None,
+            "fp_version": None,
+            "face_version": None,
+            "users": [],
+            "user_count": 0,
+            "unsupported": [],
+            "errors": {},
+        }
+        tcp_ok, tcp_detail = self.probe_tcp_connection()
+        if not tcp_ok:
+            snapshot["connection_detail"] = tcp_detail
+            return snapshot
+
+        def _safe_attr(conn: Any, method_name: str, field: str) -> None:
+            if not hasattr(conn, method_name):
+                snapshot["unsupported"].append(field)
+                return
+            try:
+                value = getattr(conn, method_name)()
+                text = str(value).strip() if value is not None else ""
+                snapshot[field] = text or None
+            except Exception as exc:  # noqa: BLE001
+                snapshot["errors"][field] = str(exc)
+
+        def _read(conn: Any) -> dict[str, Any]:
+            for method_name in DANGEROUS_PYZK_METHODS:
+                _ = hasattr(conn, method_name)
+            snapshot["connected"] = True
+            snapshot["connection_detail"] = "connected"
+            _safe_attr(conn, "get_firmware_version", "firmware_version")
+            _safe_attr(conn, "get_serialnumber", "serial_number")
+            _safe_attr(conn, "get_platform", "platform")
+            _safe_attr(conn, "get_fp_version", "fp_version")
+            _safe_attr(conn, "get_face_version", "face_version")
+            if not hasattr(conn, "get_users"):
+                snapshot["unsupported"].append("users")
+                return snapshot
+            try:
+                raw = conn.get_users() or []
+                users: list[dict[str, Any]] = []
+                for u in raw:
+                    uid_raw = getattr(u, "uid", 0) or 0
+                    try:
+                        uid = int(uid_raw)
+                    except (TypeError, ValueError):
+                        uid = 0
+                    user_id = str(getattr(u, "user_id", "") or "").strip() or str(uid)
+                    privilege_raw = getattr(u, "privilege", None)
+                    try:
+                        privilege = int(privilege_raw) if privilege_raw is not None else None
+                    except (TypeError, ValueError):
+                        privilege = None
+                    group_id_raw = getattr(u, "group_id", None)
+                    group_id = str(group_id_raw).strip() if group_id_raw not in (None, "") else None
+                    card_raw = getattr(u, "card", None)
+                    card = str(card_raw).strip() if card_raw not in (None, "") else None
+                    users.append(
+                        {
+                            "uid": uid,
+                            "user_id": user_id,
+                            "name": str(getattr(u, "name", "") or "").strip(),
+                            "privilege": privilege,
+                            "group_id": group_id,
+                            "card": card,
+                        }
+                    )
+                snapshot["users"] = users
+                snapshot["user_count"] = len(users)
+            except Exception as exc:  # noqa: BLE001
+                snapshot["errors"]["users"] = str(exc)
+            return snapshot
+
+        try:
+            self._adapter.run("inspect_readonly", _read, max_attempts=2)
+        except (ZKError, OSError, TimeoutError, RuntimeError) as exc:
+            snapshot["connection_detail"] = format_device_connection_error(
+                exc, settings=self._settings, connection=self._connection
+            )
+        return snapshot
+
     def check_connection(self) -> tuple[bool, str]:
         """Check TCP reachability, then verify pyzk handshake succeeds."""
         tcp_ok, tcp_detail = self.probe_tcp_connection()
@@ -283,6 +370,96 @@ class DeviceService:
                 continue
         return out
 
+    def create_missing_users(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        """CREATE-only metadata write in one device session. Never updates existing user_ids."""
+
+        def _occupied(users: list[Any]) -> set[int]:
+            occupied: set[int] = set()
+            for user in users:
+                try:
+                    uid = int(getattr(user, "uid", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if uid > 0:
+                    occupied.add(uid)
+            return occupied
+
+        def _next_uid(occupied: set[int], preferred: int | None) -> int:
+            if preferred is not None and preferred > 0 and preferred not in occupied:
+                return int(preferred)
+            candidate = 1
+            while candidate in occupied:
+                candidate += 1
+            return candidate
+
+        def _write(conn: Any) -> dict[str, Any]:
+            for method_name in DANGEROUS_PYZK_METHODS:
+                if hasattr(conn, method_name):
+                    continue
+            live = list(conn.get_users() or [])
+            by_id = {str(getattr(user, "user_id", "") or "").strip(): user for user in live}
+            occupied = _occupied(live)
+            created: list[dict[str, Any]] = []
+            skipped: list[dict[str, Any]] = []
+            failed: list[dict[str, Any]] = []
+            total = len(rows)
+            for index, row in enumerate(rows, start=1):
+                user_id = str(row.get("user_id") or "").strip()
+                if not user_id:
+                    failed.append({"user_id": "", "error": "missing user_id"})
+                    continue
+                existing = by_id.get(user_id)
+                if existing is not None:
+                    try:
+                        existing_uid = int(getattr(existing, "uid", 0) or 0) or None
+                    except (TypeError, ValueError):
+                        existing_uid = None
+                    skipped.append({"user_id": user_id, "uid": existing_uid})
+                    continue
+                try:
+                    preferred = row.get("uid")
+                    preferred_uid = int(preferred) if preferred not in (None, "", 0, "0") else None
+                except (TypeError, ValueError):
+                    preferred_uid = None
+                target_uid = _next_uid(occupied, preferred_uid)
+                try:
+                    raw_card = row.get("card")
+                    card = int(raw_card) if str(raw_card or "0").isdigit() else 0
+                    kwargs: dict[str, object] = {
+                        "name": str(row.get("name") or user_id).strip() or user_id,
+                        "privilege": int(row.get("privilege") or 0),
+                        "user_id": user_id,
+                        "group_id": str(row.get("group_id") or ""),
+                        "card": card,
+                        "uid": target_uid,
+                    }
+                    conn.set_user(**kwargs)
+                    occupied.add(target_uid)
+                    by_id[user_id] = type("User", (), {"uid": target_uid, "user_id": user_id})()
+                    created.append({"user_id": user_id, "uid": target_uid})
+                    if index == 1 or index == total or index % 5 == 0:
+                        logger.info("Cutover CREATE %s/%s user_id=%s uid=%s", index, total, user_id, target_uid)
+                    time.sleep(0.05)
+                except Exception as exc:  # noqa: BLE001
+                    failed.append({"user_id": user_id, "error": str(exc)})
+                    logger.warning("Cutover CREATE failed user_id=%s: %s", user_id, exc)
+            after = []
+            for user in conn.get_users() or []:
+                try:
+                    uid = int(getattr(user, "uid", 0) or 0)
+                except (TypeError, ValueError):
+                    uid = 0
+                after.append(
+                    {
+                        "uid": uid,
+                        "user_id": str(getattr(user, "user_id", "") or "").strip(),
+                        "name": str(getattr(user, "name", "") or "").strip(),
+                    }
+                )
+            return {"created": created, "skipped": skipped, "failed": failed, "users": after}
+
+        return self._adapter.run("create_missing_users", _write, max_attempts=2)
+
     def upsert_user(
         self,
         *,
@@ -323,8 +500,7 @@ class DeviceService:
                             if existing_uid_raw is not None:
                                 target_uid = int(existing_uid_raw)
                                 break
-                if target_uid is None:
-                    target_uid = 0
+                # Never pass uid=0 — pyzk assigns next_uid when uid is omitted/None.
 
                 existing_privilege = int(getattr(existing_user, "privilege", 0) or 0) if existing_user is not None else 0
                 existing_group_id = str(getattr(existing_user, "group_id", "") or "") if existing_user is not None else ""
@@ -336,13 +512,14 @@ class DeviceService:
                 effective_card = int(raw_card) if str(raw_card).isdigit() else 0
 
                 kwargs: dict[str, object] = {
-                    "uid": target_uid,
                     "name": safe_name,
                     "privilege": effective_privilege,
                     "user_id": user_id,
                     "group_id": effective_group_id,
                     "card": effective_card,
                 }
+                if target_uid is not None and int(target_uid) > 0:
+                    kwargs["uid"] = int(target_uid)
                 conn.set_user(**kwargs)
                 # Older firmware can delay write persistence; short cooldown reduces false negatives.
                 time.sleep(0.1)

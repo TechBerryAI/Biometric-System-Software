@@ -7,6 +7,7 @@ from app.domains.attendance.models.idempotency_key import IdempotencyKey
 from app.domains.devices.models.device import Device
 from app.domains.devices.models.device_sync_state import DeviceSyncState
 from app.domains.devices.models.device_command import DeviceCommand
+from app.domains.devices.models.device_migration import DeviceMigration, DeviceMigrationItem
 from app.domains.devices.models.device_user_drift import DeviceUserDrift
 from app.domains.employees.models.device_user_mapping import DeviceUserMapping
 from app.domains.employees.models.employee import Employee
@@ -29,5 +30,7 @@ __all__ = [
     "Device",
     "DeviceSyncState",
     "DeviceCommand",
+    "DeviceMigration",
+    "DeviceMigrationItem",
     "SystemControlState",
 ]

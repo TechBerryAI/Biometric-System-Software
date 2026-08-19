@@ -35,6 +35,8 @@ from app.models import (  # noqa: F401 — register metadata
     IdempotencyKey,
     Device,
     DeviceCommand,
+    DeviceMigration,
+    DeviceMigrationItem,
     DeviceSyncState,
     DeviceUserDrift,
     DeviceUserMapping,

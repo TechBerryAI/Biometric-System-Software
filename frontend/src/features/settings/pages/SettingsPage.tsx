@@ -3,7 +3,8 @@ import { Clock3, Cpu, Globe2, Loader2, Moon, ShieldCheck, Sparkles, Sun, Timer }
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/features/auth/AuthContext";
 import { ChangePasswordCard } from "@/features/settings/components/ChangePasswordCard";
-import { listFleetDevices, updateFleetDevice } from "@/features/settings/api";
+import { listFleetDevices, updateFleetDevice, RETIRED_PRIMARY_IP } from "@/features/settings/api";
+import { DeviceCutoverCard } from "@/features/settings/components/DeviceCutoverCard";
 import { fetchOperationalMetrics } from "@/features/operations/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -282,12 +283,18 @@ export function Settings() {
               />
             </div>
             <p className="rounded-xl border border-line/60 bg-surface px-4 py-3 text-xs text-ink-muted leading-relaxed">
-              The API only calls <span className="font-medium text-ink">get_users</span> and{" "}
-              <span className="font-medium text-ink">get_attendance</span>. No templates, no destructive writes.
+              Saving IP, port, and timezone retargets the primary device <span className="font-medium text-ink">{deviceName ?? "main-entrance"}</span>.
+              A replacement may keep the previous LAN address; inspect must confirm a new serial before migrating.
               {readOnly
                 ? " You need device management permission to change these values."
-                : " Saving updates IP, port, and timezone together. Changes apply on the next sync or probe."}
+                : " Changes apply on the next sync, probe, or inspect."}
             </p>
+            {form.ipAddress.trim() === RETIRED_PRIMARY_IP ? (
+              <p className="rounded-xl border border-line/60 bg-surface px-3 py-2 text-sm text-ink-muted">
+                This is the previous terminal's LAN address. That is expected if the replacement uses the same IP.
+                Confirm a new serial with Inspect before migrating.
+              </p>
+            ) : null}
 
             {message ? (
               <p
@@ -406,6 +413,8 @@ export function Settings() {
 
         <ChangePasswordCard />
       </div>
+
+      {canManageDevice && primaryDevice ? <DeviceCutoverCard device={primaryDevice} /> : null}
     </div>
   );
 }
