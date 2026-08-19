@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from tests.factories import make_device
 
+_RUNNER = "app.domains.devices.services.device_sync_runner"
+
 
 @contextmanager
 def _noop_lock(*_args, **_kwargs):
@@ -31,13 +33,13 @@ def test_sync_device_success(client: TestClient, admin_headers: dict[str, str]) 
         punches_missing_after_insert=0,
     )
     with (
-        patch("app.domains.devices.router.wait_for_correction_commands_clear", return_value=True),
-        patch("app.domains.devices.router.device_session_lock", side_effect=_noop_lock),
-        patch("app.domains.devices.router.run_user_sync", return_value=(12, 2)),
-        patch("app.domains.devices.router.run_device_sync_detailed", return_value=sync_result) as device_sync,
-        patch("app.domains.devices.router.update_device_health"),
-        patch("app.domains.devices.router.get_or_create_sync_state", return_value=MagicMock()),
-        patch("app.domains.devices.router.AIResponseCache", return_value=cache),
+        patch(f"{_RUNNER}.wait_for_correction_commands_clear", return_value=True),
+        patch(f"{_RUNNER}.device_session_lock", side_effect=_noop_lock),
+        patch(f"{_RUNNER}.run_user_sync", return_value=(12, 2)),
+        patch(f"{_RUNNER}.run_device_sync_detailed", return_value=sync_result) as device_sync,
+        patch(f"{_RUNNER}.update_device_health"),
+        patch(f"{_RUNNER}.get_or_create_sync_state", return_value=MagicMock()),
+        patch(f"{_RUNNER}.AIResponseCache", return_value=cache),
     ):
         response = client.post("/sync/device", headers=admin_headers)
     assert response.status_code == 200
@@ -62,14 +64,14 @@ def test_sync_device_error_reports_saved_ip_not_env(
     )
     db_session.commit()
     with (
-        patch("app.domains.devices.router.wait_for_correction_commands_clear", return_value=True),
-        patch("app.domains.devices.router.device_session_lock", side_effect=_noop_lock),
-        patch("app.domains.devices.router.run_user_sync", return_value=(0, 0)),
+        patch(f"{_RUNNER}.wait_for_correction_commands_clear", return_value=True),
+        patch(f"{_RUNNER}.device_session_lock", side_effect=_noop_lock),
+        patch(f"{_RUNNER}.run_user_sync", return_value=(0, 0)),
         patch(
-            "app.domains.devices.router.run_device_sync_detailed",
+            f"{_RUNNER}.run_device_sync_detailed",
             side_effect=OSError(errno.EPIPE, "Broken pipe"),
         ),
-        patch("app.domains.devices.router.update_device_health"),
+        patch(f"{_RUNNER}.update_device_health"),
     ):
         response = client.post("/sync/device", headers=admin_headers)
     assert response.status_code == 502
@@ -82,3 +84,38 @@ def test_sync_device_error_reports_saved_ip_not_env(
 def test_sync_device_unauthenticated(client: TestClient) -> None:
     response = client.post("/sync/device")
     assert response.status_code in {401, 403}
+
+
+@pytest.mark.testid("BE-API-SYNC-003")
+def test_sync_device_wait_false_enqueues_job(client: TestClient, admin_headers: dict[str, str]) -> None:
+    with patch("app.domains.devices.router.run_manual_device_sync") as task:
+        task.apply_async.return_value = MagicMock(id="job-sync-1")
+        response = client.post("/sync/device", params={"wait": False, "full": True}, headers=admin_headers)
+    assert response.status_code == 202
+    body = response.json()
+    assert body["accepted"] is True
+    assert body["task_id"] == "job-sync-1"
+    task.apply_async.assert_called_once()
+
+
+@pytest.mark.testid("BE-API-SYNC-004")
+def test_sync_job_status_success(client: TestClient, admin_headers: dict[str, str]) -> None:
+    payload = {
+        "ok": True,
+        "users_on_device": 3,
+        "new_employees": 0,
+        "attendance_records_fetched": 10,
+        "new_attendance_logs": 2,
+        "placeholder_employees_created": 0,
+        "skipped_reason": None,
+        "skipped_corrected_punches": 0,
+        "punches_missing_after_insert": 0,
+    }
+    job = MagicMock(state="SUCCESS", result=payload)
+    with patch("app.domains.devices.router.AsyncResult", return_value=job):
+        response = client.get("/sync/jobs/job-sync-1", headers=admin_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["state"] == "SUCCESS"
+    assert body["result"]["new_attendance_logs"] == 2
+    assert body["error"] is None

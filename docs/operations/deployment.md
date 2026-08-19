@@ -71,10 +71,12 @@ make start-vm
 
 Use `/api` as the only frontend API base path.
 
+A ready-to-copy config lives at `deploy/nginx.conf`. **You must set `proxy_read_timeout` (and `proxy_send_timeout`) to 600s.** Nginx defaults to 60s, which is what produces `504 Gateway Time-out` on **Sync now** while the VM is still talking to the terminal.
+
 ```nginx
 server {
     listen 80;
-    server_name 192.168.1.117;
+    server_name 192.168.1.60;
 
     root /var/www/biometric-frontend/dist;
     index index.html;
@@ -83,7 +85,8 @@ server {
         try_files $uri /index.html;
     }
 
-    # IMPORTANT: trailing slash in both location and proxy_pass rewrites /api/* -> /* upstream.
+    # Trailing slash rewrites /api/* -> /* upstream.
+    # 600s timeouts are required: a full ZK attendance pull often exceeds 60s on a VM.
     location /api/ {
         proxy_pass http://127.0.0.1:8000/;
         proxy_http_version 1.1;
@@ -91,11 +94,17 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
+        proxy_buffering off;
     }
 }
 ```
 
 Without the trailing-slash rewrite form above, upstream receives `/api/auth/login` instead of `/auth/login`.
+
+After editing: `sudo nginx -t && sudo systemctl reload nginx`. Then rebuild/restart the app on the VM so **Sync now** can return `202` immediately and finish in Celery (avoids the 60s gateway even before nginx is updated).
 
 ## Production Safety Checklist
 

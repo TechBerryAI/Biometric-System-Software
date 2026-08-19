@@ -75,6 +75,8 @@ Legend: **ID** = stable test marker · **File** = intended test module · **Stat
 | Surface | Test ID | File |
 |---------|---------|------|
 | `POST /sync/device` | BE-API-SYNC-001 | `backend/tests/api/test_sync_api.py` |
+| `POST /sync/device?wait=false` | BE-API-SYNC-003 | same |
+| `GET /sync/jobs/{task_id}` | BE-API-SYNC-004 | same |
 | `GET /insights/management` | BE-API-INS-001 | `backend/tests/api/test_insights_api.py` |
 | `GET /insights/anomalies` | BE-API-INS-002 | same |
 | Insights degrade without key | BE-API-INS-003 | same |
@@ -139,6 +141,7 @@ Legend: **ID** = stable test marker · **File** = intended test module · **Stat
 | Task / beat | Test ID | File |
 |-------------|---------|------|
 | `sync_attendance_from_device` | BE-WRK-SYNC-001 | `backend/tests/workers/test_sync_task.py` |
+| `run_manual_device_sync` | BE-WRK-SYNC-002 | same |
 | `probe_device_connectivity` | BE-WRK-PROBE-001 | `backend/tests/workers/test_probe_task.py` |
 | `process_device_commands` | BE-WRK-CMD-001 | `backend/tests/workers/test_process_commands_task.py` |
 | `reconcile_devices` | BE-WRK-REC-001 | `backend/tests/workers/test_reconcile_task.py` |

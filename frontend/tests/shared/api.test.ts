@@ -24,6 +24,18 @@ describe("FE-UNIT-API-001 api helpers", () => {
     expect(formatSyncErrorMessage(err)).toContain("adjust attendance manually");
   });
 
+  it("explains 504 gateway timeouts on sync", () => {
+    const err = new axios.AxiosError("Request failed with status code 504");
+    err.response = {
+      status: 504,
+      statusText: "Gateway Timeout",
+      headers: {},
+      config: { headers: {} } as never,
+      data: {},
+    };
+    expect(formatSyncErrorMessage(err)).toContain("proxy timed out");
+  });
+
   it("logs in through MSW-backed loginWithPassword", async () => {
     const tokens = await loginWithPassword("admin@company.com", "secret");
     expect(tokens.access_token).toBe(mockTokens.access_token);

@@ -90,6 +90,46 @@ def sync_attendance_from_device(self) -> dict[str, int | bool | list]:
 
 
 @celery_app.task(
+    name="app.workers.tasks.run_manual_device_sync",
+    bind=True,
+    max_retries=0,
+    queue="attendance_sync",
+    track_started=True,
+    time_limit=900,
+    soft_time_limit=840,
+)
+def run_manual_device_sync(self, full_resync: bool = True) -> dict[str, object]:
+    """Operator-triggered Sync now. Always runs, even when auto-sync is disabled."""
+    del self
+    from app.domains.devices.services.device_sync_runner import execute_device_sync
+    from app.shared.device_exceptions import DeviceFetchError, DeviceLockContentionError
+
+    db = SessionLocal()
+    try:
+        payload = execute_device_sync(db, settings=settings, full_resync=full_resync)
+        logger.info(
+            "Manual device sync completed: fetched=%s inserted=%s",
+            payload.get("attendance_records_fetched"),
+            payload.get("new_attendance_logs"),
+        )
+        return {"ok": True, **payload}
+    except DeviceLockContentionError as exc:
+        _safe_rollback(db)
+        return {"ok": False, "error": str(exc), "status_code": 409}
+    except DeviceFetchError as exc:
+        _safe_rollback(db)
+        return {"ok": False, "error": str(exc), "status_code": 502}
+    except Exception as exc:  # noqa: BLE001
+        _safe_rollback(db)
+        if _is_disconnect_error(exc):
+            dispose_engines()
+        logger.exception("Manual device sync failed: %s", exc)
+        return {"ok": False, "error": str(exc), "status_code": 500}
+    finally:
+        db.close()
+
+
+@celery_app.task(
     name="app.workers.tasks.probe_device_connectivity",
     bind=True,
     max_retries=0,

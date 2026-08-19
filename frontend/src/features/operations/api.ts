@@ -11,13 +11,60 @@ export type DeviceSyncResponse = {
   punches_missing_after_insert?: number;
 };
 
+type DeviceSyncQueued = {
+  accepted: boolean;
+  task_id: string;
+  status?: string;
+};
+
+type DeviceSyncJobStatus = {
+  task_id: string;
+  state: string;
+  result: (DeviceSyncResponse & { ok?: boolean; error?: string; status_code?: number }) | null;
+  error: string | null;
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+async function waitForManualSyncJob(taskId: string): Promise<DeviceSyncResponse> {
+  const started = Date.now();
+  const deadline = started + SYNC_HTTP_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const { data } = await api.get<DeviceSyncJobStatus>(`/sync/jobs/${encodeURIComponent(taskId)}`, {
+      timeout: 15_000,
+    });
+    const failed = data.state === "FAILURE" || data.result?.ok === false;
+    if (failed) {
+      throw new Error(data.error || data.result?.error || "Sync failed");
+    }
+    if (data.state === "SUCCESS" && data.result) {
+      return data.result;
+    }
+    if (data.state === "PENDING" && Date.now() - started > 45_000) {
+      throw new Error(
+        "Sync is queued but the worker has not picked it up. On the VM, confirm Celery is running (make start-vm / START_CELERY=1)."
+      );
+    }
+    await sleep(2000);
+  }
+  throw new Error("Sync is still running on the server. Wait a minute, then refresh to see new punches.");
+}
+
 /** Pull all users + attendance still on the terminal (full history, read-only). */
 export async function syncFromDevice(): Promise<DeviceSyncResponse> {
-  const { data } = await api.post<DeviceSyncResponse>("/sync/device", null, {
+  const { data, status } = await api.post<DeviceSyncResponse | DeviceSyncQueued>("/sync/device", null, {
     timeout: SYNC_HTTP_TIMEOUT_MS,
-    params: { full: true },
+    params: { full: true, wait: false },
+    validateStatus: (code) => code === 200 || code === 202,
   });
-  return data;
+  if (status === 202 && data && "task_id" in data && data.task_id) {
+    return waitForManualSyncJob(data.task_id);
+  }
+  return data as DeviceSyncResponse;
 }
 
 export type IncompleteAttendanceSample = {

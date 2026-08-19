@@ -31,3 +31,32 @@ def test_sync_attendance_from_device_runs_with_patches() -> None:
     sync_branch.assert_called_once()
     assert fake_db.commit.call_count >= 1
     fake_db.close.assert_called_once()
+
+
+@pytest.mark.testid("BE-WRK-SYNC-002")
+def test_run_manual_device_sync_returns_ok_payload() -> None:
+    fake_db = MagicMock()
+    payload = {
+        "users_on_device": 8,
+        "new_employees": 1,
+        "attendance_records_fetched": 20,
+        "new_attendance_logs": 3,
+        "placeholder_employees_created": 0,
+        "skipped_reason": None,
+        "skipped_corrected_punches": 0,
+        "punches_missing_after_insert": 0,
+    }
+    with (
+        patch("app.workers.tasks.SessionLocal", return_value=fake_db),
+        patch(
+            "app.domains.devices.services.device_sync_runner.execute_device_sync",
+            return_value=payload,
+        ),
+    ):
+        from app.workers.tasks import run_manual_device_sync
+
+        result = run_manual_device_sync.run(full_resync=True)
+
+    assert result["ok"] is True
+    assert result["new_attendance_logs"] == 3
+    fake_db.close.assert_called_once()

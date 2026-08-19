@@ -25,6 +25,7 @@ Swagger UI: `/docs`
   - `/attendance/*`
   - `/attendance/adjust/*` for correction workflows
   - `/sync/device`
+  - `/sync/jobs/{task_id}` (poll a Sync now job started with `wait=false`)
 
 - **Forensics and Audit**
   - `/forensics/*` for raw events, correction ledger, device snapshots

@@ -107,6 +107,9 @@ export function getApiErrorMessage(err: unknown): string {
 }
 
 export function formatSyncErrorMessage(err: unknown): string {
+  if (axios.isAxiosError(err) && err.response?.status === 504) {
+    return "The VM proxy timed out while the device was still sending punches. Wait a minute and refresh — the sync may have finished in the background.";
+  }
   const message = getApiErrorMessage(err);
   if (message.includes("no route to host")) {
     return `${message} You can still adjust attendance manually while the device is offline.`;

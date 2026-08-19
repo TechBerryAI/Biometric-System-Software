@@ -44,6 +44,7 @@ celery_app.conf.update(
         "app.workers.tasks.process_device_commands": {"queue": "device_commands"},
         "app.workers.tasks.recover_stale_commands": {"queue": "device_commands"},
         "app.workers.tasks.sync_attendance_from_device": {"queue": "attendance_sync"},
+        "app.workers.tasks.run_manual_device_sync": {"queue": "attendance_sync"},
         "app.workers.tasks.probe_device_connectivity": {"queue": "attendance_sync"},
         "app.workers.tasks.reconcile_devices": {"queue": "reconciliation"},
         "app.workers.tasks.archive_old_attendance": {"queue": "reconciliation"},
