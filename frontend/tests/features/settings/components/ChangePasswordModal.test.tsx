@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import { ChangePasswordCard } from "@/features/settings/components/ChangePasswordCard";
+import { ChangePasswordModal } from "@/features/settings/components/ChangePasswordModal";
 import { renderWithProviders } from "@test/setup/render";
 
 vi.mock("@/features/auth/AuthContext", () => ({
@@ -16,10 +16,10 @@ vi.mock("@/features/auth/AuthContext", () => ({
   }),
 }));
 
-describe("FE-UNIT-PWD-001 ChangePasswordCard", () => {
-  it("renders password fields", () => {
-    renderWithProviders(<ChangePasswordCard />, { withAuth: false });
-    expect(screen.getByText(/account security/i)).toBeInTheDocument();
+describe("FE-UNIT-PWD-001 ChangePasswordModal", () => {
+  it("renders password fields when open", () => {
+    renderWithProviders(<ChangePasswordModal open onOpenChange={() => undefined} />, { withAuth: false });
+    expect(screen.getByRole("heading", { name: /change password/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Enter current password")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Minimum 8 characters")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Re-enter new password")).toBeInTheDocument();

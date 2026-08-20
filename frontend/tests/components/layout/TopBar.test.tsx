@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { TopBar } from "@/components/layout/TopBar";
 import { renderWithProviders } from "@test/setup/render";
 
@@ -28,5 +29,12 @@ describe("FE-UNIT-TOPBAR-001 TopBar", () => {
     renderWithProviders(<TopBar />, { withAuth: false });
     expect(screen.getByLabelText("Search")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /notifications/i })).toBeInTheDocument();
+  });
+
+  it("shows change password in the profile dropdown", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TopBar />, { withAuth: false });
+    await user.click(screen.getByRole("button", { name: /admin user/i }));
+    expect(await screen.findByRole("menuitem", { name: /change password/i })).toBeInTheDocument();
   });
 });

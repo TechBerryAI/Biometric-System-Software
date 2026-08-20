@@ -106,7 +106,7 @@ export default function App() {
                 <Route
                   path="/settings"
                   element={
-                    <RequireAuth permission="metrics:read">
+                    <RequireAuth permission="device:manage">
                       <Settings />
                     </RequireAuth>
                   }

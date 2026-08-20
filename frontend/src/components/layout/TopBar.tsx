@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/features/auth/AuthContext";
 import { accountTierFromUser, roleLabelFromUser } from "@/features/auth/sessionCapabilities";
 import { AddAccountModal } from "@/features/settings/components/AddAccountModal";
+import { ChangePasswordModal } from "@/features/settings/components/ChangePasswordModal";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -30,6 +31,7 @@ export function TopBar({ className }: { className?: string }) {
   const globalSearchQuery = useUiStore((s) => s.globalSearchQuery);
   const setGlobalSearchQuery = useUiStore((s) => s.setGlobalSearchQuery);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const canManageUsers = can("user:manage");
   const accountTier = accountTierFromUser(user);
   const roleLabel = roleLabelFromUser(user);
@@ -105,6 +107,7 @@ export function TopBar({ className }: { className?: string }) {
             <DropdownMenuLabel>Account</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => navigate("/profile")}>Profile</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setPasswordModalOpen(true)}>Change password</DropdownMenuItem>
             {canManageUsers ? (
               <DropdownMenuItem onSelect={() => setAccountModalOpen(true)}>Add New Account</DropdownMenuItem>
             ) : null}
@@ -114,6 +117,7 @@ export function TopBar({ className }: { className?: string }) {
         </DropdownMenu>
       </div>
       <AddAccountModal open={accountModalOpen} onOpenChange={setAccountModalOpen} />
+      <ChangePasswordModal open={passwordModalOpen} onOpenChange={setPasswordModalOpen} />
     </header>
   );
 }

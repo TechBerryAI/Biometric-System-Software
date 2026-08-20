@@ -34,7 +34,7 @@ const items = [
   { to: "/monitoring", label: "Live Monitor", icon: Activity, permission: "reports:read" as Permission },
   { to: "/reports", label: "Reports", icon: FileBarChart2, permission: "reports:read" as Permission },
   { to: "/operations", label: "Operations", icon: ShieldCheck, permission: "device:manage" as Permission },
-  { to: "/settings", label: "Settings", icon: Settings, permission: "metrics:read" as Permission },
+  { to: "/settings", label: "Settings", icon: Settings, permission: "device:manage" as Permission },
 ] as const;
 
 export function Sidebar() {

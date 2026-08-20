@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clock3, Cpu, Globe2, Loader2, Moon, ShieldCheck, Sparkles, Sun, Timer } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/features/auth/AuthContext";
-import { ChangePasswordCard } from "@/features/settings/components/ChangePasswordCard";
 import { listFleetDevices, updateFleetDevice, RETIRED_PRIMARY_IP } from "@/features/settings/api";
 import { DeviceCutoverCard } from "@/features/settings/components/DeviceCutoverCard";
 import { fetchOperationalMetrics } from "@/features/operations/api";
@@ -410,8 +409,6 @@ export function Settings() {
             </div>
           </CardContent>
         </Card>
-
-        <ChangePasswordCard />
       </div>
 
       {canManageDevice && primaryDevice ? <DeviceCutoverCard device={primaryDevice} /> : null}
