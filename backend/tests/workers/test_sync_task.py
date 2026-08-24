@@ -29,6 +29,7 @@ def test_sync_attendance_from_device_runs_with_patches() -> None:
     assert result["total_inserted"] == 4
     ensure_device.assert_called_once()
     sync_branch.assert_called_once()
+    assert sync_branch.call_args.kwargs.get("full_resync") is False
     assert fake_db.commit.call_count >= 1
     fake_db.close.assert_called_once()
 

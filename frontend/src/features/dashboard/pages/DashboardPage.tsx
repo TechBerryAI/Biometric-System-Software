@@ -87,7 +87,7 @@ import { fetchTenants } from "@/features/tenancy/api";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useTenantStore } from "@/stores/tenant-store";
 import { cn } from "@/lib/cn";
-import { fmtDisplayDate } from "@/lib/dates";
+import { fmtDisplayDate, isoToTimeParts, zonedWallClockToISO } from "@/lib/dates";
 
 export function Dashboard() {
   const { can } = useAuth();
@@ -481,7 +481,7 @@ export function Dashboard() {
         id: `log-${log.id}`,
         title: isCheckIn ? "Employee check-in" : "Employee check-out",
         subtitle: `${employee?.name ?? `User ${log.employee_code}`} • ${log.device_id}`,
-        timestamp: new Date(log.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        timestamp: formatClock(log.timestamp),
         severity,
         icon: isCheckIn ? UserCheck : TimerReset,
       };
@@ -515,7 +515,7 @@ export function Dashboard() {
     if (checkIns.length === 0) return "—";
     const hourCounts = new Map<number, number>();
     for (const log of checkIns) {
-      const hour = new Date(log.timestamp).getHours();
+      const hour = isoToTimeParts(log.timestamp)?.hour ?? 0;
       hourCounts.set(hour, (hourCounts.get(hour) ?? 0) + 1);
     }
     let peakHour = 0;
@@ -526,7 +526,8 @@ export function Dashboard() {
         peakHour = hour;
       }
     }
-    return new Date(2000, 0, 1, peakHour, 30).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const hh = String(peakHour).padStart(2, "0");
+    return formatClock(`2000-01-01T${hh}:30:00+05:30`);
   }, [filteredActivity]);
 
   const anomalyUnavailable = Boolean(

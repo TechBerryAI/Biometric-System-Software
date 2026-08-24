@@ -1,6 +1,7 @@
 """ORM models."""
 
 from app.domains.attendance.models.attendance_log import AttendanceLog
+from app.domains.attendance.models.attendance_ingest_skip import AttendanceIngestSkip
 from app.domains.attendance.models.attendance_session import AttendanceSession
 from app.domains.attendance.models.archive_run import AttendanceArchiveRun
 from app.domains.attendance.models.idempotency_key import IdempotencyKey
@@ -18,6 +19,7 @@ from app.domains.auth.models.user import User
 
 __all__ = [
     "AttendanceLog",
+    "AttendanceIngestSkip",
     "AttendanceSession",
     "AttendanceArchiveRun",
     "IdempotencyKey",

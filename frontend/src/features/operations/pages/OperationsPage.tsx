@@ -33,6 +33,14 @@ export function Operations() {
         ) : null}
       </p>
 
+      {typeof metrics.data?.device_clock_drift_seconds === "number" &&
+      Math.abs(metrics.data.device_clock_drift_seconds) > 120 ? (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+          Device clock is {Math.round(Math.abs(metrics.data.device_clock_drift_seconds) / 60)} minutes off IST.
+          The next attendance sync will rewrite the terminal to local time so punches stay on the correct calendar day.
+        </p>
+      ) : null}
+
       {metrics.data?.last_attendance_sync_at ? (
         <p className="text-sm text-ink-muted">
           Last attendance sync: {fmtDisplayDateTime(metrics.data.last_attendance_sync_at)}

@@ -22,7 +22,7 @@ class Device(Base):
     ip_address: Mapped[str] = mapped_column(String(128), nullable=False)
     port: Mapped[int] = mapped_column(Integer, nullable=False, default=4370)
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="Asia/Kolkata")
     firmware_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
     serial_number: Mapped[str | None] = mapped_column(String(128), nullable=True)
     capabilities: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

@@ -82,7 +82,25 @@ def test_daily_summary(
         params={"summary_date": day.isoformat()},
     )
     assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    body = response.json()
+    assert isinstance(body, list)
+    assert body
+    assert "summary_date" in body[0]
+    assert "employee_id" in body[0]
+    assert "first_check_in" in body[0]
+    assert "last_check_out" in body[0]
+    assert "total_work_minutes" in body[0]
+    assert "sessions_count" in body[0]
+
+
+@pytest.mark.testid("BE-API-ATT-006")
+def test_attendance_clock(client: TestClient, admin_headers: dict[str, str]) -> None:
+    response = client.get("/attendance/clock", headers=admin_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert "timezone" in body
+    assert "local_today" in body
+    assert "employee_id" not in body
 
 
 @pytest.mark.testid("BE-API-ATT-004")

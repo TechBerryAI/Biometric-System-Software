@@ -63,6 +63,7 @@ export const mockOpsMetrics = {
   incomplete_attendance_samples: [],
   attendance_sync_stale: false,
   device_connectivity_mode: "both",
+  device_clock_drift_seconds: 0,
 };
 
 export const handlers = [

@@ -1,6 +1,16 @@
 import { api, SYNC_HTTP_TIMEOUT_MS } from "@/shared/api/client";
 import type { AttendanceLog, DailySummaryRow, DayPunchesResponse } from "@/types";
 
+export type AttendanceClock = {
+  timezone: string;
+  local_today: string;
+};
+
+export async function fetchAttendanceClock(): Promise<AttendanceClock> {
+  const { data } = await api.get<AttendanceClock>("/attendance/clock");
+  return data;
+}
+
 export async function fetchDailySummary(summaryDate?: string): Promise<DailySummaryRow[]> {
   const { data } = await api.get<DailySummaryRow[]>("/attendance/daily-summary", {
     params: summaryDate ? { summary_date: summaryDate } : {},

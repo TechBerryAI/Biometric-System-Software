@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.core.app_timezone import set_app_timezone
+from app.core.app_timezone import coerce_device_timezone, set_app_timezone
 from app.domains.devices.connection import DeviceConnectionConfig
 from app.domains.devices.gateway.router import get_device_gateway
 from app.domains.devices.models.device import Device
@@ -145,6 +145,16 @@ def ensure_default_device(db: Session, settings: Settings | None = None) -> Devi
         if mode == "pull":
             existing.connectivity_mode = "both"
         _deactivate_duplicate_ip_siblings(db, existing)
+        if settings.timezone != "UTC":
+            coerced = coerce_device_timezone(existing.timezone)
+            if coerced != (existing.timezone or "").strip():
+                logger.warning(
+                    "Coercing device %s timezone from %r to %s",
+                    existing.name,
+                    existing.timezone,
+                    coerced,
+                )
+                existing.timezone = coerced
         if existing.timezone:
             set_app_timezone(existing.timezone)
         return existing

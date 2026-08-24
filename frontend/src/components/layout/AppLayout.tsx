@@ -1,12 +1,22 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useAuth } from "@/features/auth/AuthContext";
 import { accountTierFromUser } from "@/features/auth/sessionCapabilities";
+import { fetchAttendanceClock } from "@/features/attendance/api";
+import { setAppTimezone } from "@/lib/dates";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const accountTier = accountTierFromUser(user);
+
+  useEffect(() => {
+    void fetchAttendanceClock()
+      .then((clock) => setAppTimezone(clock.timezone))
+      .catch(() => {
+        /* keep DEFAULT_APP_TIMEZONE */
+      });
+  }, []);
 
   return (
     <div data-account-tier={accountTier} className="relative flex min-h-screen w-full bg-surface">

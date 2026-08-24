@@ -90,6 +90,7 @@ export type OperationalMetrics = {
   incomplete_attendance_samples?: IncompleteAttendanceSample[];
   attendance_sync_stale?: boolean;
   device_connectivity_mode?: string;
+  device_clock_drift_seconds?: number | null;
 };
 
 export type DeviceCommandRow = {

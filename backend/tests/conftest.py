@@ -16,6 +16,8 @@ os.environ.setdefault("CSRF_ENABLED", "false")
 os.environ.setdefault("AUTH_COOKIE_ENABLED", "false")
 os.environ.setdefault("XAI_API_KEY", "")
 os.environ.setdefault("DEVICE_AUTO_SYNC_ENABLED", "false")
+# Keep unit/API tests on UTC unless a test opts into Asia/Kolkata.
+os.environ.setdefault("TIMEZONE", "UTC")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,6 +32,7 @@ from app.core.database import Base, get_db
 from app.core.security import create_access_token
 from app.models import (  # noqa: F401 — register metadata
     AttendanceLog,
+    AttendanceIngestSkip,
     AttendanceSession,
     AttendanceArchiveRun,
     IdempotencyKey,

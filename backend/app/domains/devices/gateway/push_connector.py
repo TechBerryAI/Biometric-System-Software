@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.core.app_timezone import as_aware
 from app.domains.devices.connection import DeviceConnectionConfig
 from app.domains.devices.gateway.base import DeviceConnector
 from app.domains.devices.services.device_service import DeviceAttendanceRecord, DeviceUser
@@ -68,8 +69,7 @@ class PushConnector(DeviceConnector):
                     ts = datetime.fromtimestamp(float(ts_raw), tz=ZoneInfo("UTC"))
                 else:
                     ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=tz)
+                ts = as_aware(ts, tz)
             except (TypeError, ValueError):
                 continue
             out.append(

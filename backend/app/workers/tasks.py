@@ -74,7 +74,9 @@ def sync_attendance_from_device(self) -> dict[str, int | bool | list]:
         try:
             ensure_default_device(db, settings)
             db.commit()
-            results = sync_branch(db, branch_id=None, full_resync=True, settings=settings)
+            # Incremental: a full pull would re-import repaired original AM/PM stamps
+            # unless the skip list is loaded (manual Sync now still uses full_resync).
+            results = sync_branch(db, branch_id=None, full_resync=False, settings=settings)
             db.commit()
             total_inserted = sum(int(r.get("inserted", 0)) for r in results if isinstance(r.get("inserted"), int))
             logger.info("Fleet attendance sync completed: devices=%s total_inserted=%s", len(results), total_inserted)

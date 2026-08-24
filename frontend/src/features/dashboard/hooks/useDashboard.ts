@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchDailySummary } from "@/features/attendance/api";
 import { fetchEmployees } from "@/features/employees/api";
 import { useTenantStore } from "@/stores/tenant-store";
-import type { DailySummaryRow, Employee } from "@/types";
+import { todayISO } from "@/lib/dates";
 
 export function useDashboard() {
   const tenantId = useTenantStore((s) => s.selectedTenantId);
@@ -15,7 +15,7 @@ export function useDashboard() {
 
   const summaryQuery = useQuery({
     queryKey: ["daily-summary", "today", tenantId],
-    queryFn: () => fetchDailySummary(),
+    queryFn: () => fetchDailySummary(todayISO()),
     staleTime: 2 * 60 * 1000,
   });
 

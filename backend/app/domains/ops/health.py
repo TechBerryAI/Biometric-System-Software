@@ -11,6 +11,7 @@ from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.core import device_policy
+from app.core.app_timezone import local_today
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import Permission, require_permissions
@@ -33,10 +34,13 @@ settings = get_settings()
 
 @router.get("/health")
 def health() -> dict[str, str]:
+    tz_name = settings.resolved_timezone()
     return {
         "status": "ok",
         "service": settings.app_name,
         "device_writes": "enabled" if device_policy.DEVICE_WRITES_ENABLED else "disabled",
+        "timezone": tz_name,
+        "local_today": local_today(tz_name).isoformat(),
     }
 
 

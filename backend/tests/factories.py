@@ -69,6 +69,7 @@ def make_device(
     mode: str = "NORMAL",
     connectivity_mode: str = "pull",
     branch_id: str | None = None,
+    timezone: str = "UTC",
 ) -> Device:
     return Device(
         name=name,
@@ -79,6 +80,7 @@ def make_device(
         active=True,
         connectivity_mode=connectivity_mode,
         branch_id=branch_id,
+        timezone=timezone,
     )
 
 

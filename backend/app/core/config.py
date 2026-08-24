@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     zk_omit_ping: bool = Field(default=False, alias="ZK_OMIT_PING")
 
     timezone: str = Field(
-        default="UTC",
+        default="Asia/Kolkata",
         alias="TIMEZONE",
         description="Bootstrap only; runtime timezone follows the primary device (Settings UI).",
     )
@@ -72,6 +72,18 @@ class Settings(BaseSettings):
         default=True,
         alias="DEVICE_AUTO_SYNC_ENABLED",
         description="When false, Celery stops polling the biometric device (manual sync still works).",
+    )
+    device_auto_sync_time: bool = Field(
+        default=True,
+        alias="DEVICE_AUTO_SYNC_TIME",
+        description="When true, attendance poll writes IST wall clock to the terminal if drift exceeds threshold.",
+    )
+    device_clock_drift_seconds: int = Field(
+        default=120,
+        ge=30,
+        le=3600,
+        alias="DEVICE_CLOCK_DRIFT_SECONDS",
+        description="Auto-correct the terminal clock when |device-now − IST now| exceeds this many seconds.",
     )
     device_connectivity_probe_seconds: int = Field(
         default=60,

@@ -29,6 +29,11 @@ class AttendanceSessionRead(BaseModel):
     created_at: datetime
 
 
+class AttendanceClockRead(BaseModel):
+    timezone: str
+    local_today: date
+
+
 class DailySummaryRow(BaseModel):
     summary_date: date
     employee_id: int

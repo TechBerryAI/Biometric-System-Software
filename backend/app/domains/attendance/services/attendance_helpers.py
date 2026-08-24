@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, delete, exists, func, or_, select
+from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.app_timezone import local_date as tz_local_date
 from app.core.config import Settings, get_settings
 from app.domains.attendance.models.attendance_log import AttendanceLog
 from app.domains.attendance.models.attendance_session import AttendanceSession
@@ -38,7 +40,8 @@ def day_bounds_utc(d: date, tz_name: str) -> tuple[datetime, datetime]:
 
 
 def local_date(dt: datetime, tz: ZoneInfo) -> date:
-    return dt.astimezone(tz).date()
+    """Calendar date of ``dt`` in ``tz``. Naive values are device wall clock in ``tz``."""
+    return tz_local_date(dt, tz)
 
 
 def resolve_mapping_for_punch(
@@ -251,17 +254,17 @@ def employee_punch_bounds(
             )
         )
 
-    day_count = func.count().over(partition_by=func.date(AttendanceLog.timestamp)).label("day_count")
-    check_in_rows = list(
+    tz = ZoneInfo(get_settings().resolved_timezone())
+    check_in_ts = list(
         db.execute(
-            select(AttendanceLog.timestamp, day_count)
+            select(AttendanceLog.timestamp)
             .where(
                 *base_filters,
                 AttendanceLog.punch_type.in_(_CHECK_IN_DIRECTION_CODES),
                 *mapping_filters,
             )
             .order_by(AttendanceLog.timestamp)
-        ).all()
+        ).scalars().all()
     )
     all_ts = list(
         db.execute(
@@ -270,8 +273,9 @@ def employee_punch_bounds(
             .order_by(AttendanceLog.timestamp)
         ).scalars().all()
     )
+    day_counts = Counter(local_date(ts, tz) for ts in check_in_ts)
     check_ins: list[tuple[datetime, date, int]] = [
-        (ts, ts.date(), int(cnt)) for ts, cnt in check_in_rows
+        (ts, local_date(ts, tz), day_counts[local_date(ts, tz)]) for ts in check_in_ts
     ]
     first_in = _first_meaningful_check_in(check_ins, all_ts)
     last_punch = all_ts[-1] if all_ts else None

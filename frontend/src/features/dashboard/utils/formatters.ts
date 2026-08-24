@@ -1,3 +1,4 @@
+import { getAppTimezone } from "@/lib/dates";
 import type { HealthTone, InsightSeverity } from "@/features/dashboard/utils/analytics";
 
 export function toDeltaLabel(delta: number | null, suffix = "pts"): string {
@@ -22,7 +23,15 @@ export function readHour(iso: string | null): number | null {
   if (!iso) return null;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
-  return date.getHours() + date.getMinutes() / 60;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: getAppTimezone(),
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const h = Number(parts.find((p) => p.type === "hour")?.value ?? 0) % 24;
+  const m = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+  return h + m / 60;
 }
 
 export function deltaPercentLabel(delta: number | null): string {
@@ -36,7 +45,7 @@ export function formatClock(value: string | null): string {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: getAppTimezone() });
 }
 
 export function toSpark(values: number[]): string {

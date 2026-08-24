@@ -13,6 +13,7 @@ from sqlalchemy import exists, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from app.core.app_timezone import as_aware, to_utc
 from app.core.config import Settings, get_settings
 from app.domains.attendance.models.attendance_log import AttendanceLog
 from app.domains.employees.models.employee import Employee
@@ -27,6 +28,11 @@ from app.domains.devices.services.device_service import DeviceAttendanceRecord, 
 from app.domains.devices.services.device_registry_service import device_service_for
 from app.domains.employees.services.employee_offboard_service import enqueue_delete_user_command
 from app.domains.attendance.services.punch_classification import device_attendance_punch_type
+from app.domains.attendance.services.clock_shift_repair import (
+    fetched_record_is_skipped,
+    load_ingest_skip_keys,
+)
+from app.domains.devices.models.device_sync_state import DeviceSyncState
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +46,9 @@ class DeviceSyncResult:
     placeholders: int
     skipped_corrected_punches: int = 0
     punches_missing_after_insert: int = 0
+    skipped_repaired_punches: int = 0
     skipped_reason: str | None = None
+    clock_drift_seconds: float | None = None
 
 
 class AttendanceFetchSource(Protocol):
@@ -60,11 +68,17 @@ class MergedAttendanceSource:
 
     def __init__(self, *sources: AttendanceFetchSource) -> None:
         self._sources = sources
+        self.last_clock_drift_seconds: float | None = None
+        self.last_device_time: datetime | None = None
 
     def fetch_attendance(self) -> list[DeviceAttendanceRecord]:
         out: list[DeviceAttendanceRecord] = []
         for source in self._sources:
             out.extend(source.fetch_attendance())
+            drift = getattr(source, "last_clock_drift_seconds", None)
+            if drift is not None:
+                self.last_clock_drift_seconds = drift
+                self.last_device_time = getattr(source, "last_device_time", None)
         return out
 
 
@@ -307,6 +321,7 @@ def insert_attendance_logs_idempotent(
     """
     rows = 0
     settings = get_settings()
+    tz = ZoneInfo(settings.resolved_timezone())
     stamp_device_id = device_id or settings.zk_device_id
     canonical_device_id = settings.zk_device_id
     prepared: list[dict] = []
@@ -316,7 +331,8 @@ def insert_attendance_logs_idempotent(
     for r in records:
         employee_code = r.user_id
         punch_type = device_attendance_punch_type(status=r.status, punch=r.punch)
-        batch_key = (employee_code, r.timestamp, punch_type)
+        stamp = to_utc(r.timestamp, tz)
+        batch_key = (employee_code, stamp, punch_type)
         if batch_key in batch_seen:
             continue
         batch_seen.add(batch_key)
@@ -324,13 +340,13 @@ def insert_attendance_logs_idempotent(
             db,
             device_id=stamp_device_id,
             device_user_id=employee_code,
-            at_time=r.timestamp,
+            at_time=stamp,
             canonical_device_id=canonical_device_id,
         )
         prepared.append(
             {
                 "employee_code": employee_code,
-                "timestamp": r.timestamp,
+                "timestamp": stamp,
                 "device_id": stamp_device_id,
                 "employee_uuid": mapping.employee_uuid if mapping else None,
                 "device_mapping_id": mapping.id if mapping else None,
@@ -412,15 +428,11 @@ def prune_recent_duplicate_logs(db: Session, *, settings: Settings, days: int | 
 
 
 def _aware_timestamp(ts: datetime, *, tz: ZoneInfo) -> datetime:
-    if ts.tzinfo is not None:
-        return ts
-    return ts.replace(tzinfo=tz)
+    return as_aware(ts, tz)
 
 
 def _record_epoch_key(record: DeviceAttendanceRecord, punch_type: str, *, tz: ZoneInfo) -> tuple[str, int, str]:
-    ts = record.timestamp
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=tz)
+    ts = as_aware(record.timestamp, tz)
     return (str(record.user_id).strip(), int(ts.timestamp()), punch_type)
 
 
@@ -453,10 +465,7 @@ def count_fetched_missing_in_db(
         for row in records
     }
     codes = {k[0] for k in keys}
-    aware_bounds = [
-        row.timestamp if row.timestamp.tzinfo is not None else row.timestamp.replace(tzinfo=tz)
-        for row in records
-    ]
+    aware_bounds = [as_aware(row.timestamp, tz) for row in records]
     min_ts = min(aware_bounds)
     max_ts = max(aware_bounds)
     # Wide pad: naive SQLite reinterpretation can shift by timezone offset.
@@ -502,6 +511,20 @@ def run_device_sync(
     return result.fetched, result.inserted, result.placeholders
 
 
+def _persist_clock_drift(db: Session, device_id: str, drift: float | None) -> None:
+    if drift is None:
+        return
+    row = db.execute(select(DeviceSyncState).where(DeviceSyncState.device_id == device_id)).scalar_one_or_none()
+    if row is None:
+        row = DeviceSyncState(device_id=device_id)
+        db.add(row)
+        db.flush()
+    counts = dict(row.drift_counts or {})
+    counts["clock_drift_seconds"] = round(float(drift), 1)
+    counts["clock_checked_at"] = datetime.now(ZoneInfo("UTC")).isoformat()
+    row.drift_counts = counts
+
+
 def run_device_sync_detailed(
     db: Session,
     device: AttendanceFetchSource | None = None,
@@ -536,14 +559,25 @@ def run_device_sync_detailed(
             skipped_reason="correction_active",
         )
     device = device or device_service_for(db, device_name=resolved_device_id, settings=settings)
+    tz = ZoneInfo(settings.resolved_timezone())
     floor = None if full_resync else _incremental_sync_floor(db, device_id=resolved_device_id, settings=settings)
     fetched_records = device.fetch_attendance()
     fetched_count = len(fetched_records)
+    clock_drift = getattr(device, "last_clock_drift_seconds", None)
+    _persist_clock_drift(db, resolved_device_id, clock_drift)
     if floor is not None:
-        fetched_records = [row for row in fetched_records if row.timestamp >= floor]
+        newest_fetched = max((as_aware(row.timestamp, tz) for row in fetched_records), default=None)
+        floor_aware = as_aware(floor, tz)
+        if newest_fetched is not None and newest_fetched < floor_aware:
+            logger.warning(
+                "Device clock appears behind last stored punch for %s; skipping incremental floor",
+                resolved_device_id,
+            )
+            floor = None
+        else:
+            fetched_records = [row for row in fetched_records if as_aware(row.timestamp, tz) >= floor_aware]
     records = _dedupe_device_records(fetched_records)
 
-    tz = ZoneInfo(settings.resolved_timezone())
     guards = load_corrected_day_guards(db, device_id=resolved_device_id)
     skipped_corrected = 0
     if guards:
@@ -565,6 +599,30 @@ def run_device_sync_detailed(
                 skipped_corrected,
             )
         records = kept
+
+    skip_keys = load_ingest_skip_keys(db, resolved_device_id)
+    skipped_repaired = 0
+    if skip_keys:
+        kept_repaired: list[DeviceAttendanceRecord] = []
+        for row in records:
+            punch_type = device_attendance_punch_type(status=row.status, punch=row.punch)
+            if fetched_record_is_skipped(
+                employee_code=str(row.user_id).strip(),
+                timestamp=row.timestamp,
+                punch_type=punch_type,
+                skip_keys=skip_keys,
+                tz=tz,
+            ):
+                skipped_repaired += 1
+                continue
+            kept_repaired.append(row)
+        if skipped_repaired:
+            logger.info(
+                "Sync skipped %s repaired device punch(es) for %s (stale AM/PM stamps)",
+                skipped_repaired,
+                resolved_device_id,
+            )
+        records = kept_repaired
 
     n = insert_attendance_logs_idempotent(db, records, resolved_device_id)
     missing_after = count_fetched_missing_in_db(db, records, resolved_device_id)
@@ -627,6 +685,8 @@ def run_device_sync_detailed(
         placeholders=placeholders,
         skipped_corrected_punches=skipped_corrected,
         punches_missing_after_insert=missing_after,
+        skipped_repaired_punches=skipped_repaired,
+        clock_drift_seconds=clock_drift,
     )
 
 

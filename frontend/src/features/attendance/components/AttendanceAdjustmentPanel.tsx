@@ -13,40 +13,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { fmtDisplayDate, fmtDisplayDateTime } from "@/lib/dates";
+import { fmtDisplayDate, fmtDisplayDateTime, isoToTimeParts, zonedWallClockToISO, type TimeParts } from "@/lib/dates";
 import { applyAttendanceAdjustment, fetchAttendanceDayPreview, fetchCorrectionCapabilities, fetchCorrectionStatus, type AttendanceDayPreview, type CorrectionCapabilities } from "@/features/attendance/api";
 import { getApiErrorMessage } from "@/shared/api/client";
 import type { EmployeeDailyAttendance } from "@/types";
-
-type TimeParts = {
-  hour: number;
-  minute: number;
-  second: number;
-};
 
 const EMPTY_TIME: TimeParts = { hour: 0, minute: 0, second: 0 };
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Number.isFinite(n) ? n : min));
-}
-
-function isoToTimeParts(iso: string | null | undefined): TimeParts | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  return { hour: d.getHours(), minute: d.getMinutes(), second: d.getSeconds() };
-}
-
-function buildLocalDateTime(localDate: string, parts: TimeParts): Date {
-  const [year, month, day] = localDate.split("-").map(Number);
-  return new Date(
-    year,
-    month - 1,
-    day,
-    clamp(parts.hour, 0, 23),
-    clamp(parts.minute, 0, 59),
-    clamp(parts.second, 0, 59),
-    0,
-  );
 }
 
 type TimePartsEditorProps = {
@@ -215,13 +190,13 @@ export function AttendanceAdjustmentModal({
     setError(null);
     setSuccess(null);
     try {
-      const newCheckIn = buildLocalDateTime(date, checkInParts);
-      const newCheckOut = checkOutParts ? buildLocalDateTime(date, checkOutParts) : null;
+      const newCheckIn = zonedWallClockToISO(date, checkInParts);
+      const newCheckOut = checkOutParts ? zonedWallClockToISO(date, checkOutParts) : null;
       const result = await applyAttendanceAdjustment({
         employee_id: employeeId,
         local_date: date,
-        new_check_in: newCheckIn.toISOString(),
-        new_check_out: newCheckOut?.toISOString() ?? null,
+        new_check_in: newCheckIn,
+        new_check_out: newCheckOut,
       });
       if (result.status === "device_pending") {
         if (!result.device_command_uuid) {
@@ -242,9 +217,9 @@ export function AttendanceAdjustmentModal({
     }
   };
 
-  const previewCheckIn = date ? fmtDisplayDateTime(buildLocalDateTime(date, checkInParts).toISOString()) : "—";
+  const previewCheckIn = date ? fmtDisplayDateTime(zonedWallClockToISO(date, checkInParts)) : "—";
   const previewCheckOut =
-    date && checkOutParts ? fmtDisplayDateTime(buildLocalDateTime(date, checkOutParts).toISOString()) : "—";
+    date && checkOutParts ? fmtDisplayDateTime(zonedWallClockToISO(date, checkOutParts)) : "—";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

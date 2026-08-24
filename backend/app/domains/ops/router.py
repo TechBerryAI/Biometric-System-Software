@@ -56,6 +56,7 @@ class OperationalMetricsRead(BaseModel):
     incomplete_attendance_samples: list[dict[str, object]] = []
     attendance_sync_stale: bool = False
     device_connectivity_mode: str = "both"
+    device_clock_drift_seconds: float | None = None
 
 
 @router.get(
@@ -183,6 +184,13 @@ def operational_metrics(db: Session = Depends(get_db)) -> OperationalMetricsRead
         select(DeviceSyncState).where(DeviceSyncState.device_id == registered_device.name)
     ).scalar_one_or_none()
     last_sync = sync_state.last_attendance_sync_at if sync_state else None
+    clock_drift: float | None = None
+    if sync_state and isinstance(sync_state.drift_counts, dict):
+        raw_drift = sync_state.drift_counts.get("clock_drift_seconds")
+        try:
+            clock_drift = float(raw_drift) if raw_drift is not None else None
+        except (TypeError, ValueError):
+            clock_drift = None
     # Stale if no successful sync within 3× poll interval (or 10 minutes minimum).
     stale_after = timedelta(seconds=max(settings.device_poll_interval_seconds * 3, 600))
     now_utc = datetime.now(ZoneInfo("UTC"))
@@ -240,4 +248,5 @@ def operational_metrics(db: Session = Depends(get_db)) -> OperationalMetricsRead
         incomplete_attendance_samples=incomplete_samples,
         attendance_sync_stale=attendance_sync_stale,
         device_connectivity_mode=(registered_device.connectivity_mode or "both"),
+        device_clock_drift_seconds=clock_drift,
     )

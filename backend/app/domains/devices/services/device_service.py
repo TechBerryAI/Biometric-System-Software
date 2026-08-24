@@ -14,7 +14,9 @@ from zoneinfo import ZoneInfo
 from zk import ZK
 from zk.exception import ZKError
 
+from app.core.app_timezone import as_aware
 from app.core.config import Settings, get_settings
+from app.core.device_clock import naive_local_wall_for_device
 from app.core import device_policy
 from app.domains.devices.connection import DeviceConnectionConfig
 from app.domains.devices.services.device_attlog_codec import AttlogRecord
@@ -113,6 +115,8 @@ class DeviceService:
         self._settings = settings or get_settings()
         self._connection = connection or DeviceConnectionConfig.from_settings(self._settings)
         self._adapter = PyZKAdapter(self._settings, connection=self._connection)
+        self.last_clock_drift_seconds: float | None = None
+        self.last_device_time: datetime | None = None
 
     @property
     def connection(self) -> DeviceConnectionConfig:
@@ -331,15 +335,62 @@ class DeviceService:
             )
 
     def fetch_attendance(self) -> list[DeviceAttendanceRecord]:
-        """Return attendance rows from device; empty list on failure."""
+        """Return attendance rows from device; empty list on failure.
+
+        Same ZK session reads ``get_time`` and, when drift exceeds the configured
+        threshold, writes IST wall clock before pulling attlog.
+        """
+        tz = ZoneInfo(self._connection.timezone)
+
+        def _read(conn: Any) -> tuple[list[Any], float | None, datetime | None]:
+            drift: float | None = None
+            device_now: datetime | None = None
+            if hasattr(conn, "get_time"):
+                try:
+                    device_now = as_aware(conn.get_time(), tz)
+                    now_local = datetime.now(tz)
+                    drift = (device_now - now_local).total_seconds()
+                    threshold = int(self._settings.device_clock_drift_seconds)
+                    if self._settings.device_auto_sync_time and abs(drift) > threshold:
+                        logger.warning(
+                            "Device clock drift %.0fs (threshold %ss); writing local wall clock tz=%s",
+                            drift,
+                            threshold,
+                            self._connection.timezone,
+                        )
+                        wall = naive_local_wall_for_device(timezone=self._connection.timezone, now=now_local)
+                        disabled = False
+                        if hasattr(conn, "disable_device"):
+                            conn.disable_device()
+                            disabled = True
+                        try:
+                            if hasattr(conn, "set_time"):
+                                conn.set_time(wall)
+                            elif hasattr(conn, "set_device_time"):
+                                conn.set_device_time(wall)
+                            time.sleep(0.2)
+                            if hasattr(conn, "get_time"):
+                                device_now = as_aware(conn.get_time(), tz)
+                                drift = (device_now - datetime.now(tz)).total_seconds()
+                        finally:
+                            if disabled and hasattr(conn, "enable_device"):
+                                conn.enable_device()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Device get_time during attendance fetch failed: %s", exc)
+            rows = conn.get_attendance()
+            return list(rows or []), drift, device_now
+
         try:
-            raw = self._adapter.run("fetch_attendance", lambda conn: conn.get_attendance(), max_attempts=3)
+            raw, drift, device_now = self._adapter.run("fetch_attendance", _read, max_attempts=3)
         except (ZKError, OSError, TimeoutError) as exc:
             logger.warning("Device fetch_attendance failed: %s", exc)
             raise DeviceFetchError(f"Device fetch_attendance failed: {exc}") from exc
         except RuntimeError as exc:
             logger.warning("Device fetch_attendance failed: %s", exc)
             raise DeviceFetchError(f"Device fetch_attendance failed: {exc}") from exc
+
+        self.last_clock_drift_seconds = drift
+        self.last_device_time = device_now
 
         out: list[DeviceAttendanceRecord] = []
         for row in raw:
@@ -355,8 +406,7 @@ class DeviceService:
                     continue
                 punch = int(getattr(row, "punch", 0))
                 status = int(getattr(row, "status", 0))
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=ZoneInfo(self._connection.timezone))
+                ts = as_aware(ts, ZoneInfo(self._connection.timezone))
                 out.append(
                     DeviceAttendanceRecord(
                         user_id=user_id,
@@ -701,17 +751,49 @@ class DeviceService:
         self._adapter.run("restart_device", _restart, max_attempts=1)
 
     def sync_device_time(self) -> datetime:
-        """Synchronize device clock to server UTC time."""
+        """Synchronize the terminal wall clock to the configured local timezone.
+
+        ZKTeco ``set_time`` writes naive year/month/day/hour components. Passing UTC
+        makes Monday 09:00 IST land on the device as 03:30, which this app then
+        tags as local and stores as Sunday night.
+        """
 
         def _sync(conn: Any) -> datetime:
-            now = datetime.now(ZoneInfo("UTC"))
-            if hasattr(conn, "set_time"):
-                conn.set_time(now)
-            elif hasattr(conn, "set_device_time"):
-                conn.set_device_time(now)
-            else:
-                raise RuntimeError("Device firmware does not support time synchronization.")
-            return now
+            tz = ZoneInfo(self._connection.timezone)
+            now_local = datetime.now(tz)
+            wall = naive_local_wall_for_device(timezone=self._connection.timezone, now=now_local)
+            disabled = False
+            if hasattr(conn, "disable_device"):
+                conn.disable_device()
+                disabled = True
+            try:
+                if hasattr(conn, "set_time"):
+                    ok = conn.set_time(wall)
+                    if ok is False:
+                        raise RuntimeError("Device set_time returned False.")
+                elif hasattr(conn, "set_device_time"):
+                    conn.set_device_time(wall)
+                else:
+                    raise RuntimeError("Device firmware does not support time synchronization.")
+                time.sleep(0.2)
+                if hasattr(conn, "get_time"):
+                    device_now = as_aware(conn.get_time(), tz)
+                    drift = (device_now - datetime.now(tz)).total_seconds()
+                    self.last_clock_drift_seconds = drift
+                    self.last_device_time = device_now
+                    if abs(drift) > 120:
+                        logger.warning(
+                            "Device clock drift after sync is %.0fs (wrote=%s read=%s device=%s tz=%s)",
+                            drift,
+                            wall.isoformat(),
+                            device_now.replace(tzinfo=None).isoformat(),
+                            self._connection.device_id,
+                            self._connection.timezone,
+                        )
+            finally:
+                if disabled and hasattr(conn, "enable_device"):
+                    conn.enable_device()
+            return now_local
 
         return self._adapter.run("sync_device_time", _sync, max_attempts=2)
 
@@ -721,8 +803,13 @@ class DeviceService:
 
         def _apply(conn: Any) -> dict[str, object]:
             if "timezone" in config and hasattr(conn, "set_timezone"):
-                conn.set_timezone(str(config["timezone"]))
-                applied["timezone"] = config["timezone"]
+                raw_tz = str(config["timezone"]).strip()
+                # Firmware expects a numeric GMT offset (minutes), not IANA names.
+                if "/" in raw_tz or not raw_tz.lstrip("+-").isdigit():
+                    logger.warning("Skipping firmware set_timezone for non-numeric value %r", raw_tz)
+                else:
+                    conn.set_timezone(raw_tz)
+                    applied["timezone"] = raw_tz
             if "volume" in config and hasattr(conn, "set_volume"):
                 conn.set_volume(int(config["volume"]))
                 applied["volume"] = config["volume"]

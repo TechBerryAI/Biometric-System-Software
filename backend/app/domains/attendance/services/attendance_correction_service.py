@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.app_timezone import as_aware
 from app.core.config import Settings, get_settings
 from app.core import device_policy
 from app.domains.devices.models.device_command import DeviceCommand, DeviceCommandStatus
@@ -180,9 +181,7 @@ def _parse_payload_datetime_ist(value: object) -> datetime | None:
     except (TypeError, ValueError):
         return None
     tz = _local_tz()
-    if ts.tzinfo is None:
-        return ts.replace(tzinfo=tz)
-    return ts.astimezone(tz)
+    return as_aware(ts, tz)
 
 
 def load_corrected_day_guards(
@@ -590,7 +589,7 @@ def get_adjustment_command_status(
     payload = command.payload or {}
     employee_id = int(payload.get("employee_id") or 0)
     local_date_raw = payload.get("local_date")
-    local_date = date.fromisoformat(str(local_date_raw)) if local_date_raw else date.today()
+    local_date = date.fromisoformat(str(local_date_raw)) if local_date_raw else datetime.now(_local_tz()).date()
     new_check_in = _parse_payload_datetime(payload.get("new_check_in"))
     new_check_out = _parse_payload_datetime(payload.get("new_check_out"))
     db_only = bool(payload.get("db_only"))

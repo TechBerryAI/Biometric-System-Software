@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.core.app_timezone import DEFAULT_TIMEZONE
 from app.core.config import Settings
 from app.domains.devices.models.device import Device
 
@@ -19,7 +20,7 @@ class DeviceConnectionConfig:
     timeout_seconds: int = 30
     force_udp: bool = False
     omit_ping: bool = False
-    timezone: str = "UTC"
+    timezone: str = DEFAULT_TIMEZONE
 
     @classmethod
     def from_settings(cls, settings: Settings) -> DeviceConnectionConfig:

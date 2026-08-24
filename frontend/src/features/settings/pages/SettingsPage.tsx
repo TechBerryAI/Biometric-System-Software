@@ -82,7 +82,6 @@ export function Settings() {
   const metricsQuery = useQuery({
     queryKey: ["operational-metrics"],
     queryFn: fetchOperationalMetrics,
-    enabled: !canManageDevice,
     staleTime: 30_000,
     retry: false,
   });
@@ -248,6 +247,14 @@ export function Settings() {
             {loadError ? (
               <p className="rounded-xl border border-status-absent-soft bg-status-absent-soft/40 px-3 py-2 text-sm text-status-absent">
                 {loadError}
+              </p>
+            ) : null}
+
+            {typeof metricsQuery.data?.device_clock_drift_seconds === "number" &&
+            Math.abs(metricsQuery.data.device_clock_drift_seconds) > 120 ? (
+              <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">
+                Device clock is {Math.round(Math.abs(metricsQuery.data.device_clock_drift_seconds) / 60)} minutes off
+                IST. Attendance poll will rewrite the terminal to local time automatically.
               </p>
             ) : null}
 

@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchAttendanceLogs } from "@/features/attendance/api";
 import { fetchDeviceUptime } from "@/features/monitoring/api";
 import { fetchOperationalMetrics } from "@/features/operations/api";
-import { addDays, formatISO } from "@/lib/dates";
+import { formatISO } from "@/lib/dates";
 import { useTenantStore } from "@/stores/tenant-store";
 
 export function useRealtimeFeed(limit = 30) {
@@ -11,7 +11,7 @@ export function useRealtimeFeed(limit = 30) {
   const logs = useQuery({
     queryKey: ["realtime-attendance-logs", tenantId, limit],
     queryFn: async () => {
-      const from = formatISO(addDays(new Date(), -1));
+      const from = formatISO(new Date(Date.now() - 1 * 86_400_000));
       const rows = await fetchAttendanceLogs({ from, limit: Math.max(limit, 100) });
       return rows.slice(0, limit);
     },

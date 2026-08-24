@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.app_timezone import local_today
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import Permission, require_permissions
@@ -16,6 +17,7 @@ from app.domains.attendance.models.attendance_log import AttendanceLog
 from app.domains.attendance.models.attendance_session import AttendanceSession
 from app.domains.employees.models.employee import Employee
 from app.domains.attendance.schemas import (
+    AttendanceClockRead,
     AttendanceLogRead,
     AttendanceSessionRead,
     DailySummaryRow,
@@ -34,6 +36,13 @@ router = APIRouter(
     tags=["attendance"],
     dependencies=[Depends(require_permissions(Permission.REPORT_READ))],
 )
+
+
+@router.get("/clock", response_model=AttendanceClockRead)
+def attendance_clock() -> AttendanceClockRead:
+    """Canonical calendar used for roster 'today' (device/Settings timezone)."""
+    tz_name = get_settings().resolved_timezone()
+    return AttendanceClockRead(timezone=tz_name, local_today=local_today(tz_name))
 
 
 @router.get("/logs", response_model=list[AttendanceLogRead])
