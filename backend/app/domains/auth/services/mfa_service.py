@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.core.crypto import decrypt_value, encrypt_value
 from app.core.redis_keys import with_namespace
+from app.core.operator_access import is_env_operator_user
 from app.domains.auth.models.user import User
 
 MFA_ISSUER = "Biometric Attendance"
@@ -113,5 +114,7 @@ def disable_mfa(db: Session, user: User) -> None:
 
 
 def user_requires_mfa(user: User) -> bool:
+    if is_env_operator_user(user):
+        return False
     settings = get_settings()
     return settings.mfa_required or user.mfa_enabled

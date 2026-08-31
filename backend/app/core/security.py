@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.operator_access import is_operator_account
+from app.core.operator_access import AuthPrincipal, build_env_operator, is_env_operator_uuid, is_operator_account
 from app.domains.auth.models.user import User
 from app.domains.auth.services.cookie_auth_service import resolve_access_token
 
@@ -145,7 +145,7 @@ def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
-) -> User:
+) -> AuthPrincipal:
     settings = get_settings()
     if not settings.auth_enabled:
         user = db.execute(select(User).where(User.active.is_(True)).order_by(User.id)).scalars().first()
@@ -169,6 +169,16 @@ def get_current_user(
     user_uuid = payload.get("sub")
     if not user_uuid:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+    if is_env_operator_uuid(str(user_uuid)):
+        operator = build_env_operator()
+        if operator is None or not operator.active:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User inactive or missing")
+        if operator.role not in ALLOWED_APP_ROLES:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This account role is not allowed to access the app.",
+            )
+        return operator
     user = db.execute(select(User).where(User.user_uuid == user_uuid)).scalar_one_or_none()
     if user is None or not user.active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User inactive or missing")
@@ -178,7 +188,7 @@ def get_current_user(
 
 
 def require_permissions(*required_permissions: str):
-    def _dependency(user: User = Depends(get_current_user)) -> User:
+    def _dependency(user: AuthPrincipal = Depends(get_current_user)) -> AuthPrincipal:
         granted = ROLE_PERMISSIONS.get(user.role, set())
         missing = [perm for perm in required_permissions if perm not in granted]
         if missing:
@@ -191,7 +201,7 @@ def require_permissions(*required_permissions: str):
     return _dependency
 
 
-def require_operator_account(user: User = Depends(get_current_user)) -> User:
+def require_operator_account(user: AuthPrincipal = Depends(get_current_user)) -> AuthPrincipal:
     if not is_operator_account(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

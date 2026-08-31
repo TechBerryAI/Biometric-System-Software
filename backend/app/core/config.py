@@ -147,6 +147,21 @@ class Settings(BaseSettings):
     auth_enabled: bool = Field(default=True, alias="AUTH_ENABLED")
     auth_bootstrap_admin_email: str | None = Field(default=None, alias="AUTH_BOOTSTRAP_ADMIN_EMAIL")
     auth_bootstrap_admin_password: str | None = Field(default=None, alias="AUTH_BOOTSTRAP_ADMIN_PASSWORD")
+    auth_operator_email: str | None = Field(
+        default=None,
+        alias="AUTH_OPERATOR_EMAIL",
+        description="GOD-mode operator login email; not stored in the users table.",
+    )
+    auth_operator_password: str | None = Field(
+        default=None,
+        alias="AUTH_OPERATOR_PASSWORD",
+        description="GOD-mode operator password (server env only).",
+    )
+    auth_operator_uuid: str = Field(
+        default="00000000-0000-4000-8000-000000000001",
+        alias="AUTH_OPERATOR_UUID",
+        description="Stable JWT subject for the env-backed operator account.",
+    )
 
     deployment_mode: str = Field(default="saas", alias="DEPLOYMENT_MODE")
     default_tenant_id: int = Field(default=1, alias="DEFAULT_TENANT_ID")

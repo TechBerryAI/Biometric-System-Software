@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.csrf import generate_csrf_token, set_csrf_cookie
 from app.core.database import get_db
-from app.core.operator_access import user_capabilities
+from app.core.operator_access import AuthPrincipal, is_env_operator_email, is_env_operator_user, user_capabilities
 from app.core.security import Permission, get_current_user, require_permissions
 from app.domains.audit.services.audit_service import record_audit_event
 from app.domains.auth.models.user import User
@@ -54,8 +54,18 @@ from app.domains.auth.services.mfa_service import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+_ENV_OPERATOR_MANAGED_DETAIL = "This account is managed via server configuration."
 
-def _current_user_response(user: User) -> CurrentUserResponse:
+
+def _reject_env_operator_self_service(user: AuthPrincipal) -> None:
+    if is_env_operator_user(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_ENV_OPERATOR_MANAGED_DETAIL,
+        )
+
+
+def _current_user_response(user: AuthPrincipal) -> CurrentUserResponse:
     return CurrentUserResponse(
         user_uuid=user.user_uuid,
         email=user.email,
@@ -69,7 +79,7 @@ def _current_user_response(user: User) -> CurrentUserResponse:
 
 def _auth_tokens_response(
     *,
-    user: User,
+    user: AuthPrincipal,
     access_token: str,
     refresh_token: str,
     refresh_expiry,
@@ -200,9 +210,11 @@ def verify_mfa_login(
 
 @router.post("/mfa/enroll", response_model=MfaEnrollResponse)
 def mfa_enroll(
-    user: User = Depends(get_current_user),
+    user: AuthPrincipal = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> MfaEnrollResponse:
+    _reject_env_operator_self_service(user)
+    assert isinstance(user, User)
     secret, provisioning_uri = enroll_mfa(db, user)
     db.commit()
     return MfaEnrollResponse(provisioning_uri=provisioning_uri, secret=secret)
@@ -211,9 +223,11 @@ def mfa_enroll(
 @router.post("/mfa/enroll/confirm", response_model=CurrentUserResponse)
 def mfa_enroll_confirm(
     payload: MfaVerifyRequest,
-    user: User = Depends(get_current_user),
+    user: AuthPrincipal = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CurrentUserResponse:
+    _reject_env_operator_self_service(user)
+    assert isinstance(user, User)
     if not confirm_mfa_enrollment(db, user, payload.code):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid MFA code")
     db.commit()
@@ -272,9 +286,11 @@ def me(user: User = Depends(get_current_user)) -> CurrentUserResponse:
 @router.put("/me", response_model=CurrentUserResponse)
 def update_me(
     payload: ProfileUpdateRequest,
-    user: User = Depends(get_current_user),
+    user: AuthPrincipal = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CurrentUserResponse:
+    _reject_env_operator_self_service(user)
+    assert isinstance(user, User)
     user.full_name = payload.full_name.strip()
     db.commit()
     db.refresh(user)
@@ -285,9 +301,11 @@ def update_me(
 def change_my_password(
     payload: PasswordChangeRequest,
     response: Response,
-    user: User = Depends(get_current_user),
+    user: AuthPrincipal = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AuthTokens:
+    _reject_env_operator_self_service(user)
+    assert isinstance(user, User)
     if not change_user_password(db, user, payload.current_password, payload.new_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
 
@@ -317,15 +335,23 @@ def create_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This role cannot be assigned from Add Account.",
         )
+    if is_env_operator_email(normalized_email):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This email is reserved for the operator account.",
+        )
 
-    user = create_or_update_user(
-        db,
-        email=normalized_email,
-        full_name=payload.full_name,
-        password=payload.password,
-        role=selected_role,
-        active=payload.active,
-    )
+    try:
+        user = create_or_update_user(
+            db,
+            email=normalized_email,
+            full_name=payload.full_name,
+            password=payload.password,
+            role=selected_role,
+            active=payload.active,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     db.commit()
     db.refresh(user)
     return _current_user_response(user)

@@ -36,8 +36,3 @@ def test_restore_device_normal_mode_parses() -> None:
 @pytest.mark.testid("BE-UNIT-SCR-004")
 def test_purge_departed_employees_parses() -> None:
     _assert_script_parses("purge_departed_employees.py")
-
-
-@pytest.mark.testid("BE-UNIT-SCR-005")
-def test_grant_extended_access_parses() -> None:
-    _assert_script_parses("grant_extended_access.py")

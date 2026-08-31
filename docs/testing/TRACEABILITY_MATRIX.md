@@ -178,7 +178,6 @@ Legend: **ID** = stable test marker · **File** = intended test module · **Stat
 | `probe_device_attlog_tier.py` | BE-UNIT-SCR-002 | same |
 | `restore_device_normal_mode.py` | BE-UNIT-SCR-003 | same |
 | `purge_departed_employees.py` | BE-UNIT-SCR-004 | same |
-| `grant_extended_access.py` | BE-UNIT-SCR-005 | same |
 | `setup_local_database.sql` | N/A | Manual DBA artifact |
 
 ---

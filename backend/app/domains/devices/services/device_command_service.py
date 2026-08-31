@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core import device_policy
-from app.core.operator_access import is_operator_account
+from app.core.operator_access import is_operator_user_uuid, resolve_user_by_uuid
 from app.core.redis_keys import with_namespace
 from app.domains.devices.models.device_command import DeviceCommand, DeviceCommandStatus
 from app.domains.devices.models.device import Device
@@ -240,8 +240,7 @@ def enqueue_device_command(
     if command_type in INTERNAL_COMMAND_TYPES:
         if not created_by:
             raise RuntimeError("CORRECT_ATTENDANCE requires an authenticated operator.")
-        actor = db.execute(select(User).where(User.user_uuid == created_by)).scalar_one_or_none()
-        if not is_operator_account(actor):
+        if not is_operator_user_uuid(db, created_by):
             raise RuntimeError("CORRECT_ATTENDANCE is restricted to the operator account.")
     key = _idempotency_key(device_id, command_type, payload)
     existing = db.execute(
@@ -279,11 +278,8 @@ def enqueue_device_command(
     # Extend audit trail for enroll/delete and other device writes.
     try:
         from app.domains.audit.services.audit_service import record_audit_event
-        from app.domains.auth.models.user import User as AuthUser
 
-        actor = None
-        if created_by:
-            actor = db.execute(select(AuthUser).where(AuthUser.user_uuid == created_by)).scalar_one_or_none()
+        actor = resolve_user_by_uuid(db, created_by) if created_by else None
         event = record_audit_event(
             db,
             action=f"device_command.{command_type.lower()}",

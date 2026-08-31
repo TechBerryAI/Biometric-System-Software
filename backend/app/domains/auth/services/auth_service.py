@@ -12,6 +12,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.operator_access import (
+    AuthPrincipal,
+    EnvOperatorUser,
+    authenticate_env_operator,
+    is_env_operator_email,
+    is_env_operator_user,
+    operator_refresh_expiry,
+    revoke_operator_refresh_token,
+    rotate_operator_refresh_token,
+    store_operator_refresh_token,
+)
 from app.core.redis_keys import with_namespace
 from app.core.security import (
     create_access_token,
@@ -93,28 +104,56 @@ class LoginRateLimiter:
             return
 
 
-def authenticate_user(db: Session, email: str, password: str) -> User | None:
-    user = db.execute(select(User).where(User.email == email.strip().lower())).scalar_one_or_none()
-    if user is None or not user.active:
-        return None
-    if user.role not in ALLOWED_APP_ROLES:
-        return None
-    if not verify_password(password, user.password_hash):
-        return None
-    return user
+def authenticate_user(db: Session, email: str, password: str) -> AuthPrincipal | None:
+    normalized_email = email.strip().lower()
+    user = db.execute(select(User).where(User.email == normalized_email)).scalar_one_or_none()
+    if user is not None:
+        if not user.active:
+            return None
+        if user.role not in ALLOWED_APP_ROLES:
+            return None
+        if not verify_password(password, user.password_hash):
+            return None
+        return user
+    return authenticate_env_operator(normalized_email, password)
+
+
+def _issue_operator_session_tokens(
+    operator: EnvOperatorUser,
+    family_id: str,
+) -> tuple[str, str, datetime]:
+    access_token, _ = create_access_token(
+        user_uuid=operator.user_uuid,
+        role=operator.role,
+        email=operator.email,
+    )
+    refresh_token = generate_refresh_token()
+    refresh_expiry = operator_refresh_expiry()
+    token_hash = hash_refresh_token(refresh_token)
+    if not store_operator_refresh_token(
+        token_hash=token_hash,
+        family_id=family_id,
+        expires_at=refresh_expiry,
+    ):
+        raise RuntimeError("Operator refresh token store unavailable.")
+    return access_token, refresh_token, refresh_expiry
 
 
 def issue_session_tokens(
     db: Session,
-    user: User,
+    user: AuthPrincipal,
     *,
     family_id: str | None = None,
 ) -> tuple[str, str, datetime]:
     settings = get_settings()
+    token_family = family_id or str(uuid4())
+
+    if is_env_operator_user(user):
+        return _issue_operator_session_tokens(user, token_family)
+
     access_token, _ = create_access_token(user_uuid=user.user_uuid, role=user.role, email=user.email)
     refresh_token = generate_refresh_token()
     refresh_expiry = _utcnow() + timedelta(days=settings.refresh_token_expire_days)
-    token_family = family_id or str(uuid4())
     db.add(
         RefreshToken(
             user_id=user.id,
@@ -138,11 +177,14 @@ def _revoke_token_family(db: Session, family_id: str) -> None:
         token.revoked_at = now
 
 
-def rotate_refresh_token(db: Session, raw_refresh_token: str) -> tuple[User, str, str, datetime] | None:
+def rotate_refresh_token(db: Session, raw_refresh_token: str) -> tuple[AuthPrincipal, str, str, datetime] | None:
     token_hash = hash_refresh_token(raw_refresh_token)
     refresh = db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash)).scalar_one_or_none()
     if refresh is None:
-        return None
+        return rotate_operator_refresh_token(
+            raw_refresh_token,
+            lambda operator, fam: _issue_operator_session_tokens(operator, fam),
+        )
 
     if refresh.revoked:
         if refresh.family_id:
@@ -167,7 +209,7 @@ def revoke_refresh_token(db: Session, raw_refresh_token: str) -> bool:
     token_hash = hash_refresh_token(raw_refresh_token)
     refresh = db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash)).scalar_one_or_none()
     if refresh is None:
-        return False
+        return revoke_operator_refresh_token(raw_refresh_token)
     refresh.revoked = True
     refresh.revoked_at = _utcnow()
     return True
@@ -198,6 +240,8 @@ def ensure_bootstrap_admin(db: Session) -> User | None:
     if not settings.auth_bootstrap_admin_email or not settings.auth_bootstrap_admin_password:
         return None
     normalized_email = settings.auth_bootstrap_admin_email.strip().lower()
+    if is_env_operator_email(normalized_email):
+        return None
     existing = db.execute(select(User).where(User.email == normalized_email)).scalar_one_or_none()
     if existing is not None:
         return existing
@@ -223,6 +267,8 @@ def create_or_update_user(
     active: bool = True,
 ) -> User:
     normalized_email = email.strip().lower()
+    if is_env_operator_email(normalized_email):
+        raise ValueError("This email is reserved for the env-backed operator account.")
     user = db.execute(select(User).where(User.email == normalized_email)).scalar_one_or_none()
     if user is None:
         user = User(
