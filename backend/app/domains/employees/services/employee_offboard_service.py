@@ -115,9 +115,9 @@ def offboard_employee(
 
     employee.departed_at = now
     if not employee.employee_uuid:
-        from uuid import uuid4
+        from app.shared.ids import new_employee_id
 
-        employee.employee_uuid = str(uuid4())
+        employee.employee_uuid = new_employee_id()
         db.flush()
 
     _deactivate_device_mappings(

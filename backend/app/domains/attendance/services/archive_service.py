@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, func, select
@@ -13,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.domains.attendance.models.archive_run import AttendanceArchiveRun
 from app.domains.attendance.models.attendance_log import AttendanceLog
+from app.shared.ids import new_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ def archive_old_attendance(
     ).scalar_one()
 
     run = AttendanceArchiveRun(
-        run_uuid=str(uuid4()),
+        run_uuid=new_run_id(),
         partition_name=None,
         period_start=period_start,
         period_end=cutoff,

@@ -17,7 +17,7 @@ describe("FE-UNIT-ADJ-001 AttendanceAdjustmentPanel", () => {
   it("renders edit button and gated modal when capability present", async () => {
     useAuthMock.mockReturnValue({
       user: {
-        user_uuid: "1",
+        user_uuid: "usr_TESTADMIN000001",
         email: "admin@company.com",
         role: "SUPER_ADMIN",
         active: true,
@@ -62,7 +62,7 @@ describe("FE-UNIT-ADJ-001 AttendanceAdjustmentPanel", () => {
   it("returns null modal when capability missing", () => {
     useAuthMock.mockReturnValue({
       user: {
-        user_uuid: "1",
+        user_uuid: "usr_TESTADMIN000001",
         email: "viewer@company.com",
         role: "CEO",
         active: true,

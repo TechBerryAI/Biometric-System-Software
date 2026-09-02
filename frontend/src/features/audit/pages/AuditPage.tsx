@@ -47,7 +47,9 @@ export function Audit() {
                   <tr key={row.command_uuid} className="border-t border-line/50">
                     <td className="px-6 py-3 text-ink-muted">{row.created_at}</td>
                     <td className="px-3 py-3">{row.status}</td>
-                    <td className="px-3 py-3 font-mono text-xs">{row.command_uuid.slice(0, 8)}…</td>
+                    <td className="px-3 py-3 font-mono text-xs" title={row.command_uuid}>
+                      {row.command_uuid}
+                    </td>
                     <td className="px-6 py-3 text-ink-muted">{row.last_error ?? "—"}</td>
                   </tr>
                 ))

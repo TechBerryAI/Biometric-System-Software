@@ -15,7 +15,7 @@ class DeviceUserMapping(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     employee_uuid: Mapped[str] = mapped_column(
-        String(36),
+        String(40),
         ForeignKey("employees.employee_uuid", ondelete="CASCADE"),
         nullable=False,
         index=True,

@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Any, Iterable
-from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -30,6 +29,7 @@ from app.domains.devices.services.device_registry_service import device_service_
 from app.domains.devices.services.device_service import format_device_connection_error
 from app.domains.employees.models.employee import Employee
 from app.shared.device_exceptions import DeviceLockContentionError
+from app.shared.ids import new_migration_id
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +335,7 @@ def create_preflight(
     planned = plan_actions(employees, snapshot)
     summary = _preflight_summary(employees, planned, snapshot)
     row = DeviceMigration(
-        migration_uuid=str(uuid4()),
+        migration_uuid=new_migration_id(),
         device_id=device.name,
         status="PREFLIGHT",
         include_departed=include_departed,
@@ -366,7 +366,7 @@ def run_dry_run(
         migration = get_migration(db, device.name, migration_uuid)
     else:
         migration = DeviceMigration(
-            migration_uuid=str(uuid4()),
+            migration_uuid=new_migration_id(),
             device_id=device.name,
             include_departed=include_departed,
             target_ip=device.ip_address,

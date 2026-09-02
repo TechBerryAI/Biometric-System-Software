@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from uuid import uuid4
 
 from sqlalchemy import Boolean, DateTime, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.shared.ids import new_device_id
 
 
 class Device(Base):
@@ -17,7 +17,7 @@ class Device(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    device_uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid4()))
+    device_uuid: Mapped[str] = mapped_column(String(40), unique=True, nullable=False, index=True, default=new_device_id)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     ip_address: Mapped[str] = mapped_column(String(128), nullable=False)
     port: Mapped[int] = mapped_column(Integer, nullable=False, default=4370)

@@ -19,7 +19,7 @@ class DeviceUserDrift(Base):
     device_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     device_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     drift_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    employee_uuid: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    employee_uuid: Mapped[str | None] = mapped_column(String(40), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="open", server_default="open", index=True)
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -28,5 +28,5 @@ class DeviceUserDrift(Base):
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    command_uuid: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    command_uuid: Mapped[str | None] = mapped_column(String(40), nullable=True)
     metadata_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

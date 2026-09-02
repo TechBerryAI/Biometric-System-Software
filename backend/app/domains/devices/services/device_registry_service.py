@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Any
-from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -21,6 +20,7 @@ from app.domains.employees.models.device_user_mapping import DeviceUserMapping
 from app.domains.devices.services.device_command_service import device_session_lock
 from app.domains.devices.services.device_service import DeviceService
 from app.shared.device_exceptions import DeviceFetchError, DeviceLockContentionError
+from app.shared.ids import new_device_id
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ def create_device(
     if existing is not None:
         raise ValueError(f"Device '{name}' already exists.")
     row = Device(
-        device_uuid=str(uuid4()),
+        device_uuid=new_device_id(),
         name=name.strip(),
         ip_address=ip_address.strip(),
         port=port,

@@ -158,7 +158,7 @@ class Settings(BaseSettings):
         description="GOD-mode operator password (server env only).",
     )
     auth_operator_uuid: str = Field(
-        default="00000000-0000-4000-8000-000000000001",
+        default="usr_operator_root01",
         alias="AUTH_OPERATOR_UUID",
         description="Stable JWT subject for the env-backed operator account.",
     )

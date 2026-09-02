@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import logging
 import sys
-from uuid import uuid4
 
 import app.models  # noqa: F401
 
@@ -19,6 +18,7 @@ from app.domains.devices.services.device_migration_service import (
     run_dry_run,
 )
 from app.domains.devices.services.device_registry_service import get_device_by_name
+from app.shared.ids import new_user_id
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
@@ -30,7 +30,7 @@ TARGET_NAME = "main-entrance"
 def main() -> int:
     settings = get_settings()
     db = SessionLocal()
-    actor = str(uuid4())
+    actor = new_user_id()
     try:
         device = get_device_by_name(db, TARGET_NAME)
         if device is None:

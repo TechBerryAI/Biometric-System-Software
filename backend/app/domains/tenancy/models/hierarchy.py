@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 from datetime import datetime
-from uuid import uuid4
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.shared.ids import (
+    new_branch_id,
+    new_department_id,
+    new_org_id,
+    new_region_id,
+    new_tenant_id,
+)
 
 
 class Tenant(Base):
     __tablename__ = "tenants"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    tenant_uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid4()))
+    tenant_uuid: Mapped[str] = mapped_column(String(40), unique=True, nullable=False, index=True, default=new_tenant_id)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
     deployment_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="saas", server_default="saas")
@@ -30,7 +36,7 @@ class Organization(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
-    org_uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid4()))
+    org_uuid: Mapped[str] = mapped_column(String(40), unique=True, nullable=False, index=True, default=new_org_id)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
@@ -43,7 +49,7 @@ class Region(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    region_uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid4()))
+    region_uuid: Mapped[str] = mapped_column(String(40), unique=True, nullable=False, index=True, default=new_region_id)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC", server_default="UTC")
@@ -57,7 +63,7 @@ class Branch(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     region_id: Mapped[int] = mapped_column(ForeignKey("regions.id", ondelete="CASCADE"), nullable=False, index=True)
-    branch_uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid4()))
+    branch_uuid: Mapped[str] = mapped_column(String(40), unique=True, nullable=False, index=True, default=new_branch_id)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -72,7 +78,7 @@ class Department(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), nullable=False, index=True)
-    dept_uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid4()))
+    dept_uuid: Mapped[str] = mapped_column(String(40), unique=True, nullable=False, index=True, default=new_department_id)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")

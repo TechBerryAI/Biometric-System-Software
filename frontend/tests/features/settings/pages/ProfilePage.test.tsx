@@ -7,7 +7,7 @@ vi.mock("@/features/auth/AuthContext", () => ({
   AuthProvider: ({ children }: { children: React.ReactNode }) => children,
   useAuth: () => ({
     user: {
-      user_uuid: "1",
+      user_uuid: "usr_TESTADMIN000001",
       email: "admin@company.com",
       full_name: "Admin User",
       role: "SUPER_ADMIN",

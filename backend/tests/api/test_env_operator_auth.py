@@ -12,9 +12,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.core.config import get_settings
+from app.core.operator_access import OperatorRefreshTokenStore
 from app.core.security import hash_refresh_token
 from app.domains.auth.models.user import User
-from app.domains.auth.services.auth_service import OperatorRefreshTokenStore
 
 
 class _InMemoryOperatorRefreshStore(OperatorRefreshTokenStore):
@@ -55,7 +55,7 @@ class _InMemoryOperatorRefreshStore(OperatorRefreshTokenStore):
 def env_operator_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AUTH_OPERATOR_EMAIL", "operator-env@example.com")
     monkeypatch.setenv("AUTH_OPERATOR_PASSWORD", "OperatorPass123!")
-    monkeypatch.setenv("AUTH_OPERATOR_UUID", "00000000-0000-4000-8000-000000000099")
+    monkeypatch.setenv("AUTH_OPERATOR_UUID", "usr_operator_test099")
     get_settings.cache_clear()
     _InMemoryOperatorRefreshStore._shared.clear()
     yield
@@ -66,7 +66,7 @@ def env_operator_settings(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture()
 def env_operator_client(client: TestClient, env_operator_settings: None):
     with patch(
-        "app.domains.auth.services.auth_service.OperatorRefreshTokenStore",
+        "app.core.operator_access.OperatorRefreshTokenStore",
         _InMemoryOperatorRefreshStore,
     ):
         yield client

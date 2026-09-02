@@ -4,7 +4,7 @@ import { API_BASE_URL } from "@/config/api";
 const base = API_BASE_URL.replace(/\/$/, "");
 
 export const mockUser = {
-  user_uuid: "user-uuid-1",
+  user_uuid: "usr_TESTADMIN000001",
   email: "admin@company.com",
   full_name: "Admin User",
   role: "SUPER_ADMIN" as const,

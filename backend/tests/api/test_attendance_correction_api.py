@@ -61,7 +61,7 @@ def test_correction_command_status(
 ) -> None:
     emp, day = adjust_employee
     missing = client.get(
-        "/attendance/adjust/commands/00000000-0000-0000-0000-000000000000",
+        "/attendance/adjust/commands/cmd_0000000000000000",
         headers=operator_headers,
     )
     assert missing.status_code == 404

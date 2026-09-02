@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from uuid import uuid4
 
 from sqlalchemy import DateTime, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.shared.ids import new_run_id
 
 
 class AttendanceArchiveRun(Base):
@@ -17,10 +17,10 @@ class AttendanceArchiveRun(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_uuid: Mapped[str] = mapped_column(
-        String(36),
+        String(40),
         unique=True,
         nullable=False,
-        default=lambda: str(uuid4()),
+        default=new_run_id,
     )
     partition_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

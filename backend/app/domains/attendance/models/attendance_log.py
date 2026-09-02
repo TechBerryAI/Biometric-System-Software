@@ -28,7 +28,7 @@ class AttendanceLog(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     device_id: Mapped[str] = mapped_column(String(128), nullable=False)
     employee_uuid: Mapped[str | None] = mapped_column(
-        String(36),
+        String(40),
         ForeignKey("employees.employee_uuid", ondelete="SET NULL"),
         nullable=True,
         index=True,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from uuid import uuid4
 from zoneinfo import ZoneInfo
 from contextlib import asynccontextmanager
 
@@ -32,6 +31,7 @@ from app.domains.ops.router import router as operations_router
 from app.domains.reporting.router import router as reporting_router
 from app.domains.dashboard.router import router as dashboard_router
 from app.domains.tenancy.router import router as tenancy_router
+from app.shared.ids import new_request_id
 
 settings = get_settings()
 configure_logging(log_level=settings.log_level, json_logs=settings.json_logs)
@@ -85,7 +85,7 @@ async def security_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def request_context_middleware(request: Request, call_next):
-    request_id = request.headers.get("x-request-id") or str(uuid4())
+    request_id = request.headers.get("x-request-id") or new_request_id()
     request.state.request_id = request_id
     started = datetime.now(ZoneInfo("UTC"))
     response = await call_next(request)

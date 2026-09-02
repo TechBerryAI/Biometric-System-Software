@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from redis import Redis
@@ -33,6 +32,7 @@ from app.core.security import (
 )
 from app.domains.auth.models.refresh_token import RefreshToken
 from app.domains.auth.models.user import User, UserRole
+from app.shared.ids import new_family_id
 
 ALLOWED_APP_ROLES = {
     UserRole.SUPER_ADMIN.value,
@@ -146,7 +146,7 @@ def issue_session_tokens(
     family_id: str | None = None,
 ) -> tuple[str, str, datetime]:
     settings = get_settings()
-    token_family = family_id or str(uuid4())
+    token_family = family_id or new_family_id()
 
     if is_env_operator_user(user):
         return _issue_operator_session_tokens(user, token_family)

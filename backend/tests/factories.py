@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import secrets
 from datetime import date, datetime, time, timedelta
-from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from app.core.security import hash_password
@@ -14,6 +14,7 @@ from app.domains.employees.models.device_user_mapping import DeviceUserMapping
 from app.domains.employees.models.employee import Employee
 from app.domains.ops.models.system_control_state import SystemControlState
 from app.domains.auth.models.user import User, UserRole
+from app.shared.ids import new_command_id, new_employee_id
 
 UTC = ZoneInfo("UTC")
 
@@ -51,7 +52,8 @@ def make_employee(
     device_uid: int | None = 1,
 ) -> Employee:
     return Employee(
-        device_user_id=device_user_id or f"TBI{uuid4().hex[:6].upper()}",
+        employee_uuid=new_employee_id(),
+        device_user_id=device_user_id or f"TBI{secrets.token_hex(3).upper()}",
         name=name,
         department=department,
         shift_start=shift_start,
@@ -125,12 +127,12 @@ def make_device_command(
     idempotency_key: str | None = None,
 ) -> DeviceCommand:
     return DeviceCommand(
-        command_uuid=str(uuid4()),
+        command_uuid=new_command_id(),
         device_id=device_id,
         command_type=command_type,
         payload=payload or {"user_id": "TBI001", "name": "Test"},
         status=status,
-        idempotency_key=idempotency_key or uuid4().hex,
+        idempotency_key=idempotency_key or secrets.token_hex(16),
         retries=0,
     )
 

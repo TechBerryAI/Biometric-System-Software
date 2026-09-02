@@ -55,7 +55,7 @@ describe("FE-UNIT-GUARD-001 RequireAuth", () => {
 
   it("renders children when authenticated", () => {
     useAuthMock.mockReturnValue({
-      user: { user_uuid: "1", email: "a@b.com", role: "SUPER_ADMIN", active: true },
+      user: { user_uuid: "usr_TESTADMIN000001", email: "a@b.com", role: "SUPER_ADMIN", active: true },
       loading: false,
       can: () => true,
       login: vi.fn(),

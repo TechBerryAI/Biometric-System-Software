@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -34,6 +33,7 @@ from app.domains.attendance.services.attendance_helpers import (
     summarize_employee_day_from_logs,
 )
 from app.domains.ops.services.system_governance_service import assert_device_write_allowed
+from app.shared.ids import new_employee_id
 
 router = APIRouter(
     prefix="/employees",
@@ -110,7 +110,7 @@ def get_employee(employee_id: int, db: Session = Depends(get_db)) -> EmployeeDet
     if emp is None or emp.departed_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
     if not emp.employee_uuid:
-        emp.employee_uuid = str(uuid4())
+        emp.employee_uuid = new_employee_id()
         db.commit()
         db.refresh(emp)
 
@@ -171,7 +171,7 @@ def get_employee_daily_attendance(
     if emp is None or emp.departed_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
     if not emp.employee_uuid:
-        emp.employee_uuid = str(uuid4())
+        emp.employee_uuid = new_employee_id()
         db.commit()
         db.refresh(emp)
 
@@ -245,7 +245,7 @@ def upsert_employee_metadata(
     effective_at = datetime.now(ZoneInfo("UTC"))
     if existing is not None:
         if not existing.employee_uuid:
-            existing.employee_uuid = str(uuid4())
+            existing.employee_uuid = new_employee_id()
         name_changed = existing.name.strip() != payload.name.strip()
         if name_changed:
             _ensure_device_writes_enabled(db, device_id=settings.zk_device_id)
@@ -285,7 +285,7 @@ def upsert_employee_metadata(
         return existing
     _ensure_device_writes_enabled(db, device_id=settings.zk_device_id)
     emp = Employee(
-        employee_uuid=str(uuid4()),
+        employee_uuid=new_employee_id(),
         device_user_id=payload.device_user_id,
         name=payload.name,
         department=payload.department,
@@ -358,7 +358,7 @@ def update_employee(
 
     settings = get_settings()
     if not existing.employee_uuid:
-        existing.employee_uuid = str(uuid4())
+        existing.employee_uuid = new_employee_id()
 
     identity_changed = (
         existing.device_user_id.strip() != new_device_user_id

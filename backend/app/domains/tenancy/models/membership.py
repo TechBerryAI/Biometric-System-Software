@@ -3,22 +3,22 @@
 from __future__ import annotations
 
 from datetime import datetime
-from uuid import uuid4
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.shared.ids import new_membership_id
 
 
 class TenantMembership(Base):
     __tablename__ = "tenant_memberships"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    membership_uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, default=lambda: str(uuid4()))
+    membership_uuid: Mapped[str] = mapped_column(String(40), unique=True, nullable=False, default=new_membership_id)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_uuid: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    user_uuid: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     scope_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     branch_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)

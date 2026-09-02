@@ -6,7 +6,6 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Protocol, Sequence
-from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import exists, select
@@ -33,6 +32,7 @@ from app.domains.attendance.services.clock_shift_repair import (
     load_ingest_skip_keys,
 )
 from app.domains.devices.models.device_sync_state import DeviceSyncState
+from app.shared.ids import new_employee_id
 
 logger = logging.getLogger(__name__)
 
@@ -254,13 +254,13 @@ def sync_employees_from_device_users(
                 legacy.device_group_id = u.group_id
                 legacy.device_card = u.card
                 if not legacy.employee_uuid:
-                    legacy.employee_uuid = str(uuid4())
+                    legacy.employee_uuid = new_employee_id()
                 db.flush()
 
         stmt = (
             pg_insert(Employee)
             .values(
-                employee_uuid=str(uuid4()),
+                employee_uuid=new_employee_id(),
                 device_user_id=u.user_id,
                 device_uid=u.uid,
                 device_privilege=u.privilege,
@@ -290,7 +290,7 @@ def sync_employees_from_device_users(
         if emp is None:
             continue
         if not emp.employee_uuid:
-            emp.employee_uuid = str(uuid4())
+            emp.employee_uuid = new_employee_id()
             db.flush()
         _ensure_active_mapping(
             db,
@@ -393,7 +393,7 @@ def backfill_employees_from_orphan_logs(db: Session) -> int:
         res = db.execute(
             pg_insert(Employee)
             .values(
-                employee_uuid=str(uuid4()),
+                employee_uuid=new_employee_id(),
                 device_user_id=code,
                 name=f"User {code}",
                 department=None,
@@ -408,7 +408,7 @@ def backfill_employees_from_orphan_logs(db: Session) -> int:
     employees = db.execute(select(Employee).where(Employee.device_user_id.in_(codes))).scalars().all()
     for emp in employees:
         if not emp.employee_uuid:
-            emp.employee_uuid = str(uuid4())
+            emp.employee_uuid = new_employee_id()
             db.flush()
         _ensure_active_mapping(
             db,

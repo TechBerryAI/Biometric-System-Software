@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from uuid import uuid4
 
 from sqlalchemy import Boolean, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.shared.ids import new_user_id
 
 
 class UserRole(str, Enum):
@@ -27,7 +27,7 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    user_uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid4()))
+    user_uuid: Mapped[str] = mapped_column(String(40), unique=True, nullable=False, index=True, default=new_user_id)
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
     full_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)

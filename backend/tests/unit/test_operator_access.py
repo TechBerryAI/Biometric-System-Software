@@ -27,7 +27,7 @@ from tests.factories import make_operator, make_user
 def env_operator_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AUTH_OPERATOR_EMAIL", "operator-env@example.com")
     monkeypatch.setenv("AUTH_OPERATOR_PASSWORD", "OperatorPass123!")
-    monkeypatch.setenv("AUTH_OPERATOR_UUID", "00000000-0000-4000-8000-000000000099")
+    monkeypatch.setenv("AUTH_OPERATOR_UUID", "usr_operator_test099")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -59,7 +59,7 @@ def test_env_operator_helpers(env_operator_settings: None) -> None:
     assert is_env_operator_configured() is True
     assert is_env_operator_email("operator-env@example.com") is True
     assert is_env_operator_email("other@example.com") is False
-    assert is_env_operator_uuid("00000000-0000-4000-8000-000000000099") is True
+    assert is_env_operator_uuid("usr_operator_test099") is True
     assert is_env_operator_uuid("other-uuid") is False
 
     operator = build_env_operator()
@@ -74,7 +74,7 @@ def test_env_operator_helpers(env_operator_settings: None) -> None:
 
 @pytest.mark.testid("BE-UNIT-ENV-OP-003")
 def test_is_operator_user_uuid_env_path(env_operator_settings: None, db_session) -> None:
-    assert is_operator_user_uuid(db_session, "00000000-0000-4000-8000-000000000099") is True
+    assert is_operator_user_uuid(db_session, "usr_operator_test099") is True
     assert is_operator_user_uuid(db_session, "not-an-operator") is False
 
     db_operator = make_operator(email="db-op@example.com")

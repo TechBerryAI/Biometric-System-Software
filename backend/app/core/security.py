@@ -6,7 +6,6 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 from typing import Any
-from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, HTTPException, Request, status
@@ -21,6 +20,7 @@ from app.core.database import get_db
 from app.core.operator_access import AuthPrincipal, build_env_operator, is_env_operator_uuid, is_operator_account
 from app.domains.auth.models.user import User
 from app.domains.auth.services.cookie_auth_service import resolve_access_token
+from app.shared.ids import new_jti
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -120,7 +120,7 @@ def create_access_token(*, user_uuid: str, role: str, email: str) -> tuple[str, 
         "email": email,
         "role": role,
         "type": "access",
-        "jti": str(uuid4()),
+        "jti": new_jti(),
         "exp": int(expire.timestamp()),
         "iat": int(_utcnow().timestamp()),
     }
