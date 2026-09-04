@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/features/auth/AuthContext";
+import { getApiErrorMessage } from "@/shared/api/client";
 
 export function Login() {
   const { user, login } = useAuth();
@@ -26,8 +27,7 @@ export function Login() {
       await login(email, password);
       navigate(from, { replace: true });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Login failed";
-      setError(message);
+      setError(getApiErrorMessage(err) || "Login failed");
     } finally {
       setSubmitting(false);
     }
