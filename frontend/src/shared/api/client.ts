@@ -106,6 +106,53 @@ export function getApiErrorMessage(err: unknown): string {
   return "Request failed";
 }
 
+const STATUS_CODE_MESSAGE_RE = /Request failed with status code \d+/i;
+
+/** Login-form copy: never surface Axios status-code text to the user. */
+export function getLoginErrorMessage(err: unknown): string {
+  if (axios.isAxiosError(err)) {
+    if (!err.response) {
+      return "Unable to reach the server. Check your connection and try again.";
+    }
+
+    const status = err.response.status;
+    const raw = err.response.data as { detail?: unknown } | undefined;
+    const detail = typeof raw?.detail === "string" ? raw.detail.trim() : "";
+
+    if (detail === "Invalid MFA code") {
+      return "Incorrect verification code.";
+    }
+    if (detail === "Invalid credentials") {
+      return "Incorrect email or password.";
+    }
+    if (detail === "Too many login attempts" || detail === "Rate limit exceeded") {
+      return "Too many login attempts. Please wait a few minutes and try again.";
+    }
+    if (status === 503 || /mfa challenge store unavailable/i.test(detail)) {
+      return "Sign-in is temporarily unavailable. Please try again shortly.";
+    }
+    if (status === 401) {
+      return "Incorrect email or password.";
+    }
+    if (status === 429) {
+      return "Too many login attempts. Please wait a few minutes and try again.";
+    }
+    if (detail && !STATUS_CODE_MESSAGE_RE.test(detail)) {
+      return detail;
+    }
+    return "Sign in failed. Please try again.";
+  }
+
+  if (err instanceof Error) {
+    if (STATUS_CODE_MESSAGE_RE.test(err.message)) {
+      return "Sign in failed. Please try again.";
+    }
+    return err.message || "Sign in failed. Please try again.";
+  }
+
+  return "Sign in failed. Please try again.";
+}
+
 export function formatSyncErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err) && err.response?.status === 504) {
     return "The VM proxy timed out while the device was still sending punches. Wait a minute and refresh — the sync may have finished in the background.";
