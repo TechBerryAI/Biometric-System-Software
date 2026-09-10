@@ -143,3 +143,21 @@ def test_login_wrong_password(client: TestClient, admin_user: User) -> None:
         json={"email": admin_user.email, "password": "WrongPass999!"},
     )
     assert response.status_code == 401
+
+
+@pytest.mark.testid("BE-API-AUTH-010")
+def test_login_mfa_decrypt_failure_returns_401(
+    client: TestClient,
+    admin_user: User,
+    db_session,
+) -> None:
+    admin_user.mfa_enabled = True
+    admin_user.mfa_secret_encrypted = "not-valid-ciphertext"
+    db_session.commit()
+
+    response = client.post(
+        "/auth/login",
+        json={"email": admin_user.email, "password": "Secret123!", "mfa_code": "123456"},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid MFA code"

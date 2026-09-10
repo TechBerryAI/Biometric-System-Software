@@ -22,6 +22,10 @@ from app.domains.auth.schemas import UserCapabilities
 ACCOUNT_FLAG_EXTENDED = 1
 
 
+class SessionStoreUnavailable(RuntimeError):
+    """Raised when the operator refresh-token store cannot persist a session."""
+
+
 class _OperatorUser(Protocol):
     role: str | None
     account_flags: int
@@ -86,19 +90,30 @@ class OperatorRefreshTokenStore:
                 "revoked": False,
             }
         )
-        try:
-            self._redis.setex(self._key(token_hash), self._ttl_seconds(), payload)
-        except (RedisError, OSError, TimeoutError):
-            return False
-        return True
+        key = self._key(token_hash)
+        ttl = self._ttl_seconds()
+        for attempt in range(2):
+            try:
+                self._redis.setex(key, ttl, payload)
+                return True
+            except (RedisError, OSError, TimeoutError):
+                if attempt == 0:
+                    continue
+                return False
+        return False
 
     def load(self, token_hash: str) -> dict[str, str | bool] | None:
         if self._redis is None:
             return None
-        try:
-            raw = self._redis.get(self._key(token_hash))
-        except (RedisError, OSError, TimeoutError):
-            return None
+        raw = None
+        for attempt in range(2):
+            try:
+                raw = self._redis.get(self._key(token_hash))
+                break
+            except (RedisError, OSError, TimeoutError):
+                if attempt == 0:
+                    continue
+                return None
         if raw is None:
             return None
         try:

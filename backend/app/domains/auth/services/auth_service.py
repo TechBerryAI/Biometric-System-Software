@@ -14,6 +14,7 @@ from app.core.config import Settings, get_settings
 from app.core.operator_access import (
     AuthPrincipal,
     EnvOperatorUser,
+    SessionStoreUnavailable,
     authenticate_env_operator,
     is_env_operator_email,
     is_env_operator_user,
@@ -135,7 +136,7 @@ def _issue_operator_session_tokens(
         family_id=family_id,
         expires_at=refresh_expiry,
     ):
-        raise RuntimeError("Operator refresh token store unavailable.")
+        raise SessionStoreUnavailable("Operator refresh token store unavailable.")
     return access_token, refresh_token, refresh_expiry
 
 

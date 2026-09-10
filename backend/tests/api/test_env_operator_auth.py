@@ -190,6 +190,65 @@ def test_db_user_still_authenticates(
     assert response.json()["role"] == "SUPER_ADMIN"
 
 
+class _FailingOperatorRefreshStore(_InMemoryOperatorRefreshStore):
+    def store(self, *, token_hash: str, family_id: str, expires_at: datetime) -> bool:
+        return False
+
+
+class _FailAfterFirstStore(_InMemoryOperatorRefreshStore):
+    _store_count = 0
+
+    def store(self, *, token_hash: str, family_id: str, expires_at: datetime) -> bool:
+        type(self)._store_count += 1
+        if type(self)._store_count > 1:
+            return False
+        return super().store(token_hash=token_hash, family_id=family_id, expires_at=expires_at)
+
+
+@pytest.mark.testid("BE-API-ENV-OP-008")
+def test_env_operator_login_returns_503_when_refresh_store_unavailable(
+    client: TestClient,
+    env_operator_settings: None,
+) -> None:
+    with patch(
+        "app.core.operator_access.OperatorRefreshTokenStore",
+        _FailingOperatorRefreshStore,
+    ):
+        response = client.post(
+            "/auth/login",
+            json={"email": "operator-env@example.com", "password": "OperatorPass123!"},
+        )
+    assert response.status_code == 503
+    assert "Session store unavailable" in response.json()["detail"]
+
+
+@pytest.mark.testid("BE-API-ENV-OP-009")
+def test_env_operator_refresh_returns_503_when_store_unavailable_on_rotate(
+    client: TestClient,
+    env_operator_settings: None,
+) -> None:
+    _FailAfterFirstStore._store_count = 0
+    _InMemoryOperatorRefreshStore._shared.clear()
+    with patch(
+        "app.core.operator_access.OperatorRefreshTokenStore",
+        _FailAfterFirstStore,
+    ):
+        login = client.post(
+            "/auth/login",
+            json={"email": "operator-env@example.com", "password": "OperatorPass123!"},
+        )
+        assert login.status_code == 200
+        refresh_token = login.json()["refresh_token"]
+
+        def _naive_utc() -> datetime:
+            return datetime.now(ZoneInfo("UTC")).replace(tzinfo=None)
+
+        with patch("app.domains.auth.services.auth_service._utcnow", _naive_utc):
+            response = client.post("/auth/refresh", json={"refresh_token": refresh_token})
+    assert response.status_code == 503
+    assert "Session store unavailable" in response.json()["detail"]
+
+
 @pytest.mark.testid("BE-UNIT-ENV-OP-001")
 def test_operator_refresh_store_roundtrip() -> None:
     store = _InMemoryOperatorRefreshStore()

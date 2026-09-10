@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 
 import pyotp
@@ -14,6 +15,8 @@ from app.core.crypto import decrypt_value, encrypt_value
 from app.core.redis_keys import with_namespace
 from app.core.operator_access import is_env_operator_user
 from app.domains.auth.models.user import User
+
+logger = logging.getLogger(__name__)
 
 MFA_ISSUER = "Biometric Attendance"
 MFA_CHALLENGE_TTL_SECONDS = 300
@@ -92,7 +95,11 @@ def enroll_mfa(db: Session, user: User) -> tuple[str, str]:
 def confirm_mfa_enrollment(db: Session, user: User, code: str) -> bool:
     if not user.mfa_secret_encrypted:
         return False
-    secret = decrypt_value(user.mfa_secret_encrypted)
+    try:
+        secret = decrypt_value(user.mfa_secret_encrypted)
+    except ValueError:
+        logger.warning("MFA enrollment confirm failed: cannot decrypt secret for user_id=%s", user.id)
+        return False
     totp = pyotp.TOTP(secret)
     if not totp.verify(code, valid_window=1):
         return False
@@ -103,7 +110,11 @@ def confirm_mfa_enrollment(db: Session, user: User, code: str) -> bool:
 def verify_mfa_code(user: User, code: str) -> bool:
     if not user.mfa_enabled or not user.mfa_secret_encrypted:
         return False
-    secret = decrypt_value(user.mfa_secret_encrypted)
+    try:
+        secret = decrypt_value(user.mfa_secret_encrypted)
+    except ValueError:
+        logger.warning("MFA verify failed: cannot decrypt secret for user_id=%s", user.id)
+        return False
     totp = pyotp.TOTP(secret)
     return totp.verify(code, valid_window=1)
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Union
+from typing import NoReturn, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.csrf import generate_csrf_token, set_csrf_cookie
 from app.core.database import get_db
-from app.core.operator_access import AuthPrincipal, is_env_operator_email, is_env_operator_user, user_capabilities
+from app.core.operator_access import (
+    AuthPrincipal,
+    SessionStoreUnavailable,
+    is_env_operator_email,
+    is_env_operator_user,
+    user_capabilities,
+)
 from app.core.security import Permission, get_current_user, require_permissions
 from app.domains.audit.services.audit_service import record_audit_event
 from app.domains.auth.models.user import User
@@ -55,6 +61,14 @@ from app.domains.auth.services.mfa_service import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _ENV_OPERATOR_MANAGED_DETAIL = "This account is managed via server configuration."
+_SESSION_STORE_UNAVAILABLE_DETAIL = "Session store unavailable; please try again shortly."
+
+
+def _raise_session_store_unavailable(exc: SessionStoreUnavailable) -> NoReturn:
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=_SESSION_STORE_UNAVAILABLE_DETAIL,
+    ) from exc
 
 
 def _reject_env_operator_self_service(user: AuthPrincipal) -> None:
@@ -163,7 +177,10 @@ def login(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid MFA code")
 
     limiter.register_success(email)
-    access_token, refresh_token, refresh_expiry = issue_session_tokens(db, user)
+    try:
+        access_token, refresh_token, refresh_expiry = issue_session_tokens(db, user)
+    except SessionStoreUnavailable as exc:
+        _raise_session_store_unavailable(exc)
     _apply_session_cookies(response, access_token=access_token, refresh_token=refresh_token)
     record_audit_event(db, action="auth.login", actor=user, request=request)
     db.commit()
@@ -196,7 +213,10 @@ def verify_mfa_login(
         db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid MFA code")
 
-    access_token, refresh_token, refresh_expiry = issue_session_tokens(db, user)
+    try:
+        access_token, refresh_token, refresh_expiry = issue_session_tokens(db, user)
+    except SessionStoreUnavailable as exc:
+        _raise_session_store_unavailable(exc)
     _apply_session_cookies(response, access_token=access_token, refresh_token=refresh_token)
     record_audit_event(db, action="auth.mfa_verify", actor=user, request=request)
     db.commit()
@@ -246,7 +266,10 @@ def refresh(
     if not raw_refresh:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
 
-    rotated = rotate_refresh_token(db, raw_refresh)
+    try:
+        rotated = rotate_refresh_token(db, raw_refresh)
+    except SessionStoreUnavailable as exc:
+        _raise_session_store_unavailable(exc)
     if rotated is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
@@ -309,7 +332,10 @@ def change_my_password(
     if not change_user_password(db, user, payload.current_password, payload.new_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
 
-    access_token, refresh_token, refresh_expiry = issue_session_tokens(db, user)
+    try:
+        access_token, refresh_token, refresh_expiry = issue_session_tokens(db, user)
+    except SessionStoreUnavailable as exc:
+        _raise_session_store_unavailable(exc)
     _apply_session_cookies(response, access_token=access_token, refresh_token=refresh_token)
     db.commit()
     return _auth_tokens_response(

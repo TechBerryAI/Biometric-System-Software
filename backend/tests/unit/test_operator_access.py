@@ -82,3 +82,31 @@ def test_is_operator_user_uuid_env_path(env_operator_settings: None, db_session)
     db_session.commit()
     assert is_operator_user_uuid(db_session, db_operator.user_uuid) is True
 
+
+@pytest.mark.testid("BE-UNIT-ENV-OP-004")
+def test_operator_refresh_store_retries_once_on_transient_error(
+    env_operator_settings: None,
+) -> None:
+    from datetime import datetime, timedelta
+    from unittest.mock import MagicMock
+    from zoneinfo import ZoneInfo
+
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    from app.core.operator_access import OperatorRefreshTokenStore
+
+    store = OperatorRefreshTokenStore()
+    mock_redis = MagicMock()
+    mock_redis.setex.side_effect = [RedisTimeoutError("timeout"), True]
+    mock_redis.get.side_effect = [RedisTimeoutError("timeout"), '{"family_id":"fam-1","expires_at":"2099-01-01T00:00:00+00:00","revoked":false}']
+    store._redis = mock_redis
+
+    expires = datetime.now(ZoneInfo("UTC")) + timedelta(days=7)
+    assert store.store(token_hash="abc", family_id="fam-1", expires_at=expires) is True
+    assert mock_redis.setex.call_count == 2
+
+    loaded = store.load("abc")
+    assert loaded is not None
+    assert loaded["family_id"] == "fam-1"
+    assert mock_redis.get.call_count == 2
+
