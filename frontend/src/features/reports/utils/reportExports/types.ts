@@ -12,6 +12,9 @@ export type EmployeeReportPayload = {
 export type AttendanceSummaryPayload = {
   periodLabel: string;
   rows: Array<DailySummaryRow & { summary_date: string }>;
+  /** Inclusive window; the Excel grid shows every date in it, even ones without rows. */
+  fromDate?: string;
+  toDate?: string;
 };
 
 export type DashboardKpiExport = {

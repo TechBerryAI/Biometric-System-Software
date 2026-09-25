@@ -114,6 +114,8 @@ export function Attendance() {
         await exportAttendanceSummary(format, {
           periodLabel: range.label,
           rows: sortAttendanceRows(dayRows, sortMode),
+          fromDate: date,
+          toDate: date,
         });
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Failed to export report");

@@ -6,11 +6,10 @@ import {
   fmtGeneratedTimestamp,
 } from "@/lib/dates";
 import type {
-  AttendanceSummaryPayload,
   DashboardReportPayload,
   EmployeeReportPayload,
 } from "./types";
-import { fmtMinutes, mapRowsWithDaySeparators, safeFilename } from "./shared";
+import { fmtMinutes, safeFilename } from "./shared";
 
 function writeWorkbook(workbook: XLSX.WorkBook, filename: string): void {
   XLSX.writeFile(workbook, filename);
@@ -57,35 +56,6 @@ export function downloadEmployeeReportExcel(args: EmployeeReportPayload): void {
   XLSX.utils.book_append_sheet(workbook, attendanceSheet, "Attendance");
 
   writeWorkbook(workbook, `employee_report_${safeFilename(employee.name)}_${toDate}.xlsx`);
-}
-
-export function downloadAttendanceSummaryExcel(args: AttendanceSummaryPayload): void {
-  const { periodLabel, rows } = args;
-  const workbook = XLSX.utils.book_new();
-
-  const dataRows = mapRowsWithDaySeparators(rows, (r) => [
-    fmtDisplayDate(r.summary_date),
-    fmtDayOfWeek(r.summary_date),
-    r.employee_name,
-    r.device_user_id,
-    fmtDisplayDateTime(r.first_check_in),
-    fmtDisplayDateTime(r.last_check_out),
-    fmtMinutes(r.total_work_minutes),
-    r.first_check_in ? "No" : "Yes",
-  ]);
-
-  const sheet = XLSX.utils.aoa_to_sheet([
-    ["Attendance summary · all employees"],
-    ["Generated", fmtGeneratedTimestamp()],
-    ["Coverage", periodLabel],
-    ["Row count", rows.length],
-    [],
-    ["Date", "Day", "Employee", "Device ID", "In time", "Out time", "Total work", "Absent"],
-    ...dataRows,
-  ]);
-  XLSX.utils.book_append_sheet(workbook, sheet, "Summary");
-
-  writeWorkbook(workbook, `attendance_summary_${safeFilename(periodLabel)}.xlsx`);
 }
 
 export function downloadDashboardReportExcel(args: DashboardReportPayload): void {

@@ -12,8 +12,8 @@ export type {
   DepartmentAttendanceMember,
   DepartmentAttendancePayload,
 } from "./departmentAttendanceExcel";
+import { downloadAttendanceMatrixExcel } from "./attendanceMatrixExcel";
 import {
-  downloadAttendanceSummaryExcel,
   downloadDashboardReportExcel,
   downloadEmployeeReportExcel,
 } from "./excel";
@@ -65,8 +65,7 @@ export function exportAttendanceSummary(
     return;
   }
   if (format === "excel") {
-    downloadAttendanceSummaryExcel(args);
-    return;
+    return downloadAttendanceMatrixExcel(args);
   }
   return downloadAttendanceSummaryWord(args);
 }

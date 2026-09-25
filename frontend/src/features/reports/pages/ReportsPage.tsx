@@ -91,6 +91,8 @@ export function Reports() {
       await exportAttendanceSummary(format, {
         periodLabel: `${range.label} · ${ATTENDANCE_SORT_LABELS[sortMode]}`,
         rows: allRows,
+        fromDate: range.from,
+        toDate: range.to,
       });
     },
   });
