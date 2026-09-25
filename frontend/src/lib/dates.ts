@@ -163,13 +163,32 @@ export function dateList(fromISO: string, toISO: string): string[] {
   return out;
 }
 
-export type ExportPeriod = "day" | "week" | "month";
+export type ExportPeriod = "day" | "week" | "month" | "custom";
+
+/** Longest span the backend `/attendance/daily-summary/range` endpoint accepts. */
+export const MAX_EXPORT_RANGE_DAYS = 93;
+
+/** Inclusive number of calendar days between two ISO dates. */
+export function daySpan(fromISO: string, toISO: string): number {
+  const ms = new Date(`${toISO}T12:00:00`).getTime() - new Date(`${fromISO}T12:00:00`).getTime();
+  return Math.round(ms / 86_400_000) + 1;
+}
 
 export function getExportRange(
   baseDateISO: string,
-  period: ExportPeriod
+  period: ExportPeriod,
+  customFromISO?: string
 ): { from: string; to: string; label: string } {
   const d = new Date(`${baseDateISO}T12:00:00`);
+  if (period === "custom") {
+    const { from, to } = clampDateRange(customFromISO || baseDateISO, baseDateISO);
+    const days = daySpan(from, to);
+    return {
+      from,
+      to,
+      label: `Custom range (${fmtDisplayDate(from)} → ${fmtDisplayDate(to)}, ${days} day${days === 1 ? "" : "s"})`,
+    };
+  }
   if (period === "day") {
     return { from: baseDateISO, to: baseDateISO, label: `Day ${fmtDisplayDate(baseDateISO)}` };
   }

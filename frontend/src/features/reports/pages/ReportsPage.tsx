@@ -13,7 +13,15 @@ import {
   type AttendanceSortMode,
 } from "@/features/attendance/sortAttendance";
 import type { ExportPeriod } from "@/lib/dates";
-import { dateList, getExportRange, todayISO } from "@/lib/dates";
+import {
+  addDays,
+  dateList,
+  daySpan,
+  formatISO,
+  getExportRange,
+  MAX_EXPORT_RANGE_DAYS,
+  todayISO,
+} from "@/lib/dates";
 import { ReportFormatDialog } from "@/features/reports/components/ReportFormatDialog";
 import { fetchDailySummaryRange } from "@/features/attendance/api";
 import { fetchEmployees } from "@/features/employees/api";
@@ -34,6 +42,7 @@ export function Reports() {
   const elevated = isOperatorAccount(user);
   const [anchorDate, setAnchorDate] = useState(todayISO);
   const [period, setPeriod] = useState<ExportPeriod>("week");
+  const [customFrom, setCustomFrom] = useState(() => formatISO(addDays(new Date(), -6)));
   const [sortMode, setSortMode] = useState<AttendanceSortMode>("early_first");
   const [department, setDepartment] = useState("");
   const [formatDialogOpen, setFormatDialogOpen] = useState(false);
@@ -54,7 +63,20 @@ export function Reports() {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [employeesQuery.data]);
 
-  const range = useMemo(() => getExportRange(anchorDate, period), [anchorDate, period]);
+  const range = useMemo(
+    () => getExportRange(anchorDate, period, customFrom),
+    [anchorDate, period, customFrom]
+  );
+
+  const rangeError = useMemo(() => {
+    if (period !== "custom") return null;
+    if (!customFrom || !anchorDate) return "Pick both a start and an end date.";
+    if (customFrom > anchorDate) return "Start date must be on or before the end date.";
+    if (daySpan(customFrom, anchorDate) > MAX_EXPORT_RANGE_DAYS) {
+      return `Custom range cannot exceed ${MAX_EXPORT_RANGE_DAYS} days.`;
+    }
+    return null;
+  }, [period, customFrom, anchorDate]);
 
   const departmentMembers = useMemo(() => {
     if (!department) return [];
@@ -106,6 +128,7 @@ export function Reports() {
       : null;
 
   function handleDownloadClick() {
+    if (rangeError) return;
     if (elevated && department) {
       departmentExportMutation.mutate();
       return;
@@ -137,10 +160,6 @@ export function Reports() {
           </CardHeader>
           <CardContent className="space-y-4">
             <label className="flex flex-col gap-1.5 text-sm">
-              <span className="text-xs font-medium text-ink-muted">End date</span>
-              <Input type="date" value={anchorDate} onChange={(e) => setAnchorDate(e.target.value)} />
-            </label>
-            <label className="flex flex-col gap-1.5 text-sm">
               <span className="text-xs font-medium text-ink-muted">Window</span>
               <select
                 value={period}
@@ -150,8 +169,36 @@ export function Reports() {
                 <option value="day">Single day</option>
                 <option value="week">Last 7 days</option>
                 <option value="month">Last 30 days</option>
+                <option value="custom">Custom range</option>
               </select>
             </label>
+            {period === "custom" ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="flex flex-col gap-1.5 text-sm">
+                  <span className="text-xs font-medium text-ink-muted">Start date</span>
+                  <Input
+                    type="date"
+                    value={customFrom}
+                    max={anchorDate || undefined}
+                    onChange={(e) => setCustomFrom(e.target.value)}
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm">
+                  <span className="text-xs font-medium text-ink-muted">End date</span>
+                  <Input
+                    type="date"
+                    value={anchorDate}
+                    min={customFrom || undefined}
+                    onChange={(e) => setAnchorDate(e.target.value)}
+                  />
+                </label>
+              </div>
+            ) : (
+              <label className="flex flex-col gap-1.5 text-sm">
+                <span className="text-xs font-medium text-ink-muted">End date</span>
+                <Input type="date" value={anchorDate} onChange={(e) => setAnchorDate(e.target.value)} />
+              </label>
+            )}
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="text-xs font-medium text-ink-muted">Sort by</span>
               <select
@@ -192,14 +239,22 @@ export function Reports() {
                 ) : null}
               </label>
             ) : null}
-            <p className="rounded-xl border border-line/80 bg-surface px-3 py-2 text-xs text-ink-muted leading-relaxed">
-              {range.label} · {ATTENDANCE_SORT_LABELS[sortMode]}
-            </p>
+            {rangeError ? (
+              <p className="text-sm text-status-absent">{rangeError}</p>
+            ) : (
+              <p className="rounded-xl border border-line/80 bg-surface px-3 py-2 text-xs text-ink-muted leading-relaxed">
+                {range.label} · {ATTENDANCE_SORT_LABELS[sortMode]}
+              </p>
+            )}
             <Button
               type="button"
               className="w-full sm:w-auto"
               onClick={handleDownloadClick}
-              disabled={exportBusy || (elevated && Boolean(department) && departmentMembers.length === 0)}
+              disabled={
+                exportBusy ||
+                Boolean(rangeError) ||
+                (elevated && Boolean(department) && departmentMembers.length === 0)
+              }
             >
               <Download className="h-4 w-4" />
               {exportBusy
