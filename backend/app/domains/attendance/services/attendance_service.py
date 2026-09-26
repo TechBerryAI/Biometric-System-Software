@@ -549,7 +549,7 @@ def run_device_sync_detailed(
     resolved_device_id = device_id or settings.zk_device_id
     if not wait_for_correction_commands_clear(db, resolved_device_id, settings=settings):
         logger.warning(
-            "Deferring device sync: CORRECT_ATTENDANCE still active for device %s",
+            "Deferring device sync: another device operation is still active for device %s",
             resolved_device_id,
         )
         return DeviceSyncResult(
@@ -595,7 +595,7 @@ def run_device_sync_detailed(
             kept.append(row)
         if skipped_corrected:
             logger.info(
-                "Sync skipped %s device punch(es) on corrected employee-days (post-correction punches kept)",
+                "Sync skipped %s device punch(es) already stored for those days",
                 skipped_corrected,
             )
         records = kept

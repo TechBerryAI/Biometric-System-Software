@@ -8,7 +8,10 @@ from celery import Celery
 from celery.signals import worker_process_init
 
 from app.core.config import get_settings
+from app.core.logging_config import install_log_redaction
 from app.workers.beat_schedule import OffsetInterval
+
+install_log_redaction()
 
 settings = get_settings()
 

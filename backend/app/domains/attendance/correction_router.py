@@ -110,7 +110,7 @@ def get_correction_command_status(
 ) -> AttendanceAdjustmentRead:
     result = get_adjustment_command_status(db, command_uuid=command_uuid)
     if result is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Correction command not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device command not found.")
     return _adjustment_read(result)
 
 
@@ -137,7 +137,7 @@ def preview_adjustment_day(
 @router.post(
     "/correct",
     response_model=AttendanceAdjustmentRead,
-    responses={202: {"description": "Device correction queued (device_pending)."}},
+    responses={202: {"description": "Device operation queued (device_pending)."}},
 )
 def apply_attendance_adjustment(
     payload: AttendanceAdjustRequest,

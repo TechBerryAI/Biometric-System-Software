@@ -96,7 +96,7 @@ def sync_device(
     device_id = device.name
 
     if not wait_for_correction_commands_clear(db, device_id, settings=settings):
-        logger.warning("Deferring sync for %s: active correction commands", device_id)
+        logger.warning("Deferring sync for %s: another device operation is in progress", device_id)
         return _skipped_sync("correction_active")
 
     user_source, attendance_source = _sync_sources_for_device(gateway, device)

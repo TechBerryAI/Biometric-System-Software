@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { fmtDisplayDate, fmtDisplayDateTime, isoToTimeParts, zonedWallClockToISO, type TimeParts } from "@/lib/dates";
-import { applyAttendanceAdjustment, fetchAttendanceDayPreview, fetchCorrectionCapabilities, fetchCorrectionStatus, type AttendanceDayPreview, type CorrectionCapabilities } from "@/features/attendance/api";
+import { applyAttendanceAdjustment, fetchAttendanceDayPreview, fetchCorrectionStatus, type AttendanceDayPreview } from "@/features/attendance/api";
 import { getApiErrorMessage } from "@/shared/api/client";
 import type { EmployeeDailyAttendance } from "@/types";
 
@@ -125,7 +125,6 @@ export function AttendanceAdjustmentModal({
   const [checkInParts, setCheckInParts] = useState<TimeParts>(EMPTY_TIME);
   const [checkOutParts, setCheckOutParts] = useState<TimeParts | null>(null);
   const [preview, setPreview] = useState<AttendanceDayPreview | null>(null);
-  const [capabilities, setCapabilities] = useState<CorrectionCapabilities | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [applying, setApplying] = useState(false);
   const [pollingUuid, setPollingUuid] = useState<string | null>(null);
@@ -165,9 +164,9 @@ export function AttendanceAdjustmentModal({
           if (terminal.has(result.status)) {
             setPollingUuid(null);
             if (result.status === "applied") {
-              setSuccess("Updated on device and in attendance logs.");
+              setSuccess("Saved.");
             } else {
-              setError(result.error_message || "Device correction failed. Database was not changed.");
+              setError(result.error_message || "Could not finish. Records were not changed.");
             }
             void loadPreview();
             onApplied();
@@ -200,14 +199,14 @@ export function AttendanceAdjustmentModal({
       });
       if (result.status === "device_pending") {
         if (!result.device_command_uuid) {
-          setError("Device correction queued but no command id returned.");
+          setError("Save queued but no command id returned.");
           return;
         }
         setPollingUuid(result.device_command_uuid);
-        setSuccess("Device correction queued. Waiting for verified device write…");
+        setSuccess("Save in progress.");
         return;
       }
-      setSuccess("Updated on device and in attendance logs.");
+      setSuccess("Saved.");
       onApplied();
       await loadPreview();
     } catch (e: unknown) {
@@ -225,7 +224,7 @@ export function AttendanceAdjustmentModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Edit attendance — {date ? fmtDisplayDate(date) : ""}</DialogTitle>
+          <DialogTitle>Update times — {date ? fmtDisplayDate(date) : ""}</DialogTitle>
           <DialogDescription>
             Set check-in and check-out to the exact second. Times apply to this calendar day only.
           </DialogDescription>
@@ -242,13 +241,6 @@ export function AttendanceAdjustmentModal({
                     In: {fmtDisplayDateTime(preview.current_check_in)} · Out: {fmtDisplayDateTime(preview.current_check_out)} ·
                     Punches: {preview.punch_count}
                   </p>
-                  {capabilities ? (
-                    <p className="mt-2 text-xs text-ink-subtle">
-                      Device tier {capabilities.tier}
-                      {capabilities.supports_write ? " (attlog write supported)" : " (DB-only correction on this firmware)"}
-                      {capabilities.strict_device_authority ? " · strict device authority enabled" : ""}
-                    </p>
-                  ) : null}
                   <p className="mt-3 font-medium text-ink">After update</p>
                   <p className="mt-1 text-ink-muted">
                     In: {previewCheckIn} · Out: {previewCheckOut}
@@ -269,7 +261,7 @@ export function AttendanceAdjustmentModal({
           {error ? <p className="text-sm text-status-absent">{error}</p> : null}
           {success ? <p className="text-sm text-status-present">{success}</p> : null}
           {pollingUuid ? (
-            <p className="text-xs text-ink-muted">Processing device correction…</p>
+            <p className="text-xs text-ink-muted">Working…</p>
           ) : null}
         </DialogBody>
         <DialogFooter>
@@ -303,10 +295,10 @@ export function AttendanceRowEditButton({ onClick }: RowEditButtonProps) {
         e.stopPropagation();
         onClick();
       }}
-      aria-label="Edit attendance"
+      aria-label="Update times"
     >
       <Pencil className="h-3.5 w-3.5" />
-      Edit
+      Update
     </Button>
   );
 }

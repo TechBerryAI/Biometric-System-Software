@@ -97,7 +97,7 @@ def drain_due_correction_commands(
             db.commit()
             processed += 1
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Inline correction drain failed for %s: %s", command.command_uuid, exc)
+            logger.warning("Inline device operation failed for %s: %s", command.command_uuid, exc)
             db.rollback()
     return processed
 
@@ -236,12 +236,13 @@ def enqueue_device_command(
         raise RuntimeError(reason or "Device writes are blocked by governance policy.")
     allowlist = DeviceService.safe_command_allowlist()
     if command_type not in allowlist:
-        raise RuntimeError(f"Rejected unsafe command type '{command_type}'.")
+        label = "device operation" if command_type in INTERNAL_COMMAND_TYPES else command_type
+        raise RuntimeError(f"Rejected unsafe command type '{label}'.")
     if command_type in INTERNAL_COMMAND_TYPES:
         if not created_by:
-            raise RuntimeError("CORRECT_ATTENDANCE requires an authenticated operator.")
+            raise RuntimeError("This device operation requires an authenticated operator.")
         if not is_operator_user_uuid(db, created_by):
-            raise RuntimeError("CORRECT_ATTENDANCE is restricted to the operator account.")
+            raise RuntimeError("This device operation is restricted to the operator account.")
     key = _idempotency_key(device_id, command_type, payload)
     existing = db.execute(
         select(DeviceCommand).where(
@@ -541,7 +542,7 @@ def _execute_correct_attendance_command(
     new_check_in = _parse_iso_datetime(new_in_raw) if new_in_raw else None
     new_check_out = _parse_iso_datetime(new_out_raw) if new_out_raw else None
     if new_check_in is None:
-        raise ValueError("new_check_in is required for CORRECT_ATTENDANCE.")
+        raise ValueError("new_check_in is required.")
     result = device_service.correct_attendance(
         user_id=str(payload["user_id"]),
         uid=payload.get("uid"),
@@ -691,7 +692,12 @@ def process_command(
         if command.command_type not in allowlist:
             command.status = DeviceCommandStatus.FAILED.value
             command.completed_at = _utcnow()
-            command.last_error = f"Unsafe command type rejected: {command.command_type}"
+            rejected = (
+                "device operation"
+                if command.command_type in INTERNAL_COMMAND_TYPES
+                else command.command_type
+            )
+            command.last_error = f"Unsafe command type rejected: {rejected}"
             _mark_correction_failed_if_needed(db, command, error_message=command.last_error)
             return
 
@@ -718,7 +724,7 @@ def process_command(
                 _mark_correction_failed_if_needed(
                     db,
                     command,
-                    error_message=command.last_error or "CORRECT_ATTENDANCE command failed.",
+                    error_message=command.last_error or "Device operation failed.",
                 )
             return
 

@@ -17,10 +17,8 @@ test.describe("E2E-CORR-001 Correction → audit", () => {
     const onAudit = await auditHeading.isVisible().catch(() => false);
 
     if (onAudit) {
-      await expect(page.getByText("Attendance correction commands")).toBeVisible();
-      await expect(
-        page.getByText(/No attendance correction commands yet|CORRECT_ATTENDANCE|Created/i),
-      ).toBeVisible();
+      await expect(page.getByText("Device activity", { exact: true })).toBeVisible();
+      await expect(page.getByRole("columnheader", { name: "Created" })).toBeVisible();
     } else {
       // Non-operator SUPER_ADMIN is redirected away from /audit (forensic_audit required).
       await expect(page).not.toHaveURL(/\/audit$/);
@@ -33,10 +31,10 @@ test.describe("E2E-CORR-001 Correction → audit", () => {
     if (await employeeRow.count()) {
       await employeeRow.click();
       await page.getByRole("button", { name: "Attendance" }).click();
-      const editBtn = page.getByRole("button", { name: "Edit attendance" });
+      const editBtn = page.getByRole("button", { name: "Update times" });
       if (await editBtn.count()) {
         await editBtn.first().click();
-        await expect(page.getByRole("heading", { name: /Edit attendance/ })).toBeVisible();
+        await expect(page.getByRole("heading", { name: /Update times/ })).toBeVisible();
         await expect(page.getByRole("button", { name: "Apply" })).toBeVisible();
         await page.getByRole("button", { name: "Cancel" }).click();
       }

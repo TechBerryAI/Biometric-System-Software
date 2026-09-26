@@ -31,7 +31,7 @@ def execute_device_sync(db: Session, *, settings: Settings, full_resync: bool = 
     device_service = DeviceService(settings=settings, connection=connection)
     if not wait_for_correction_commands_clear(db, registered.name, settings=settings):
         raise DeviceLockContentionError(
-            f"Device '{registered.name}' is applying an attendance correction. "
+            f"Device '{registered.name}' is busy. "
             "Wait a few seconds and retry sync."
         )
     lock_wait = max(int(settings.zk_device_timeout_seconds), 180)

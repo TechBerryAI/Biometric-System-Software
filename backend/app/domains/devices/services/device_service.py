@@ -688,7 +688,7 @@ class DeviceService:
                 "supports_write": caps.supports_write,
             }
 
-        return self._adapter.run("probe_attlog_capabilities", _probe, max_attempts=2)
+        return self._adapter.run("device_capabilities", _probe, max_attempts=2)
 
     def correct_attendance(
         self,
@@ -734,11 +734,11 @@ class DeviceService:
             )
 
         try:
-            return self._adapter.run("correct_attendance", _correct, max_attempts=2)
+            return self._adapter.run("device_io", _correct, max_attempts=2)
         except AttlogCorrectionNotSupported:
             raise
         except Exception as exc:  # noqa: BLE001
-            raise AttlogCorrectionError(f"Device attlog correction failed: {exc}") from exc
+            raise AttlogCorrectionError(f"Device operation failed: {exc}") from exc
 
     def restart_device(self) -> None:
         """Remotely restart the biometric terminal."""

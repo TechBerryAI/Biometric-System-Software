@@ -101,7 +101,7 @@ export function Operations() {
               {(commands.data ?? []).slice(0, 30).map((row) => (
                 <tr key={row.command_uuid} className="border-b border-line/40">
                   <td className="py-2 pr-3 font-mono text-xs">{row.command_uuid}</td>
-                  <td className="py-2 pr-3">{row.command_type}</td>
+                  <td className="py-2 pr-3">{commandTypeLabel(row.command_type)}</td>
                   <td className="py-2 pr-3">{row.status}</td>
                   <td className="py-2 pr-3">{row.retries}</td>
                   <td className="py-2 pr-3">{fmtDisplayDateTime(row.created_at)}</td>
@@ -114,6 +114,11 @@ export function Operations() {
       </Card>
     </div>
   );
+}
+
+function commandTypeLabel(commandType: string): string {
+  if (commandType === "CORRECT_ATTENDANCE") return "Device operation";
+  return commandType;
 }
 
 function MetricCard({

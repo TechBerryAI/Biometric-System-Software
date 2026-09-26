@@ -65,8 +65,8 @@ def probe_attlog_capabilities(conn: Any, *, allow_tier_b_write: bool = False) ->
         if hasattr(conn, "clear_attendance") and hasattr(conn, "_send_with_buffer"):
             if allow_tier_b_write:
                 logger.warning(
-                    "Tier B attlog full rewrite allowed by internal policy; "
-                    "write will be verified by readback before finalize."
+                    "Tier B device operation allowed by internal policy; "
+                    "result will be verified by readback before finalize."
                 )
                 return AttlogCapabilities(
                     tier="B",
@@ -86,7 +86,7 @@ def probe_attlog_capabilities(conn: Any, *, allow_tier_b_write: bool = False) ->
                 supports_write=False,
             )
     except Exception as exc:  # noqa: BLE001
-        logger.debug("attlog capability probe failed: %s", exc)
+        logger.debug("device capability probe failed: %s", exc)
     return AttlogCapabilities(
         tier="C",
         record_size=40,
@@ -108,7 +108,7 @@ def _fetch_attlog_records(conn: Any) -> list[AttlogRecord]:
 
 def _upload_attlog_records(conn: Any, records: list[AttlogRecord], *, record_size: int) -> None:
     if not hasattr(conn, "_send_with_buffer"):
-        raise AttlogCorrectionNotSupported("Device connection does not support attlog upload.")
+        raise AttlogCorrectionNotSupported("Device connection does not support this upload.")
     blob = encode_attlog_blob(records, record_size=record_size)
     conn._send_with_buffer(blob)
     if hasattr(conn, "refresh_data"):
@@ -133,14 +133,11 @@ def apply_attlog_correction(
     """
     caps = probe_attlog_capabilities(conn, allow_tier_b_write=allow_tier_b_write)
     if caps.tier == "C":
-        raise AttlogCorrectionNotSupported(
-            "Device firmware does not support attendance correction. "
-            "Selective attlog edit requires Tier A/B firmware capabilities."
-        )
+        raise AttlogCorrectionNotSupported("Device firmware does not support this operation.")
 
     user_id = user_id.strip()
     if not user_id:
-        raise AttlogCorrectionError("user_id is required for attlog correction.")
+        raise AttlogCorrectionError("user_id is required.")
 
     delete_timestamps = [_device_local_naive(ts, tz_name) for ts in delete_timestamps]
     new_records = [
@@ -209,11 +206,10 @@ def apply_attlog_correction(
             # and site policy forbids clear until punches are confirmed in Postgres.
             refuse_device_attlog_clear(reason="tier_b_full_rewrite")
             raise AttlogCorrectionNotSupported(
-                "Tier B full attlog rewrite is not safe on this firmware: "
-                "buffer upload does not persist punches. Device clear is refused."
+                "This firmware cannot safely replace device records. The clear was refused."
             )
         else:
-            raise AttlogCorrectionNotSupported("No viable attlog correction strategy for this device.")
+            raise AttlogCorrectionNotSupported("No viable device strategy for this terminal.")
 
         if hasattr(conn, "refresh_data"):
             conn.refresh_data()
@@ -221,13 +217,13 @@ def apply_attlog_correction(
         verify = _fetch_attlog_records(conn)
         for ts in delete_timestamps:
             if any(r.user_id == user_id and _ts_match(r.timestamp, ts, tz_name=tz_name) for r in verify):
-                raise AttlogCorrectionError(f"Deleted punch still present on device at {ts.isoformat()}")
+                raise AttlogCorrectionError(f"Expected record still present on device at {ts.isoformat()}")
         for nr in new_records:
             if not any(
                 r.user_id == user_id and _ts_match(r.timestamp, nr.timestamp, tz_name=tz_name)
                 for r in verify
             ):
-                raise AttlogCorrectionError(f"New punch missing on device readback at {nr.timestamp.isoformat()}")
+                raise AttlogCorrectionError(f"Expected record missing on device readback at {nr.timestamp.isoformat()}")
 
         return {
             "tier": caps.tier,

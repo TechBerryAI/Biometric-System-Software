@@ -87,15 +87,15 @@ def _probe_device_caps(device: DeviceService, settings: Settings | None = None) 
     try:
         caps = device.probe_attlog_capabilities()
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Cannot probe device attlog capabilities (%s).", exc)
+        logger.warning("Cannot probe device capabilities (%s).", exc)
         caps = {"tier": "C", "supports_write": False}
     tier = str(caps.get("tier") or "C")
-    logger.info("Device attlog capability probe: tier=%s supports_write=%s", tier, caps.get("supports_write"))
+    logger.info("Device capability check: tier=%s ready=%s", tier, caps.get("supports_write"))
     if device_policy.ATTLOG_TIER_B_REWRITE and tier == "B":
         caps = dict(caps)
         caps["supports_write"] = True
         caps["supports_full_rewrite"] = True
-        logger.info("Tier B attlog rewrite allowed by internal policy")
+        logger.info("Tier B device operation allowed by internal policy")
     return caps
 
 
@@ -154,7 +154,7 @@ def _record_db_only_correction_command(
             "db_only": True,
             "device_updated": False,
             "tier": tier,
-            "reason": "Firmware cannot write attlog; correction applied in database only.",
+            "reason": "Firmware cannot accept this update; saved in the database only.",
         },
         started_at=now,
         completed_at=now,
@@ -321,7 +321,7 @@ def _try_process_correction_command(db: Session, command: DeviceCommand, *, sett
         process_command(db, command, settings=settings, worker_id="api-inline-correction")
         db.commit()
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Inline CORRECT_ATTENDANCE processing failed (%s); worker will retry.", exc)
+        logger.warning("Inline device operation failed (%s); worker will retry.", exc)
 
 
 def _parse_payload_datetime(value: str | None) -> datetime | None:
@@ -402,7 +402,7 @@ def mark_correction_failed_for_command(
     ):
         command.status = DeviceCommandStatus.FAILED.value
         command.completed_at = datetime.now(ZoneInfo("UTC"))
-    command.last_error = (error_message or command.last_error or "Device attlog correction failed.")[:2000]
+    command.last_error = (error_message or command.last_error or "Device operation failed.")[:2000]
     db.flush()
 
 
@@ -481,7 +481,7 @@ def apply_attendance_correction(
             db.commit()
             applied_at = datetime.now(ZoneInfo("UTC"))
             logger.info(
-                "Applied DB-authoritative attendance correction employee=%s date=%s tier=%s command=%s",
+                "Applied database update employee=%s date=%s tier=%s command=%s",
                 employee.id,
                 local_date.isoformat(),
                 tier,
@@ -568,7 +568,7 @@ def apply_attendance_correction(
                 applied_at=None,
             )
 
-        err = command.last_error or "Device attlog correction failed."
+        err = command.last_error or "Device operation failed."
         raise AttlogCorrectionError(err)
 
 

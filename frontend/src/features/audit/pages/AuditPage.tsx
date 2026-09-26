@@ -15,15 +15,14 @@ export function Audit() {
       <header>
         <h1 className="font-display text-display-xl text-ink">Audit</h1>
         <p className="mt-2 max-w-2xl text-sm text-ink-muted leading-relaxed">
-          Recent device attendance corrections. Corrections rewrite the terminal attlog and
-          replace the day&apos;s attendance logs — no separate correction history is kept.
+          Recent device activity.
         </p>
       </header>
 
       <Card className="overflow-hidden">
         <CardHeader className="pb-3">
-          <CardTitle>Attendance correction commands</CardTitle>
-          <CardDescription>Device queue history for CORRECT_ATTENDANCE.</CardDescription>
+          <CardTitle>Device activity</CardTitle>
+          <CardDescription>Recent terminal activity.</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto px-0 pb-0">
           <table className="w-full text-sm">
@@ -39,7 +38,7 @@ export function Audit() {
               {correctionCommands.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-6 py-8 text-ink-muted">
-                    No attendance correction commands yet.
+                    No device activity yet.
                   </td>
                 </tr>
               ) : (

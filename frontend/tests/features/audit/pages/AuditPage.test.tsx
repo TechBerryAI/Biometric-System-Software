@@ -8,7 +8,7 @@ describe("FE-UNIT-AUD-001 Audit page", () => {
     renderWithProviders(<Audit />, { withAuth: false, route: "/audit" });
     expect(screen.getByRole("heading", { name: /^audit$/i })).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByText(/no attendance correction commands yet/i)).toBeInTheDocument();
+      expect(screen.getByText(/no device activity yet/i)).toBeInTheDocument();
     });
   });
 });

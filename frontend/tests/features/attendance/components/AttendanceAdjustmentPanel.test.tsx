@@ -35,7 +35,7 @@ describe("FE-UNIT-ADJ-001 AttendanceAdjustmentPanel", () => {
       <AttendanceRowEditButton onClick={() => undefined} />,
       { withAuth: false },
     );
-    expect(screen.getByRole("button", { name: /edit attendance/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /update times/i })).toBeInTheDocument();
     unmount();
 
     renderWithProviders(
@@ -56,7 +56,7 @@ describe("FE-UNIT-ADJ-001 AttendanceAdjustmentPanel", () => {
       { withAuth: false },
     );
 
-    expect(await screen.findByRole("heading", { name: /edit attendance/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /update times/i })).toBeInTheDocument();
   });
 
   it("returns null modal when capability missing", () => {
