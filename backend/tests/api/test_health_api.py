@@ -99,3 +99,21 @@ def test_health_reconciliation(client: TestClient, admin_headers: dict[str, str]
 def test_health_redis_unauthorized(client: TestClient) -> None:
     response = client.get("/health/redis")
     assert response.status_code in {401, 403}
+
+
+@pytest.mark.testid("BE-API-HLTH-010")
+def test_database_outage_returns_retryable_503(client: TestClient, admin_headers: dict[str, str]) -> None:
+    from sqlalchemy.exc import OperationalError
+
+    from app.core.database import get_db
+    from app.main import app
+
+    def _db_down():  # type: ignore[no-untyped-def]
+        raise OperationalError("SELECT 1", {}, Exception("server closed the connection unexpectedly"))
+        yield  # pragma: no cover
+
+    app.dependency_overrides[get_db] = _db_down
+    response = client.get("/health/db", headers=admin_headers)
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+    assert "temporarily unavailable" in response.json()["detail"]

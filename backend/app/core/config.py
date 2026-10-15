@@ -173,6 +173,25 @@ class Settings(BaseSettings):
     db_pool_size: int = Field(default=10, ge=1, le=100, alias="DB_POOL_SIZE")
     db_max_overflow: int = Field(default=20, ge=0, le=200, alias="DB_MAX_OVERFLOW")
     db_pool_recycle_seconds: int = Field(default=1800, ge=60, le=7200, alias="DB_POOL_RECYCLE_SECONDS")
+    db_pool_timeout_seconds: int = Field(
+        default=15,
+        ge=1,
+        le=120,
+        alias="DB_POOL_TIMEOUT_SECONDS",
+        description="Max wait for a free pooled connection before the request fails.",
+    )
+    db_connect_timeout_seconds: int = Field(
+        default=10,
+        ge=2,
+        le=120,
+        alias="DB_CONNECT_TIMEOUT_SECONDS",
+        description="TCP + handshake timeout for new PostgreSQL connections (libpq connect_timeout).",
+    )
+    db_application_name: str = Field(
+        default="biometrica",
+        alias="DB_APPLICATION_NAME",
+        description="Shown in pg_stat_activity so connections can be traced to api / worker / beat.",
+    )
     attendance_archive_retention_days: int = Field(
         default=365,
         ge=30,
@@ -200,7 +219,8 @@ class Settings(BaseSettings):
     login_attempt_window_seconds: int = Field(default=900, ge=60, le=86400, alias="LOGIN_ATTEMPT_WINDOW_SECONDS")
     login_attempt_max: int = Field(default=5, ge=3, le=50, alias="LOGIN_ATTEMPT_MAX")
     api_rate_limit_window_seconds: int = Field(default=60, ge=10, le=3600, alias="API_RATE_LIMIT_WINDOW_SECONDS")
-    api_rate_limit_max: int = Field(default=120, ge=10, le=10000, alias="API_RATE_LIMIT_MAX")
+    # Per client IP. A single dashboard load fires ~15 requests, so keep generous headroom.
+    api_rate_limit_max: int = Field(default=600, ge=10, le=10000, alias="API_RATE_LIMIT_MAX")
 
     command_queue_batch_size: int = Field(default=25, ge=1, le=250, alias="COMMAND_QUEUE_BATCH_SIZE")
     command_max_retries: int = Field(default=10, ge=1, le=20, alias="COMMAND_MAX_RETRIES")

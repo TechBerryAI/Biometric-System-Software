@@ -2,8 +2,8 @@
 #
 #   make help
 #   make install
-#   make start          # local: API + Celery + Vite (Ctrl+C stops all)
-#   make start-vm       # VM LAN runner
+#   make start          # local dev: API (--reload) + Celery + Vite (Ctrl+C stops all)
+#   make start-vm       # VM production runner (built frontend, supervised services)
 #   make test
 #   make test-e2e
 #   make clean
@@ -35,7 +35,7 @@ help:
 	@echo ""
 	@echo "  make install     Backend venv + npm workspaces + Playwright Chromium"
 	@echo "  make start       Start API, Celery, and Vite locally (Ctrl+C stops all)"
-	@echo "  make start-vm    Start stack for VM / LAN (npm run start:vm)"
+	@echo "  make start-vm    Start the production stack for VM / LAN (npm run start:vm)"
 	@echo "  make test        Backend pytest + frontend Vitest + traceability matrix"
 	@echo "  make test-e2e    Playwright E2E (app must be up at $(E2E_BASE_URL))"
 	@echo "  make sync-full   Full device attendance pull (uses backend/.env)"
@@ -54,6 +54,7 @@ start: $(PYTHON)
 	cd "$(BACKEND)" && "$(PYTHON)" -m alembic upgrade head
 	@echo "[make] Starting local stack (API :8000, UI :5173)..."
 	cd "$(ROOT)" && \
+		START_MODE=dev \
 		VM_HOST=127.0.0.1 \
 		OPEN_BROWSER=1 \
 		API_BIND_HOST=0.0.0.0 \
@@ -83,6 +84,7 @@ clean:
 	rm -rf "$(FRONTEND)/coverage" "$(FRONTEND)/dist"
 	rm -rf "$(ROOT)playwright-report" "$(ROOT)test-results" "$(ROOT)e2e/playwright-report" "$(ROOT)e2e/test-results"
 	rm -f "$(BACKEND)/celerybeat-schedule" "$(BACKEND)/celerybeat-schedule.db"
+	rm -rf "$(ROOT).run" "$(FRONTEND)/dist.next" "$(FRONTEND)/dist.prev"
 	find "$(BACKEND)" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 
 $(PYTHON) $(PYTEST):

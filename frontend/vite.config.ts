@@ -21,6 +21,17 @@ function longRunningApiTimeouts(): Plugin {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const devProxyTarget = env.VITE_DEV_PROXY_TARGET || "http://localhost:8000";
+  const apiProxy = {
+    "/api": {
+      target: devProxyTarget,
+      changeOrigin: true,
+      // Pass the browser's IP through so per-client rate limits do not lump every user together.
+      xfwd: true,
+      timeout: PROXY_TIMEOUT_MS,
+      proxyTimeout: PROXY_TIMEOUT_MS,
+      rewrite: (incomingPath: string) => incomingPath.replace(/^\/api/, ""),
+    },
+  };
 
   return {
     plugins: [react(), longRunningApiTimeouts()],
@@ -32,13 +43,28 @@ export default defineConfig(({ mode }) => {
     server: {
       host: "0.0.0.0",
       port: 5173,
-      proxy: {
-        "/api": {
-          target: devProxyTarget,
-          changeOrigin: true,
-          timeout: PROXY_TIMEOUT_MS,
-          proxyTimeout: PROXY_TIMEOUT_MS,
-          rewrite: (incomingPath) => incomingPath.replace(/^\/api/, ""),
+      proxy: apiProxy,
+    },
+    preview: {
+      host: "0.0.0.0",
+      port: 5173,
+      proxy: apiProxy,
+    },
+    build: {
+      target: "es2020",
+      // Skipping gzip-size reporting shaves time off builds on the VM.
+      reportCompressedSize: false,
+      // Export libraries (exceljs, jspdf, docx) are lazy chunks that are large by nature.
+      chunkSizeWarningLimit: 1500,
+      rollupOptions: {
+        output: {
+          // React core changes rarely; a separate chunk stays cached across app releases.
+          manualChunks(id: string) {
+            if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom|@remix-run)[\\/]/.test(id)) {
+              return "react-vendor";
+            }
+            return undefined;
+          },
         },
       },
     },

@@ -11,6 +11,7 @@ import redis
 from app.ai.utils.metrics import incr
 from app.ai.utils.telemetry import log_ai_event
 from app.core.config import Settings
+from app.core.redis_client import redis_client_options
 from app.core.redis_keys import with_namespace
 
 log = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ class AIResponseCache:
         self._namespace = settings.redis_namespace
         self._client: redis.Redis[str] | None = None
         try:
-            self._client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+            self._client = redis.Redis.from_url(settings.redis_url, decode_responses=True, **redis_client_options())
             self._client.ping()
             log_ai_event(log, "cache_ready", backend="redis")
         except Exception as exc:  # noqa: BLE001

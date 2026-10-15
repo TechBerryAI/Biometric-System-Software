@@ -9,24 +9,29 @@ from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from redis import Redis
 from redis.exceptions import RedisError
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
 from app.core.config import Settings, get_settings
+from app.core.redis_client import redis_client_options
 from app.core.redis_keys import with_namespace
 
 RateLimitHandler = Callable[[Request], Awaitable[Response]]
+
+# After a Redis error, skip limiting for a while instead of paying a timeout on every request.
+_REDIS_ERROR_BACKOFF_SECONDS = 15.0
 
 
 class RateLimiter:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
         self._redis: Redis | None = None
+        self._skip_until = 0.0
         try:
             self._redis = Redis.from_url(
                 str(self._settings.redis_url),
-                socket_timeout=1,
-                socket_connect_timeout=1,
                 decode_responses=True,
+                **redis_client_options(connect_timeout=1, socket_timeout=1),
             )
         except Exception:  # noqa: BLE001
             self._redis = None
@@ -35,7 +40,7 @@ class RateLimiter:
         return with_namespace(self._settings.redis_namespace, f"rate:api:{client_id}")
 
     def is_allowed(self, client_id: str) -> tuple[bool, int]:
-        if self._redis is None:
+        if self._redis is None or time.monotonic() < self._skip_until:
             return True, 0
 
         limit = self._settings.api_rate_limit_max
@@ -55,7 +60,28 @@ class RateLimiter:
                 return False, window
             return True, 0
         except (RedisError, OSError, TimeoutError):
+            self._skip_until = time.monotonic() + _REDIS_ERROR_BACKOFF_SECONDS
             return True, 0
+
+
+_limiter: RateLimiter | None = None
+
+
+def get_rate_limiter() -> RateLimiter:
+    """Process-wide limiter so every request reuses one Redis connection pool.
+
+    Rebuilt only if the cached settings object is replaced (tests that clear get_settings).
+    """
+    global _limiter
+    settings = get_settings()
+    if _limiter is None or _limiter._settings is not settings:  # noqa: SLF001
+        _limiter = RateLimiter(settings)
+    return _limiter
+
+
+def reset_rate_limiter() -> None:
+    global _limiter
+    _limiter = None
 
 
 def rate_limit_client_id(request: Request) -> str:
@@ -75,8 +101,8 @@ async def rate_limit_middleware(request: Request, call_next: RateLimitHandler) -
     if request.method == "OPTIONS" or _is_exempt(request.url.path):
         return await call_next(request)
 
-    limiter = RateLimiter()
-    allowed, retry_after = limiter.is_allowed(rate_limit_client_id(request))
+    # Redis I/O is blocking; keep it off the event loop so one slow call cannot stall every request.
+    allowed, retry_after = await run_in_threadpool(get_rate_limiter().is_allowed, rate_limit_client_id(request))
     if not allowed:
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,

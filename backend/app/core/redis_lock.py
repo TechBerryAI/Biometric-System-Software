@@ -12,9 +12,13 @@ from typing import Iterator
 import redis
 
 from app.core.config import Settings, get_settings
+from app.core.redis_client import redis_client_options
 from app.core.redis_keys import with_namespace
 
 logger = logging.getLogger(__name__)
+
+# How long to wait before retrying Redis after every node was unreachable.
+_RECONNECT_INTERVAL_SECONDS = 30.0
 
 # Release only if we still own the lock (Lua compare-and-del).
 _RELEASE_SCRIPT = """
@@ -43,8 +47,23 @@ class Redlock:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
+        self._connect()
+
+    def _connect(self) -> None:
+        self._last_connect_attempt = time.monotonic()
         self._clients = self._build_clients()
         self._quorum = max(1, (len(self._clients) // 2) + 1)
+
+    def available(self) -> bool:
+        """True when at least one Redis node is usable.
+
+        A Redis blip at process start used to disable locking for the life of the
+        process; retry periodically so locks come back once Redis does.
+        """
+        last_attempt = getattr(self, "_last_connect_attempt", 0.0)
+        if not self._clients and time.monotonic() - last_attempt >= _RECONNECT_INTERVAL_SECONDS:
+            self._connect()
+        return bool(self._clients)
 
     def _build_clients(self) -> list[redis.Redis]:
         urls = [str(self._settings.redis_url)]
@@ -54,7 +73,7 @@ class Redlock:
         clients: list[redis.Redis] = []
         for url in urls:
             try:
-                client = redis.Redis.from_url(url, decode_responses=True)
+                client = redis.Redis.from_url(url, decode_responses=True, **redis_client_options())
                 client.ping()
                 clients.append(client)
             except Exception as exc:  # noqa: BLE001

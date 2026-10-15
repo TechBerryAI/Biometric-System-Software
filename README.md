@@ -70,14 +70,16 @@ or:
 npm run start:vm
 ```
 
-`start-vm.js` will:
+`start-vm.js` (production mode; it does not install dependencies) will:
 
-- create backend virtual environment if missing
-- install backend and frontend dependencies
+- wait for PostgreSQL and Redis, explaining any connection failure (`backend/scripts/check_services.py`)
 - run Alembic migrations
-- start FastAPI API server
-- start frontend Vite server
-- start Celery worker + beat when configured
+- build the frontend when its sources changed, and serve it with compression and caching
+- start the FastAPI API (multiple uvicorn workers), Celery worker + beat, and the web server
+- restart any service that crashes, and clean up processes left by an earlier run
+
+To keep it running after you log out and start it on boot, install it as a service:
+see [deployment](docs/operations/deployment.md#run-as-a-service-systemd).
 
 Default URLs:
 
@@ -86,7 +88,7 @@ Default URLs:
 
 ## Enable Celery Worker + Beat
 
-On the VM, Celery is started by `npm run start:vm` when Redis is available. Locally, use separate terminals (see Manual Setup below).
+Both `make start` (local) and `npm run start:vm` (VM) start Celery worker + beat unless `START_CELERY=0` or `DEVICE_AUTO_SYNC_ENABLED=false`. To run them by hand, use separate terminals (see Manual Setup below).
 
 ## Manual Setup (Backend + Frontend)
 

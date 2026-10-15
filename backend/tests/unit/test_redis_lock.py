@@ -51,3 +51,22 @@ def test_redlock_context_manager() -> None:
     with lock.lock("job", blocking_timeout=0) as handle:
         assert isinstance(handle, LockHandle)
     reset_redlock()
+
+
+@pytest.mark.testid("BE-UNIT-REDLOCK-004")
+def test_redlock_reconnects_after_redis_was_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    lock = Redlock.__new__(Redlock)
+    lock._settings = MagicMock(redis_namespace="biometric")
+    lock._clients = []
+    lock._quorum = 1
+    fake = MagicMock()
+    monkeypatch.setattr(Redlock, "_build_clients", lambda self: [fake])
+
+    lock._last_connect_attempt = time.monotonic()
+    assert lock.available() is False  # still inside the retry interval
+
+    lock._last_connect_attempt = time.monotonic() - 60
+    assert lock.available() is True
+    assert lock._clients == [fake]
