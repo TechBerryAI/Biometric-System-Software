@@ -47,20 +47,53 @@ make start
 ## VM Start
 
 ```bash
-make start-vm
+cd /opt/biometrica/Biometric-System-Software
+node start-vm.js            # or: make start-vm / npm run start:vm
 ```
 
-1. Deploy DB migrations (`alembic upgrade head`)
-2. Deploy backend API
-3. Deploy Celery worker and beat
-4. Deploy frontend with correct `VITE_API_URL`
-5. Validate:
-   - `/health`
-   - `/health/db`
-   - `/health/redis`
-   - `/health/devices`
-   - `/health/queue`
-   - `/ops/metrics`
+`scripts/start-vm.js` runs the stack in production mode:
+
+1. Refuses to start twice, and stops processes left over from an earlier run that was killed.
+2. Waits for PostgreSQL and Redis (`SERVICE_WAIT_SECONDS`, default 180) and explains failures
+   (`backend/scripts/check_services.py`; run it by hand any time with `backend/.venv/bin/python scripts/check_services.py` from `backend/`).
+3. Applies migrations (`alembic upgrade head`, retried briefly if the database is restarting).
+4. Rebuilds `frontend/dist` only when frontend sources changed (`FRONTEND_BUILD=always|never` overrides).
+5. Starts and supervises (restart with backoff on crash):
+   - API: uvicorn with `API_WORKERS` (default 2) workers, no auto-reload
+   - Celery worker (`CELERY_CONCURRENCY`, default 4) and beat (state in `.run/`, reset on start)
+   - Web: `scripts/serve-frontend.js` on `FRONTEND_PORT` (default 5173) — compressed, cached static files and the `/api` proxy
+
+Users keep opening `http://192.168.1.60:5173`. Ctrl+C (or SIGTERM) stops everything.
+`START_MODE=dev` gives the old development behaviour (uvicorn `--reload` + Vite dev server); `make start` uses it.
+
+Validate after a deploy:
+
+- `/api/health` through the web port
+- `/health/db`, `/health/redis`, `/health/devices`, `/health/queue`, `/ops/metrics`
+
+### Run as a service (systemd)
+
+Running `node start-vm.js` in an SSH session stops when the session ends. Install the unit instead:
+
+```bash
+command -v node             # adjust ExecStart / PATH in the unit if this is not /usr/bin/node
+sudo cp deploy/systemd/biometrica.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now biometrica
+journalctl -u biometrica -f # live logs
+```
+
+After `git pull`: `sudo systemctl restart biometrica` (the frontend rebuilds automatically).
+
+### Startup failures
+
+| Message | Meaning / fix |
+| --- | --- |
+| `server closed the connection during the handshake` | The DB port answers but PostgreSQL hangs up. On the DB host check `systemctl status postgresql*`, `journalctl -u postgresql*`, `ss -ltnp \| grep :<port>` (is it PostgreSQL or a proxy/port-forward?) and disk space. |
+| `handshake only works without TLS` | Add `DB_SSLMODE=disable` to `backend/.env`. |
+| `connection refused` / `no answer` | PostgreSQL/Redis not running, not listening on the LAN interface, or blocked by the firewall. |
+| `connection limit reached` | Something else holds all connections — usually stale app processes on another machine. |
+| `Biometrica is already running` | Another runner is active (terminal or systemd). Stop that one first. |
 
 ## VM/LAN CORS Notes
 
@@ -71,7 +104,9 @@ make start-vm
 
 Use `/api` as the only frontend API base path.
 
-A ready-to-copy config lives at `deploy/nginx.conf`. **You must set `proxy_read_timeout` (and `proxy_send_timeout`) to 600s.** Nginx defaults to 60s, which is what produces `504 Gateway Time-out` on **Sync now** while the VM is still talking to the terminal.
+Optional: `start-vm.js` already serves the built frontend and proxies `/api` on port 5173. Put nginx in front only
+if you want port 80/HTTPS; proxy it to the runner's web port, or serve `frontend/dist` directly as below.
+**You must set `proxy_read_timeout` (and `proxy_send_timeout`) to 600s.** Nginx defaults to 60s, which is what produces `504 Gateway Time-out` on **Sync now** while the VM is still talking to the terminal.
 
 ```nginx
 server {

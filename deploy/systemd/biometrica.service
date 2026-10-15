@@ -1,0 +1,36 @@
+# Runs the whole Biometrica stack (API, Celery worker + beat, web server) as a service so it
+# survives SSH logouts and starts on boot. scripts/start-vm.js supervises the individual
+# processes; systemd restarts the runner itself if it ever exits (e.g. database unreachable at boot).
+#
+# Install (adjust User / paths / node location first: `command -v node`):
+#   sudo cp deploy/systemd/biometrica.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now biometrica
+# Logs:     journalctl -u biometrica -f
+# Restart:  sudo systemctl restart biometrica   (after git pull; the frontend rebuilds automatically)
+
+[Unit]
+Description=Biometrica attendance stack (API, Celery, web)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=techberryai
+WorkingDirectory=/opt/biometrica/Biometric-System-Software
+Environment=VM_HOST=192.168.1.60
+Environment=NO_COLOR=1
+# Include the directory that holds node/npm if it is not /usr/bin (e.g. nvm installs).
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/node scripts/start-vm.js
+Restart=always
+RestartSec=10
+# SIGTERM goes to the runner, which stops its services gracefully; anything left after the
+# timeout is killed by systemd.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=60
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

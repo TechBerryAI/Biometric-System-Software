@@ -49,3 +49,29 @@ def test_rate_limiter_blocks_when_over_limit(monkeypatch: pytest.MonkeyPatch) ->
     allowed, retry_after = limiter.is_allowed("127.0.0.1")
     assert allowed is False
     assert retry_after == 60
+
+
+@pytest.mark.testid("BE-UNIT-RATE-004")
+def test_rate_limiter_backs_off_after_redis_error() -> None:
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    limiter = RateLimiter()
+    fake_redis = MagicMock()
+    fake_redis.pipeline.side_effect = RedisConnectionError("down")
+    limiter._redis = fake_redis
+
+    assert limiter.is_allowed("10.0.0.5") == (True, 0)
+    # Second call inside the backoff window must not touch Redis (no per-request timeout).
+    assert limiter.is_allowed("10.0.0.5") == (True, 0)
+    assert fake_redis.pipeline.call_count == 1
+
+
+@pytest.mark.testid("BE-UNIT-RATE-005")
+def test_rate_limiter_is_shared_per_process() -> None:
+    from app.core.rate_limit import get_rate_limiter, reset_rate_limiter
+
+    reset_rate_limiter()
+    try:
+        assert get_rate_limiter() is get_rate_limiter()
+    finally:
+        reset_rate_limiter()

@@ -24,3 +24,14 @@ def test_get_read_db_yields_session() -> None:
             next(gen)
         except StopIteration:
             pass
+
+
+@pytest.mark.testid("BE-UNIT-DB-003")
+def test_postgres_connect_args_fail_fast_and_keep_alive() -> None:
+    from app.core.config import get_settings
+
+    args = dbmod.postgres_connect_args(get_settings())
+    assert args["connect_timeout"] >= 2
+    assert args["keepalives"] == 1
+    assert args["keepalives_idle"] > 0
+    assert args["application_name"]

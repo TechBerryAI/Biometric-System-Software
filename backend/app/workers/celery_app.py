@@ -33,6 +33,18 @@ celery_app = Celery(
     backend=str(settings.redis_url),
 )
 
+# Redis lives on another host: keepalives + health checks recover connections a firewall
+# silently dropped, and bounded timeouts stop a dead Redis from hanging workers.
+_REDIS_TRANSPORT_OPTIONS = {
+    "socket_keepalive": True,
+    "socket_connect_timeout": 10,
+    "socket_timeout": 30,
+    "health_check_interval": 25,
+    "retry_on_timeout": True,
+    # Longest task (manual full pull) is capped at 15 min; redeliver unacked work only after that.
+    "visibility_timeout": 3600,
+}
+
 celery_app.conf.update(
     task_default_queue="attendance_sync",
     task_serializer="json",
@@ -43,6 +55,22 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_acks_late=True,
     task_reject_on_worker_lost=True,
+    broker_connection_retry_on_startup=True,
+    broker_connection_max_retries=None,
+    broker_transport_options=_REDIS_TRANSPORT_OPTIONS,
+    redis_socket_keepalive=True,
+    redis_socket_connect_timeout=10,
+    redis_socket_timeout=30,
+    redis_retry_on_timeout=True,
+    redis_backend_health_check_interval=25,
+    result_expires=6 * 3600,
+    # A hung device socket must not pin a worker slot forever (manual sync sets its own limits).
+    task_soft_time_limit=1500,
+    task_time_limit=1800,
+    # Recycle children periodically so slow leaks (pyzk sockets, large ORM sessions) cannot build up.
+    worker_max_tasks_per_child=200,
+    worker_max_memory_per_child=512_000,
+    worker_cancel_long_running_tasks_on_connection_loss=True,
     task_routes={
         "app.workers.tasks.process_device_commands": {"queue": "device_commands"},
         "app.workers.tasks.recover_stale_commands": {"queue": "device_commands"},

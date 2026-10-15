@@ -8,6 +8,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from app.ai.router import router as insights_router
 from app.core.config import get_settings
@@ -42,15 +46,25 @@ logger = get_logger("http.request")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_telemetry(app, settings)
-    try:
-        from app.core.database import SessionLocal
-        from app.domains.devices.services.device_registry_service import ensure_default_device
+    from sqlalchemy.exc import IntegrityError
 
-        with SessionLocal() as db:
-            ensure_default_device(db, settings)
-            db.commit()
-    except Exception:  # noqa: BLE001
-        logger.warning("device_timezone_bootstrap_failed", exc_info=True)
+    from app.core.database import SessionLocal
+    from app.domains.devices.services.device_registry_service import ensure_default_device
+
+    # With several API workers, all of them seed the default device at once on a fresh database;
+    # the loser of that race just re-reads the row the winner created.
+    for attempt in range(2):
+        try:
+            with SessionLocal() as db:
+                ensure_default_device(db, settings)
+                db.commit()
+            break
+        except IntegrityError:
+            if attempt == 1:
+                logger.warning("device_timezone_bootstrap_failed", exc_info=True)
+        except Exception:  # noqa: BLE001
+            logger.warning("device_timezone_bootstrap_failed", exc_info=True)
+            break
     logger.info("app_started", service=settings.app_name, environment=settings.environment)
     try:
         yield
@@ -73,6 +87,19 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan, debug=settings.debug)
+
+
+@app.exception_handler(OperationalError)
+@app.exception_handler(PoolTimeoutError)
+async def database_unavailable_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Database down, restarting, or out of pooled connections: a retryable 503, not an opaque 500."""
+    reason = str(getattr(exc, "orig", None) or exc).strip().splitlines()
+    logger.warning("database_unavailable", path=request.url.path, error=reason[0] if reason else type(exc).__name__)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "The database is temporarily unavailable. Please retry in a few seconds."},
+        headers={"Retry-After": "5"},
+    )
 
 
 @app.middleware("http")
@@ -121,6 +148,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Attendance and report payloads run to hundreds of KB of JSON; compress them for slow LAN/Wi-Fi clients.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 app.include_router(employee_router)
 app.include_router(attendance_router)

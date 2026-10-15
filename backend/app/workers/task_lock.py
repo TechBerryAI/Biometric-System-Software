@@ -25,7 +25,7 @@ def task_singleton(name: str, *, ttl_ms: int) -> Iterator[bool]:
     """
     settings = get_settings()
     redlock = get_redlock(settings)
-    if not redlock._clients:  # noqa: SLF001 — empty client list means Redis unavailable
+    if not redlock.available():
         logger.warning("Celery task singleton unavailable name=%s; running without lock", name)
         yield True
         return

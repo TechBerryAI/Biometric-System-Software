@@ -9,6 +9,7 @@ from typing import Any
 import redis
 
 from app.core.config import Settings, get_settings
+from app.core.redis_client import redis_client_options
 from app.core.redis_keys import with_namespace
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,9 @@ class RedisCache:
         self._namespace = self._settings.redis_namespace
         self._client: redis.Redis | None = None
         try:
-            self._client = redis.Redis.from_url(str(self._settings.redis_url), decode_responses=True)
+            self._client = redis.Redis.from_url(
+                str(self._settings.redis_url), decode_responses=True, **redis_client_options()
+            )
             self._client.ping()
         except Exception as exc:  # noqa: BLE001
             self._client = None
