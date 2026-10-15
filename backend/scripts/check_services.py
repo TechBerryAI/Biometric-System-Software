@@ -9,6 +9,7 @@ the whole stack, and a misconfigured one fails with an actionable message instea
 Run from backend/:
   .venv/bin/python scripts/check_services.py             # single attempt
   .venv/bin/python scripts/check_services.py --wait 180  # keep retrying transient failures
+  .venv/bin/python scripts/check_services.py --forever   # wait until they recover (start-vm default)
 Exit code 0 when every service is reachable, 1 otherwise.
 """
 
@@ -287,18 +288,28 @@ def _report_failure(name: str, result: CheckResult) -> None:
         _say(f"     {hint}")
 
 
-def main() -> int:
+_REEXPLAIN_SECONDS = 300.0
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Wait for PostgreSQL and Redis before starting the app.")
     parser.add_argument("--wait", type=float, default=0, help="Keep retrying transient failures for this many seconds.")
+    parser.add_argument(
+        "--forever",
+        action="store_true",
+        help="Keep retrying transient failures until they clear (Ctrl+C to stop). Config errors still exit.",
+    )
     parser.add_argument("--skip-redis", action="store_true", help="Only check PostgreSQL.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     settings = get_settings()
     checks: dict[str, Callable[[Settings], CheckResult]] = {"database": check_database}
     if not args.skip_redis:
         checks["redis"] = check_redis
 
-    deadline = time.monotonic() + max(0.0, args.wait)
+    deadline = None if args.forever else time.monotonic() + max(0.0, args.wait)
+    max_delay = 30.0 if args.forever else 10.0
+    last_explained = time.monotonic()
     reported: set[str] = set()
     last: dict[str, CheckResult] = {}
     attempt = 0
@@ -319,7 +330,7 @@ def main() -> int:
         if not checks:
             return 0
 
-        remaining = deadline - time.monotonic()
+        remaining = float("inf") if deadline is None else deadline - time.monotonic()
         fatal = [name for name in checks if not last[name].retryable]
         if fatal or remaining <= 0:
             if attempt > 1:
@@ -329,11 +340,21 @@ def main() -> int:
                 _say(f"gave up after {args.wait:.0f}s.")
             return 1
 
-        delay = min(2.0**attempt, 10.0, remaining)
+        # A long outage should keep telling the operator what is wrong, not look like a hang.
+        if time.monotonic() - last_explained >= _REEXPLAIN_SECONDS:
+            for name in checks:
+                _report_failure(name, last[name])
+            last_explained = time.monotonic()
+        delay = min(2.0 ** min(attempt, 8), max_delay, remaining)
         waiting = ", ".join(f"{name} ({last[name].summary})" for name in checks)
-        _say(f"waiting {delay:.0f}s for {waiting}; {remaining:.0f}s left")
+        left = "" if deadline is None else f"; {remaining:.0f}s left"
+        _say(f"waiting {delay:.0f}s for {waiting}{left}")
         time.sleep(delay)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        _say("stopped.")
+        sys.exit(130)
