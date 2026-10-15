@@ -26,7 +26,7 @@ export async function changeMyPassword(payload: {
   confirm_password: string;
 }): Promise<AuthTokens> {
   const { data } = await api.post<AuthTokens>("/auth/me/password", payload);
-  configureApiAuth(data.access_token);
+  configureApiAuth(data.access_token ?? null);
   return data;
 }
 

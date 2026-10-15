@@ -18,6 +18,7 @@ from app.domains.devices.services.device_service import DeviceAttendanceRecord
 from tests.factories import make_device, make_employee
 
 IST = ZoneInfo("Asia/Kolkata")
+UTC = ZoneInfo("UTC")
 
 
 @pytest.mark.integration
@@ -60,11 +61,12 @@ def test_morning_correction_sync_imports_midday_and_evening(
             created_at=completed,
         )
     )
-    # Corrected morning IN already in DB (as replace_employee_day_logs would leave it).
+    # Corrected morning IN already in DB (as replace_employee_day_logs would leave it),
+    # stored in UTC like every other punch (SQLite keeps the UTC wall clock, naive).
     db_session.add(
         AttendanceLog(
             employee_code="TBICORR1",
-            timestamp=morning_in,
+            timestamp=morning_in.astimezone(UTC),
             device_id="main-entrance",
             punch_type="0",
         )
@@ -93,8 +95,9 @@ def test_morning_correction_sync_imports_midday_and_evening(
     assert result.skipped_corrected_punches == 2  # morning IN replay + deleted near-dup
     assert result.punches_missing_after_insert == 0
 
+    # Punches are persisted as UTC; SQLite hands them back naive.
     stamps = {
-        row.timestamp.replace(tzinfo=IST) if row.timestamp.tzinfo is None else row.timestamp.astimezone(IST)
+        (row.timestamp.replace(tzinfo=UTC) if row.timestamp.tzinfo is None else row.timestamp).astimezone(IST)
         for row in db_session.execute(
             select(AttendanceLog).where(AttendanceLog.employee_code == "TBICORR1")
         ).scalars().all()

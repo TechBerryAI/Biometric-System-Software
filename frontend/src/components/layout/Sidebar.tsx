@@ -13,6 +13,7 @@ import {
   Settings,
   Users,
   Wifi,
+  type LucideIcon,
 } from "lucide-react";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -27,15 +28,23 @@ import { Button } from "@/components/ui/button";
 import { fetchOperationalMetrics, syncFromDevice } from "@/features/operations/api";
 import { formatSyncErrorMessage } from "@/shared/api/client";
 
-const items = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: "dashboard:view" as Permission },
-  { to: "/employees", label: "Employees", icon: Users, permission: "employee:view" as Permission },
-  { to: "/attendance", label: "Attendance", icon: ClipboardList, permission: "reports:read" as Permission },
-  { to: "/monitoring", label: "Live Monitor", icon: Activity, permission: "reports:read" as Permission },
-  { to: "/reports", label: "Reports", icon: FileBarChart2, permission: "reports:read" as Permission },
-  { to: "/operations", label: "Operations", icon: ShieldCheck, permission: "device:manage" as Permission },
-  { to: "/settings", label: "Settings", icon: Settings, permission: "device:manage" as Permission },
-] as const;
+type NavItem = {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  end?: boolean;
+  permission: Permission;
+};
+
+const items: readonly NavItem[] = [
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, permission: "dashboard:view" },
+  { to: "/employees", label: "Employees", icon: Users, permission: "employee:view" },
+  { to: "/attendance", label: "Attendance", icon: ClipboardList, permission: "reports:read" },
+  { to: "/monitoring", label: "Live Monitor", icon: Activity, permission: "reports:read" },
+  { to: "/reports", label: "Reports", icon: FileBarChart2, permission: "reports:read" },
+  { to: "/operations", label: "Operations", icon: ShieldCheck, permission: "device:manage" },
+  { to: "/settings", label: "Settings", icon: Settings, permission: "device:manage" },
+];
 
 export function Sidebar() {
   const collapsed = useUiStore((s) => s.sidebarCollapsed);

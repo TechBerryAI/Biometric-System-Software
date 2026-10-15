@@ -83,6 +83,32 @@ def db_session(engine) -> Generator[Session, None, None]:
         session.close()
 
 
+def _clear_rate_limit_state() -> None:
+    """Rate-limit counters live in the shared test Redis; give every test client a clean window.
+
+    Every TestClient request comes from the same client id, so without this the API and login
+    limiters accumulate across tests (and across runs) and unrelated tests start getting 429s.
+    """
+    from redis import Redis
+    from redis.exceptions import RedisError
+
+    from app.core.rate_limit import reset_rate_limiter
+    from app.core.redis_keys import with_namespace
+
+    reset_rate_limiter()
+    settings = get_settings()
+    try:
+        redis = Redis.from_url(str(settings.redis_url), socket_connect_timeout=1, socket_timeout=1)
+        try:
+            for pattern in ("rate:api:*", "auth:login:fail:*"):
+                for key in redis.scan_iter(match=with_namespace(settings.redis_namespace, pattern), count=500):
+                    redis.delete(key)
+        finally:
+            redis.close()
+    except (RedisError, OSError):
+        pass  # No Redis: the limiters fail open, so there is nothing to clear.
+
+
 @pytest.fixture()
 def client(db_session: Session) -> Generator[TestClient, None, None]:
     from app.main import app
@@ -90,6 +116,7 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
     def _override_db() -> Generator[Session, None, None]:
         yield db_session
 
+    _clear_rate_limit_state()
     app.dependency_overrides[get_db] = _override_db
     with TestClient(app) as test_client:
         yield test_client

@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios, { type AxiosRequestHeaders } from "axios";
 import { API_BASE_URL } from "@/config/api";
 import { getSelectedTenantId } from "@/stores/tenant-store";
 
@@ -39,7 +39,7 @@ function readCookie(name: string): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-function attachSecurityHeaders(config: Record<string, unknown>) {
+function attachSecurityHeaders(config: AxiosRequestHeaders): AxiosRequestHeaders {
   if (accessToken) {
     config.Authorization = `Bearer ${accessToken}`;
   } else {
@@ -57,12 +57,12 @@ function attachSecurityHeaders(config: Record<string, unknown>) {
 }
 
 api.interceptors.request.use((config) => {
-  config.headers = attachSecurityHeaders(config.headers ?? {});
+  config.headers = attachSecurityHeaders(config.headers);
   return config;
 });
 
 rawApi.interceptors.request.use((config) => {
-  config.headers = attachSecurityHeaders(config.headers ?? {});
+  config.headers = attachSecurityHeaders(config.headers);
   return config;
 });
 

@@ -72,7 +72,7 @@ export function AttendanceTrendChart({
                 <Tooltip
                   contentStyle={tooltipStyle}
                   labelStyle={{ color: "#0F172A", fontWeight: 600 }}
-                  formatter={(value: number, name: string) => [value, name]}
+                  formatter={(value, name) => [value, name]}
                 />
                 <Line
                   type="monotone"

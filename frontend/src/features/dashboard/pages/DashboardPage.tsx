@@ -32,7 +32,7 @@ import {
   Wifi,
   Zap,
 } from "lucide-react";
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, type ComponentProps } from "react";
 import { Link } from "react-router-dom";
 import { ReportFormatDialog } from "@/features/reports/components/ReportFormatDialog";
 import { ManagementInsightsCard } from "@/features/dashboard/components/ManagementInsightsCard";
@@ -78,7 +78,6 @@ import {
   readHour,
   severityClasses,
   toDeltaLabel,
-  toneClasses,
   type ActionInsight,
 } from "@/features/dashboard/utils/formatters";
 import { fetchAttendanceAnomalies, fetchManagementInsights } from "@/features/dashboard/api";
@@ -87,7 +86,9 @@ import { fetchTenants } from "@/features/tenancy/api";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useTenantStore } from "@/stores/tenant-store";
 import { cn } from "@/lib/cn";
-import { fmtDisplayDate, isoToTimeParts, zonedWallClockToISO } from "@/lib/dates";
+import { fmtDisplayDate, isoToTimeParts } from "@/lib/dates";
+
+type KpiDefinition = Omit<ComponentProps<typeof ExecutiveKpiCard>, "delay"> & { tier: 1 | 2 };
 
 export function Dashboard() {
   const { can } = useAuth();
@@ -629,7 +630,7 @@ export function Dashboard() {
     workforceHealthIndex,
   ]);
 
-  const kpis = useMemo(() => {
+  const kpis = useMemo((): KpiDefinition[] => {
     const sparkBase = trend.data?.slice(-8).map((p) => p.attendanceRatePercent) ?? [68, 71, 72, 74, 79, 82, 78, 84];
     const lateSpark = sparkBase.map((v, i) => clamp(25 - v / 5 + i * 0.8, 2, 35));
     const missingSpark = sparkBase.map((v) => clamp((100 - v) / 1.9, 2, 44));
@@ -1083,7 +1084,7 @@ export function Dashboard() {
                   <YAxis tick={{ fontSize: 11, fill: "#64748B" }} axisLine={false} tickLine={false} />
                   <Tooltip
                     contentStyle={{ borderRadius: 14, border: "1px solid #E2E8F0", boxShadow: "0 12px 28px rgba(15,23,42,0.09)" }}
-                    formatter={(value: number, name: string) => [name === "avgHours" ? `${value}h` : value, name]}
+                    formatter={(value, name) => [name === "avgHours" ? `${value}h` : value, name]}
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Line type="monotone" dataKey="present" stroke="#4F46E5" strokeWidth={2.4} dot={false} />
@@ -1335,7 +1336,7 @@ export function Dashboard() {
                   <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fill: "#64748B" }} />
                   <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 10, fill: "#94A3B8" }} />
                   <Radar dataKey="score" stroke="#4F46E5" fill="#4F46E5" fillOpacity={0.24} />
-                  <Tooltip formatter={(value: number) => `${value.toFixed(1)} / 100`} />
+                  <Tooltip formatter={(value) => `${Number(value).toFixed(1)} / 100`} />
                 </RadarChart>
               </ResponsiveContainer>
             </div>

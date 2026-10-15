@@ -38,6 +38,7 @@ describe("FE-UNIT-API-001 api helpers", () => {
 
   it("logs in through MSW-backed loginWithPassword", async () => {
     const tokens = await loginWithPassword("admin@company.com", "secret");
+    if (!("access_token" in tokens)) throw new Error("Expected tokens, got an MFA challenge");
     expect(tokens.access_token).toBe(mockTokens.access_token);
     expect(tokens.refresh_token).toBe(mockTokens.refresh_token);
   });
