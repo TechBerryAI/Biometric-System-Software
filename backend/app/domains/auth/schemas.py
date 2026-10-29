@@ -89,3 +89,19 @@ class PasswordChangeRequest(BaseModel):
         if self.new_password == self.current_password:
             raise ValueError("New password must differ from current password")
         return self
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=512)
+    new_password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_passwords(self) -> PasswordResetConfirmRequest:
+        if self.new_password != self.confirm_password:
+            raise ValueError("New password and confirmation do not match")
+        return self

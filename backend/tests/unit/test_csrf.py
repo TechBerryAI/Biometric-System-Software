@@ -56,6 +56,26 @@ async def test_csrf_middleware_rejects_missing_header(monkeypatch: pytest.Monkey
     handler.assert_not_called()
 
 
+@pytest.mark.testid("BE-UNIT-CSRF-005")
+@pytest.mark.asyncio
+async def test_csrf_middleware_exempts_password_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CSRF_ENABLED", "true")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    request = MagicMock()
+    request.method = "POST"
+    request.url.path = "/auth/forgot-password"
+    request.cookies = {}
+    request.headers = {}
+
+    handler = AsyncMock(return_value=Response(status_code=200))
+    response = await csrf_middleware(request, handler)
+    assert response.status_code == 200
+    handler.assert_called_once()
+
+
 @pytest.mark.testid("BE-UNIT-CSRF-004")
 @pytest.mark.asyncio
 async def test_csrf_middleware_allows_matching_tokens(monkeypatch: pytest.MonkeyPatch) -> None:

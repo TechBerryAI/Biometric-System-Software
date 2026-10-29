@@ -7,7 +7,7 @@ Legend: **ID** = stable test marker · **File** = intended test module · **Stat
 
 ---
 
-## 1. HTTP routes (41)
+## 1. HTTP routes (43)
 
 ### Health (`app/main.py`)
 
@@ -36,6 +36,8 @@ Legend: **ID** = stable test marker · **File** = intended test module · **Stat
 | `POST /auth/users` | BE-API-AUTH-008 | same |
 | Auth unauthorized / validation | BE-API-AUTH-009 | same |
 | Login rate limit | BE-UNIT-AUTH-010 | `backend/tests/unit/test_auth_service.py` |
+| `POST /auth/forgot-password` | BE-API-AUTH-011 | `backend/tests/api/test_auth_api.py` |
+| `POST /auth/reset-password` | BE-API-AUTH-012 | same |
 
 ### Employees (`app/api/employee.py`)
 
@@ -86,7 +88,7 @@ Legend: **ID** = stable test marker · **File** = intended test module · **Stat
 
 ---
 
-## 2. ORM models (9)
+## 2. ORM models (10)
 
 | Model / table | Test ID | File |
 |---------------|---------|------|
@@ -96,6 +98,7 @@ Legend: **ID** = stable test marker · **File** = intended test module · **Stat
 | `DeviceUserMapping` / `device_user_mappings` | BE-INT-MDL-004 | `backend/tests/integration/test_employee_offboard.py` |
 | `User` / `users` | BE-API-AUTH-001 | `backend/tests/api/test_auth_api.py` |
 | `RefreshToken` / `refresh_tokens` | BE-API-AUTH-003 | same |
+| `PasswordResetToken` / `password_reset_tokens` | BE-API-AUTH-011 | same |
 | `Device` / `devices` | BE-INT-MDL-005 | `backend/tests/integration/test_governance_blocks_writes.py` |
 | `DeviceCommand` / `device_commands` | BE-INT-MDL-006 | `backend/tests/integration/test_command_retry_deadletter.py` |
 | `SystemControlState` / `system_control_state` | BE-UNIT-GOV-001 | `backend/tests/unit/test_governance.py` |
@@ -178,6 +181,7 @@ Legend: **ID** = stable test marker · **File** = intended test module · **Stat
 | `probe_device_attlog_tier.py` | BE-UNIT-SCR-002 | same |
 | `restore_device_normal_mode.py` | BE-UNIT-SCR-003 | same |
 | `purge_departed_employees.py` | BE-UNIT-SCR-004 | same |
+| `reset_user_password.py` | BE-UNIT-SCR-005 | same |
 | `setup_local_database.sql` | N/A | Manual DBA artifact |
 
 ---
@@ -187,6 +191,8 @@ Legend: **ID** = stable test marker · **File** = intended test module · **Stat
 | Route / page | Test ID | File |
 |--------------|---------|------|
 | `/login` Login | FE-UNIT-LOGIN-001 | `frontend/src/pages/Login.test.tsx` |
+| `/forgot-password` | FE-UNIT-FORGOT-001 | `frontend/tests/features/auth/pages/ForgotPasswordPage.test.tsx` |
+| `/reset-password` | FE-UNIT-RESET-001 | `frontend/tests/features/auth/pages/ResetPasswordPage.test.tsx`
 | `/` Dashboard | FE-UNIT-DASH-001 | `frontend/src/pages/Dashboard.test.tsx` |
 | `/employees` | FE-UNIT-EMP-001 | `frontend/src/pages/Employees.test.tsx` |
 | `/employees/:id` | FE-UNIT-EMP-002 | `frontend/src/pages/EmployeeProfile.test.tsx` |

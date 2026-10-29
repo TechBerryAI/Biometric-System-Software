@@ -45,6 +45,7 @@ from app.models import (  # noqa: F401 — register metadata
     DeviceUserMapping,
     Employee,
     RefreshToken,
+    PasswordResetToken,
     AuditEvent,
     SystemControlState,
     User,
@@ -100,7 +101,7 @@ def _clear_rate_limit_state() -> None:
     try:
         redis = Redis.from_url(str(settings.redis_url), socket_connect_timeout=1, socket_timeout=1)
         try:
-            for pattern in ("rate:api:*", "auth:login:fail:*"):
+            for pattern in ("rate:api:*", "auth:login:fail:*", "auth:reset:fail:*"):
                 for key in redis.scan_iter(match=with_namespace(settings.redis_namespace, pattern), count=500):
                     redis.delete(key)
         finally:

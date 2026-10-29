@@ -17,6 +17,8 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 CSRF_EXEMPT_PREFIXES = (
     "/health",
     "/devices/gateway/push",
+    "/auth/forgot-password",
+    "/auth/reset-password",
 )
 
 CsrfHandler = Callable[[Request], Awaitable[Response]]

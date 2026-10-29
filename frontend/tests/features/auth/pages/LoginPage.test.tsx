@@ -33,6 +33,7 @@ describe("FE-UNIT-LOGIN-001 Login page", () => {
     renderWithProviders(<Login />, { withAuth: false, route: "/login" });
 
     expect(screen.getByRole("heading", { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /forgot password/i })).toHaveAttribute("href", "/forgot-password");
     await user.type(screen.getByPlaceholderText("admin@company.com"), "admin@company.com");
     await user.type(screen.getByPlaceholderText("••••••••"), "password123");
     await user.click(screen.getByRole("button", { name: /sign in/i }));

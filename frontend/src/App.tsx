@@ -5,7 +5,9 @@ import { RequireAuth } from "@/features/auth/RequireAuth";
 import { hasCapability } from "@/features/auth/sessionCapabilities";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageFallback } from "@/components/layout/PageFallback";
+import { ForgotPassword } from "@/features/auth/pages/ForgotPasswordPage";
 import { Login } from "@/features/auth/pages/LoginPage";
+import { ResetPassword } from "@/features/auth/pages/ResetPasswordPage";
 
 // Each page (and its charts / export libraries) is its own chunk so the first screen loads fast.
 const pageModules = {
@@ -75,6 +77,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route
         path="*"
         element={

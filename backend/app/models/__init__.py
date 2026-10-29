@@ -12,6 +12,7 @@ from app.domains.devices.models.device_migration import DeviceMigration, DeviceM
 from app.domains.devices.models.device_user_drift import DeviceUserDrift
 from app.domains.employees.models.device_user_mapping import DeviceUserMapping
 from app.domains.employees.models.employee import Employee
+from app.domains.auth.models.password_reset_token import PasswordResetToken
 from app.domains.auth.models.refresh_token import RefreshToken
 from app.domains.audit.models.audit_event import AuditEvent
 from app.domains.ops.models.system_control_state import SystemControlState
@@ -28,6 +29,7 @@ __all__ = [
     "Employee",
     "User",
     "RefreshToken",
+    "PasswordResetToken",
     "AuditEvent",
     "Device",
     "DeviceSyncState",

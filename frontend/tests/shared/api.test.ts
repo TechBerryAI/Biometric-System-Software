@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { fetchEmployees } from "@/features/employees/api";
 import { fetchOperationalMetrics } from "@/features/operations/api";
 import { formatSyncErrorMessage, getApiErrorMessage } from "@/shared/api/client";
-import { loginWithPassword } from "@/features/auth/api";
+import { confirmPasswordReset, loginWithPassword, requestPasswordReset } from "@/features/auth/api";
 import { mockTokens } from "@test/msw/handlers";
 
 describe("FE-UNIT-API-001 api helpers", () => {
@@ -34,6 +34,17 @@ describe("FE-UNIT-API-001 api helpers", () => {
       data: {},
     };
     expect(formatSyncErrorMessage(err)).toContain("proxy timed out");
+  });
+
+  it("requests a password reset through MSW", async () => {
+    await expect(requestPasswordReset("admin@company.com")).resolves.toBeUndefined();
+    await expect(
+      confirmPasswordReset({
+        token: "abcdefghijklmnopqrstuvwxyz",
+        new_password: "NewSecret123!",
+        confirm_password: "NewSecret123!",
+      })
+    ).resolves.toBeUndefined();
   });
 
   it("logs in through MSW-backed loginWithPassword", async () => {
