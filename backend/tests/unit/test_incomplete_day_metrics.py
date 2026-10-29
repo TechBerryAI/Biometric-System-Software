@@ -20,17 +20,18 @@ def test_count_incomplete_days_single_punch(db_session: Session, monkeypatch: py
     settings = get_settings()
     monkeypatch.setattr(settings, "timezone", "UTC")
     monkeypatch.setattr(settings, "open_day_min_span_minutes", 5)
-    # Use a fixed weekday in the past relative to "now" — patch datetime via lookback window.
     emp = make_employee(device_user_id="TBIOPEN1")
     db_session.add(emp)
-    # Yesterday-ish: use a known recent weekday punch only once
-    day = datetime(2026, 7, 21, 9, 0, tzinfo=UTC)  # Tuesday
+    # Most recent weekday before today, so it sits inside the lookback window whenever the
+    # suite runs (a hard-coded date silently ages out of the window).
+    day_date = datetime.now(UTC).date() - timedelta(days=1)
+    while day_date.weekday() >= 5:
+        day_date -= timedelta(days=1)
+    day = datetime(day_date.year, day_date.month, day_date.day, 9, 0, tzinfo=UTC)
     db_session.add(make_attendance_log(employee=emp, punched_at=day, punch_type="0"))
     db_session.commit()
 
-    # Force "today" context by using include_today and a wide lookback that includes 21 Jul
-    # when tests run on 2026-07-22+.
     count = count_incomplete_attendance_days(
         db_session, lookback_days=60, settings=settings, include_today=True
     )
-    assert count >= 1
+    assert count == 1

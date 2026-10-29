@@ -31,8 +31,10 @@ from app.core.security import (
     hash_refresh_token,
     verify_password,
 )
+from app.domains.auth.models.password_reset_token import PasswordResetToken
 from app.domains.auth.models.refresh_token import RefreshToken
 from app.domains.auth.models.user import User, UserRole
+from app.domains.auth.services.password_reset_mailer import send_password_reset_email
 from app.shared.ids import new_family_id
 
 ALLOWED_APP_ROLES = {
@@ -54,8 +56,9 @@ def _as_utc(value: datetime) -> datetime:
 
 
 class LoginRateLimiter:
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, *, key_prefix: str = "auth:login:fail") -> None:
         self._settings = settings or get_settings()
+        self._key_prefix = key_prefix
         self._redis: Redis | None = None
         try:
             self._redis = Redis.from_url(
@@ -68,7 +71,7 @@ class LoginRateLimiter:
             self._redis = None
 
     def _key(self, email: str) -> str:
-        key = f"auth:login:fail:{email.strip().lower()}"
+        key = f"{self._key_prefix}:{email.strip().lower()}"
         return with_namespace(self._settings.redis_namespace, key)
 
     def is_blocked(self, email: str) -> bool:
@@ -234,6 +237,69 @@ def change_user_password(db: Session, user: User, current_password: str, new_pas
     user.password_hash = hash_password(new_password)
     revoke_all_user_refresh_tokens(db, user.id)
     return True
+
+
+def _invalidate_unused_reset_tokens(db: Session, user_id: int) -> None:
+    now = _utcnow()
+    tokens = db.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.user_id == user_id,
+            PasswordResetToken.used_at.is_(None),
+        )
+    ).scalars()
+    for token in tokens:
+        token.used_at = now
+
+
+def request_password_reset(db: Session, email: str) -> None:
+    normalized_email = email.strip().lower()
+    if is_env_operator_email(normalized_email):
+        return
+
+    user = db.execute(select(User).where(User.email == normalized_email)).scalar_one_or_none()
+    if user is None or not user.active or user.role not in ALLOWED_APP_ROLES:
+        return
+
+    settings = get_settings()
+    raw_token = generate_refresh_token()
+    _invalidate_unused_reset_tokens(db, user.id)
+    db.add(
+        PasswordResetToken(
+            user_id=user.id,
+            token_hash=hash_refresh_token(raw_token),
+            expires_at=_utcnow() + timedelta(minutes=settings.password_reset_expire_minutes),
+        )
+    )
+    db.flush()
+
+    frontend_url = (settings.frontend_url or "http://localhost:5173").rstrip("/")
+    send_password_reset_email(
+        recipient=user.email,
+        reset_url=f"{frontend_url}/reset-password?token={raw_token}",
+    )
+
+
+def reset_password_with_token(db: Session, raw_token: str, new_password: str) -> User | None:
+    token_hash = hash_refresh_token(raw_token.strip())
+    reset = db.execute(
+        select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+    ).scalar_one_or_none()
+    if reset is None or reset.used_at is not None:
+        return None
+    if _as_utc(reset.expires_at) <= _as_utc(_utcnow()):
+        return None
+
+    user = db.get(User, reset.user_id)
+    if user is None or not user.active or user.role not in ALLOWED_APP_ROLES:
+        return None
+    if is_env_operator_email(user.email):
+        return None
+
+    user.password_hash = hash_password(new_password)
+    revoke_all_user_refresh_tokens(db, user.id)
+    reset.used_at = _utcnow()
+    _invalidate_unused_reset_tokens(db, user.id)
+    return user
 
 
 def ensure_bootstrap_admin(db: Session) -> User | None:

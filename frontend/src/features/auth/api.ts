@@ -40,6 +40,18 @@ export type LoginChallengeResponse = {
   role: string;
 };
 
+export async function requestPasswordReset(email: string): Promise<void> {
+  await rawApi.post("/auth/forgot-password", { email: email.trim().toLowerCase() });
+}
+
+export async function confirmPasswordReset(payload: {
+  token: string;
+  new_password: string;
+  confirm_password: string;
+}): Promise<void> {
+  await rawApi.post("/auth/reset-password", payload);
+}
+
 export async function loginWithPassword(
   email: string,
   password: string,

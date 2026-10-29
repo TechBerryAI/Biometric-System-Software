@@ -23,6 +23,7 @@ from app.domains.auth.models.user import User
 from app.domains.auth.schemas import (
     AuthTokens,
     CurrentUserResponse,
+    ForgotPasswordRequest,
     LoginChallengeResponse,
     LoginRequest,
     LogoutRequest,
@@ -30,6 +31,7 @@ from app.domains.auth.schemas import (
     MfaLoginVerifyRequest,
     MfaVerifyRequest,
     PasswordChangeRequest,
+    PasswordResetConfirmRequest,
     ProfileUpdateRequest,
     RefreshRequest,
     UserCreateRequest,
@@ -41,6 +43,8 @@ from app.domains.auth.services.auth_service import (
     create_or_update_user,
     ensure_bootstrap_admin,
     issue_session_tokens,
+    request_password_reset,
+    reset_password_with_token,
     revoke_refresh_token,
     rotate_refresh_token,
 )
@@ -318,6 +322,53 @@ def update_me(
     db.commit()
     db.refresh(user)
     return _current_user_response(user)
+
+
+@router.post("/forgot-password")
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    limiter = LoginRateLimiter(key_prefix="auth:reset:fail")
+    email = payload.email.strip().lower()
+    if limiter.is_blocked(email):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many reset attempts")
+
+    request_password_reset(db, email)
+    limiter.register_failure(email)
+    record_audit_event(
+        db,
+        action="auth.password_reset_request",
+        resource_type="user",
+        resource_id=email,
+        request=request,
+    )
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/reset-password")
+def reset_password(
+    payload: PasswordResetConfirmRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    user = reset_password_with_token(db, payload.token, payload.new_password)
+    if user is None:
+        record_audit_event(
+            db,
+            action="auth.password_reset",
+            resource_type="user",
+            outcome="failure",
+            request=request,
+        )
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
+
+    record_audit_event(db, action="auth.password_reset", actor=user, request=request)
+    db.commit()
+    return {"status": "ok"}
 
 
 @router.post("/me/password", response_model=AuthTokens)

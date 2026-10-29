@@ -145,6 +145,137 @@ def test_login_wrong_password(client: TestClient, admin_user: User) -> None:
     assert response.status_code == 401
 
 
+@pytest.mark.testid("BE-API-AUTH-011")
+def test_forgot_password_unknown_email_still_ok(client: TestClient, db_session) -> None:
+    from app.domains.auth.models.password_reset_token import PasswordResetToken
+
+    response = client.post("/auth/forgot-password", json={"email": "missing@example.com"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert db_session.query(PasswordResetToken).count() == 0
+
+
+@pytest.mark.testid("BE-API-AUTH-011")
+def test_forgot_password_creates_token_and_sends_mail(
+    client: TestClient, admin_user: User, db_session
+) -> None:
+    from unittest.mock import patch
+
+    from app.domains.auth.models.password_reset_token import PasswordResetToken
+
+    with patch("app.domains.auth.services.auth_service.send_password_reset_email") as send_mail:
+        response = client.post("/auth/forgot-password", json={"email": admin_user.email})
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert db_session.query(PasswordResetToken).count() == 1
+    send_mail.assert_called_once()
+    reset_url = send_mail.call_args.kwargs["reset_url"]
+    assert "/reset-password?token=" in reset_url
+    assert send_mail.call_args.kwargs["recipient"] == admin_user.email
+
+
+@pytest.mark.testid("BE-API-AUTH-011")
+def test_forgot_password_skips_env_operator(client: TestClient, monkeypatch: pytest.MonkeyPatch, db_session) -> None:
+    from unittest.mock import patch
+
+    from app.core.config import get_settings
+    from app.domains.auth.models.password_reset_token import PasswordResetToken
+
+    monkeypatch.setenv("AUTH_OPERATOR_EMAIL", "operator-env@example.com")
+    monkeypatch.setenv("AUTH_OPERATOR_PASSWORD", "OperatorPass123!")
+    get_settings.cache_clear()
+    try:
+        with patch("app.domains.auth.services.auth_service.send_password_reset_email") as send_mail:
+            response = client.post("/auth/forgot-password", json={"email": "operator-env@example.com"})
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+        assert db_session.query(PasswordResetToken).count() == 0
+        send_mail.assert_not_called()
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.testid("BE-API-AUTH-012")
+def test_reset_password_success_and_old_password_fails(
+    client: TestClient, admin_user: User, db_session
+) -> None:
+    from unittest.mock import patch
+
+    with patch("app.domains.auth.services.auth_service.send_password_reset_email") as send_mail:
+        forgot = client.post("/auth/forgot-password", json={"email": admin_user.email})
+    assert forgot.status_code == 200
+    raw_token = send_mail.call_args.kwargs["reset_url"].split("token=", 1)[1]
+
+    reset = client.post(
+        "/auth/reset-password",
+        json={
+            "token": raw_token,
+            "new_password": "ResetPass123!",
+            "confirm_password": "ResetPass123!",
+        },
+    )
+    assert reset.status_code == 200
+    assert reset.json()["status"] == "ok"
+
+    old = client.post("/auth/login", json={"email": admin_user.email, "password": "Secret123!"})
+    assert old.status_code == 401
+    new = client.post("/auth/login", json={"email": admin_user.email, "password": "ResetPass123!"})
+    assert new.status_code == 200
+
+
+@pytest.mark.testid("BE-API-AUTH-012")
+def test_reset_password_rejects_expired_and_used_tokens(
+    client: TestClient, admin_user: User, db_session
+) -> None:
+    from datetime import datetime, timedelta
+    from unittest.mock import patch
+    from zoneinfo import ZoneInfo
+
+    from app.domains.auth.models.password_reset_token import PasswordResetToken
+
+    with patch("app.domains.auth.services.auth_service.send_password_reset_email") as send_mail:
+        client.post("/auth/forgot-password", json={"email": admin_user.email})
+    raw_token = send_mail.call_args.kwargs["reset_url"].split("token=", 1)[1]
+
+    first = client.post(
+        "/auth/reset-password",
+        json={
+            "token": raw_token,
+            "new_password": "ResetPass123!",
+            "confirm_password": "ResetPass123!",
+        },
+    )
+    assert first.status_code == 200
+    reused = client.post(
+        "/auth/reset-password",
+        json={
+            "token": raw_token,
+            "new_password": "AnotherPass123!",
+            "confirm_password": "AnotherPass123!",
+        },
+    )
+    assert reused.status_code == 400
+    assert reused.json()["detail"] == "Invalid or expired reset token"
+
+    with patch("app.domains.auth.services.auth_service.send_password_reset_email") as send_mail:
+        client.post("/auth/forgot-password", json={"email": admin_user.email})
+    expired_token = send_mail.call_args.kwargs["reset_url"].split("token=", 1)[1]
+    row = db_session.query(PasswordResetToken).order_by(PasswordResetToken.id.desc()).first()
+    assert row is not None
+    row.expires_at = datetime.now(ZoneInfo("UTC")) - timedelta(minutes=1)
+    db_session.commit()
+
+    expired = client.post(
+        "/auth/reset-password",
+        json={
+            "token": expired_token,
+            "new_password": "FreshPass123!",
+            "confirm_password": "FreshPass123!",
+        },
+    )
+    assert expired.status_code == 400
+
+
 @pytest.mark.testid("BE-API-AUTH-010")
 def test_login_mfa_decrypt_failure_returns_401(
     client: TestClient,

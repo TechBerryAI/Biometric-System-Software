@@ -17,7 +17,8 @@
  *   API_WORKERS=2                     uvicorn worker processes (production)
  *   START_CELERY=1|0                  Celery worker + beat (default on unless DEVICE_AUTO_SYNC_ENABLED=false)
  *   CELERY_CONCURRENCY=4              Celery pool processes
- *   SERVICE_WAIT_SECONDS=180          how long to wait for PostgreSQL/Redis before giving up
+ *   SERVICE_WAIT_SECONDS=...          give up if PostgreSQL/Redis are still down after this long
+ *                                     (default: production waits until they recover; dev waits 60s)
  *   FRONTEND_BUILD=auto|always|never  rebuild frontend/dist (auto = only when sources changed)
  *   VITE_API_URL=/api  OPEN_BROWSER=1
  */
@@ -59,7 +60,8 @@ const API_BIND_HOST = process.env.API_BIND_HOST || "0.0.0.0";
 const FRONTEND_BIND_HOST = process.env.FRONTEND_BIND_HOST || "0.0.0.0";
 const API_WORKERS = String(Math.max(1, Number(process.env.API_WORKERS) || 2));
 const CELERY_CONCURRENCY = String(Math.max(1, Number(process.env.CELERY_CONCURRENCY) || 4));
-const SERVICE_WAIT_SECONDS = String(process.env.SERVICE_WAIT_SECONDS || 180);
+// Unset in production = wait until the database/Redis come back, then start on its own.
+const SERVICE_WAIT_SECONDS = process.env.SERVICE_WAIT_SECONDS || (DEV ? "60" : "");
 const FRONTEND_BUILD = (process.env.FRONTEND_BUILD || "auto").toLowerCase();
 const VITE_API_URL = process.env.VITE_API_URL || "/api";
 const CELERY_QUEUES = "attendance_sync,device_commands,reconciliation,notifications";
@@ -305,24 +307,47 @@ async function assertPortsFree() {
 
 // ---------------------------------------------------------------- one-shot steps
 
+// The one-shot step currently running (preflight / migrations / build), so a stop request can end it.
+let activeStep = null;
+
 function runStep(label, command, args, options) {
-  const result = spawnSync(command, args, { stdio: "inherit", ...options });
-  if (result.error) throw new Error(`${label} could not start: ${result.error.message}`);
-  return result.status === 0;
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: "inherit", windowsHide: true, ...options });
+    activeStep = child;
+    child.on("error", (err) => {
+      activeStep = null;
+      reject(new Error(`${label} could not start: ${err.message}`));
+    });
+    child.on("exit", (code) => {
+      activeStep = null;
+      resolve(code === 0);
+    });
+  });
 }
 
-function runPreflight(python, { skipRedis }) {
-  log(`Checking PostgreSQL${skipRedis ? "" : " and Redis"} (waiting up to ${SERVICE_WAIT_SECONDS}s) ...`);
-  const args = [path.join("scripts", "check_services.py"), "--wait", SERVICE_WAIT_SECONDS];
+async function runPreflight(python, { skipRedis }) {
+  const label = skipRedis ? "PostgreSQL" : "PostgreSQL and Redis";
+  const args = [path.join("scripts", "check_services.py")];
+  if (SERVICE_WAIT_SECONDS) {
+    log(`Checking ${label} (waiting up to ${SERVICE_WAIT_SECONDS}s) ...`);
+    args.push("--wait", SERVICE_WAIT_SECONDS);
+  } else {
+    log(`Checking ${label} (waits until they are reachable; Ctrl+C to stop) ...`);
+    args.push("--forever");
+  }
   if (skipRedis) args.push("--skip-redis");
-  if (!runStep("Preflight", python, args, { cwd: BACKEND, env: backendEnv("preflight") })) {
+  if (!(await runStep("Preflight", python, args, { cwd: BACKEND, env: backendEnv("preflight") }))) {
     throw new Error("Required services are not reachable (details above). Nothing was started.");
   }
 }
 
-function runMigrations(python) {
+async function runMigrations(python) {
   log("Applying database migrations (alembic upgrade head) ...");
-  if (!runStep("Migrations", python, ["-m", "alembic", "upgrade", "head"], { cwd: BACKEND, env: backendEnv("migrate") })) {
+  const ok = await runStep("Migrations", python, ["-m", "alembic", "upgrade", "head"], {
+    cwd: BACKEND,
+    env: backendEnv("migrate"),
+  });
+  if (!ok) {
     throw new Error("Database migrations failed (details above). Nothing was started.");
   }
 }
@@ -373,7 +398,7 @@ function frontendBuildReason() {
   return null;
 }
 
-function buildFrontend(reason) {
+async function buildFrontend(reason) {
   if (!hasViteBinary()) {
     throw new Error("Frontend dependencies are missing (vite). Run `npm install` at the repository root.");
   }
@@ -383,7 +408,8 @@ function buildFrontend(reason) {
   const prev = path.join(FRONTEND, "dist.prev");
   fs.rmSync(next, { recursive: true, force: true });
   const [cmd, args] = npmCommand(["run", "build", "--", "--outDir", "dist.next", "--emptyOutDir"]);
-  const ok = runStep("Frontend build", cmd, args, { cwd: FRONTEND, env: { ...process.env, VITE_API_URL } });
+  const ok = await runStep("Frontend build", cmd, args, { cwd: FRONTEND, env: { ...process.env, VITE_API_URL } });
+  if (stopping) return;
   if (!ok) {
     fs.rmSync(next, { recursive: true, force: true });
     if (fs.existsSync(path.join(DIST, "index.html"))) {
@@ -522,6 +548,14 @@ async function shutdown(code, reason) {
   if (stopping) return;
   stopping = true;
   if (reason) log(reason);
+  if (activeStep) {
+    try {
+      if (isWin) spawnSync("taskkill", ["/pid", String(activeStep.pid), "/T", "/F"], { stdio: "ignore" });
+      else activeStep.kill("SIGTERM");
+    } catch {
+      /* already finished */
+    }
+  }
   if (services.some((s) => s.child)) log("Stopping services ...");
   for (const service of services) service.stop();
   const deadline = Date.now() + STOP_TIMEOUT_MS;
@@ -728,11 +762,13 @@ async function main() {
   await assertPortsFree();
 
   const withCelery = celeryEnabled();
-  runPreflight(python, { skipRedis: !withCelery });
-  runMigrations(python);
+  await runPreflight(python, { skipRedis: !withCelery });
+  if (stopping) return;
+  await runMigrations(python);
+  if (stopping) return;
   if (!DEV) {
     const reason = frontendBuildReason();
-    if (reason) buildFrontend(reason);
+    if (reason) await buildFrontend(reason);
     else log("Frontend build is up to date.");
   }
   if (withCelery) resetBeatState();

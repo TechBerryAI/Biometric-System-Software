@@ -8,16 +8,12 @@ import {
   refreshSession,
   verifyMfaLogin,
   type AuthTokens,
+  type CurrentUserResponse,
   type LoginChallengeResponse,
 } from "@/features/auth/api";
 
-type SessionUser = {
-  user_uuid: string;
-  email: string;
-  full_name?: string | null;
-  role: UserRole;
-  active: boolean;
-};
+// Populated from /auth/me, so it carries capabilities too; role keeps the wider client union.
+type SessionUser = Omit<CurrentUserResponse, "role"> & { role: UserRole };
 
 type SessionState = {
   accessToken?: string;

@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -68,6 +68,11 @@ export function Login() {
             <Button className="w-full" type="submit" disabled={submitting}>
               {submitting ? "Signing in..." : "Sign in"}
             </Button>
+            <div className="text-center">
+              <Link to="/forgot-password" className="text-xs font-medium text-ink-muted hover:text-ink">
+                Forgot password?
+              </Link>
+            </div>
           </form>
         </CardContent>
       </Card>

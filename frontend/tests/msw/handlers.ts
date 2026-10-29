@@ -67,6 +67,12 @@ export const mockOpsMetrics = {
 };
 
 export const handlers = [
+  http.post(`${base}/auth/forgot-password`, async () => {
+    return HttpResponse.json({ status: "ok" });
+  }),
+  http.post(`${base}/auth/reset-password`, async () => {
+    return HttpResponse.json({ status: "ok" });
+  }),
   http.post(`${base}/auth/login`, async () => {
     return HttpResponse.json(mockTokens);
   }),

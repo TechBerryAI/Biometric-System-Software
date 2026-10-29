@@ -76,3 +76,29 @@ def test_tls_only_failure_suggests_sslmode_disable(monkeypatch: pytest.MonkeyPat
 def test_redis_url_password_is_masked() -> None:
     assert check_services._mask_url("redis://:hunter2@10.0.0.1:6379/0") == "redis://:***@10.0.0.1:6379/0"
     assert check_services._mask_url("redis://10.0.0.1:6379/0") == "redis://10.0.0.1:6379/0"
+
+
+@pytest.mark.testid("BE-UNIT-PREFLIGHT-005")
+def test_forever_mode_waits_until_database_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
+    outcomes = iter(
+        [
+            check_services.CheckResult(ok=False, summary="PostgreSQL: server closed the connection"),
+            check_services.CheckResult(ok=False, summary="PostgreSQL: server closed the connection"),
+            check_services.CheckResult(ok=True, summary="PostgreSQL ok"),
+        ]
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr(check_services, "check_database", lambda _settings: next(outcomes))
+    monkeypatch.setattr(check_services.time, "sleep", sleeps.append)
+
+    assert check_services.main(["--forever", "--skip-redis"]) == 0
+    assert len(sleeps) == 2
+
+
+@pytest.mark.testid("BE-UNIT-PREFLIGHT-006")
+def test_forever_mode_still_exits_on_configuration_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    failure = check_services.CheckResult(ok=False, retryable=False, summary="password authentication failed")
+    monkeypatch.setattr(check_services, "check_database", lambda _settings: failure)
+    monkeypatch.setattr(check_services.time, "sleep", lambda _s: pytest.fail("must not wait on a config error"))
+
+    assert check_services.main(["--forever", "--skip-redis"]) == 1

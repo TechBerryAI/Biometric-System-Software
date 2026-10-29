@@ -248,7 +248,14 @@ export function AttendanceAdjustmentModal({
                 </div>
               ) : null}
               <div className="grid gap-4 sm:grid-cols-2">
-                <TimePartsEditor label="Check-in time" value={checkInParts} onChange={setCheckInParts} />
+                <TimePartsEditor
+                  label="Check-in time"
+                  value={checkInParts}
+                  onChange={(next) => {
+                    // Only optional editors emit null (via Clear); check-in is required.
+                    if (next) setCheckInParts(next);
+                  }}
+                />
                 <TimePartsEditor
                   label="Check-out time"
                   value={checkOutParts}

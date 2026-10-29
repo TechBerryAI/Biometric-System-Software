@@ -54,7 +54,8 @@ node start-vm.js            # or: make start-vm / npm run start:vm
 `scripts/start-vm.js` runs the stack in production mode:
 
 1. Refuses to start twice, and stops processes left over from an earlier run that was killed.
-2. Waits for PostgreSQL and Redis (`SERVICE_WAIT_SECONDS`, default 180) and explains failures
+2. Waits for PostgreSQL and Redis until they are reachable (set `SERVICE_WAIT_SECONDS` to give up sooner),
+   then starts on its own; configuration errors such as a wrong password stop immediately. Failures are explained
    (`backend/scripts/check_services.py`; run it by hand any time with `backend/.venv/bin/python scripts/check_services.py` from `backend/`).
 3. Applies migrations (`alembic upgrade head`, retried briefly if the database is restarting).
 4. Rebuilds `frontend/dist` only when frontend sources changed (`FRONTEND_BUILD=always|never` overrides).

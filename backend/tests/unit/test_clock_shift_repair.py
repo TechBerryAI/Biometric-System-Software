@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.app_timezone import set_app_timezone
+from app.core.app_timezone import as_aware, set_app_timezone
 from app.core.config import get_settings
 from app.domains.attendance.models.attendance_ingest_skip import AttendanceIngestSkip
 from app.domains.attendance.models.attendance_log import AttendanceLog
@@ -23,6 +23,11 @@ from tests.factories import make_attendance_log, make_employee
 
 IST = ZoneInfo("Asia/Kolkata")
 UTC = ZoneInfo("UTC")
+
+
+def _stored_ist(ts: datetime) -> datetime:
+    """Stamps are stored as UTC; SQLite returns them naive, so never let the host zone interpret them."""
+    return as_aware(ts, UTC).astimezone(IST)
 
 
 def _lagged_log(employee, *, punch_ist: datetime, created_ist: datetime, punch_type: str = "0") -> AttendanceLog:
@@ -70,12 +75,12 @@ def test_twelve_hour_repair_moves_sunday_night_to_monday(db_session: Session, is
 
     db_session.refresh(friday_morning)
     db_session.refresh(sunday_night)
-    assert friday_morning.timestamp.astimezone(IST) == datetime(2026, 8, 21, 9, 10, tzinfo=IST)
-    assert sunday_night.timestamp.astimezone(IST) == datetime(2026, 8, 24, 9, 30, tzinfo=IST)
+    assert _stored_ist(friday_morning.timestamp) == datetime(2026, 8, 21, 9, 10, tzinfo=IST)
+    assert _stored_ist(sunday_night.timestamp) == datetime(2026, 8, 24, 9, 30, tzinfo=IST)
 
     skips = list(db_session.execute(select(AttendanceIngestSkip)).scalars().all())
     assert len(skips) == 1
-    assert skips[0].timestamp.astimezone(IST) == datetime(2026, 8, 23, 21, 30, tzinfo=IST)
+    assert _stored_ist(skips[0].timestamp) == datetime(2026, 8, 23, 21, 30, tzinfo=IST)
 
     again = repair_twelve_hour_clock_shift(db_session, apply=True)
     assert again.matched == 0
@@ -134,7 +139,7 @@ def test_repaired_original_stamps_are_not_reinserted(db_session: Session, ist_se
     assert result.inserted == 0
     rows = list(db_session.execute(select(AttendanceLog)).scalars().all())
     assert len(rows) == 1
-    assert rows[0].timestamp.astimezone(IST) == datetime(2026, 8, 24, 9, 30, tzinfo=IST)
+    assert _stored_ist(rows[0].timestamp) == datetime(2026, 8, 24, 9, 30, tzinfo=IST)
 
 
 @pytest.mark.testid("BE-UNIT-SHIFT-004")
@@ -169,4 +174,4 @@ def test_purge_deletes_skip_originals_outside_lag_window(db_session: Session, is
     remaining = list(db_session.execute(select(AttendanceLog)).scalars().all())
     assert len(remaining) == 1
     assert remaining[0].id == kept.id
-    assert remaining[0].timestamp.astimezone(IST) == repaired_ist
+    assert _stored_ist(remaining[0].timestamp) == repaired_ist

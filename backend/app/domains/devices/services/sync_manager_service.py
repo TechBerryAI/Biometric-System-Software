@@ -101,11 +101,13 @@ def sync_device(
 
     user_source, attendance_source = _sync_sources_for_device(gateway, device)
 
-    tcp_ok, tcp_detail = _preflight_device_tcp(device, settings)
-    if not tcp_ok:
-        logger.info("Skipping sync for %s — device TCP unreachable: %s", device_id, tcp_detail)
-        update_device_health_for_device(db, device, status="OFFLINE", detail=tcp_detail)
-        return _skipped_sync("device_unreachable", detail=tcp_detail)
+    # Push-only devices are read from offline_buffer and are often not reachable over TCP.
+    if (device.connectivity_mode or "pull").lower() in {"pull", "both"}:
+        tcp_ok, tcp_detail = _preflight_device_tcp(device, settings)
+        if not tcp_ok:
+            logger.info("Skipping sync for %s — device TCP unreachable: %s", device_id, tcp_detail)
+            update_device_health_for_device(db, device, status="OFFLINE", detail=tcp_detail)
+            return _skipped_sync("device_unreachable", detail=tcp_detail)
 
     try:
         with device_session_lock(device_id, settings):
