@@ -316,6 +316,8 @@ def reset_password_with_otp(db: Session, email: str, otp: str, new_password: str
         return None
     if _as_utc(reset.expires_at) <= _as_utc(_utcnow()):
         return None
+    if verify_password(new_password, user.password_hash):
+        raise ValueError("New password must differ from current password")
 
     user.password_hash = hash_password(new_password)
     revoke_all_user_refresh_tokens(db, user.id)

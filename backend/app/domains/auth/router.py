@@ -369,7 +369,19 @@ def reset_password(
     request: Request,
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
-    user = reset_password_with_otp(db, payload.email, payload.otp, payload.new_password)
+    try:
+        user = reset_password_with_otp(db, payload.email, payload.otp, payload.new_password)
+    except ValueError as exc:
+        record_audit_event(
+            db,
+            action="auth.password_reset",
+            resource_type="user",
+            resource_id=str(payload.email).strip().lower(),
+            outcome="failure",
+            request=request,
+        )
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if user is None:
         record_audit_event(
             db,

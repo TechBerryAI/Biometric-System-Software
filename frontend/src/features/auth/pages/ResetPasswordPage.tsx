@@ -1,12 +1,15 @@
-import { FormEvent, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { FormEvent, useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { confirmPasswordReset } from "@/features/auth/api";
 import { getApiErrorMessage } from "@/shared/api/client";
 
+const SIGN_IN_REDIRECT_MS = 1400;
+
 export function ResetPassword() {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [email, setEmail] = useState(searchParams.get("email")?.trim().toLowerCase() ?? "");
   const [otp, setOtp] = useState("");
@@ -15,6 +18,14 @@ export function ResetPassword() {
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!submitted) return;
+    const timer = window.setTimeout(() => {
+      navigate("/login", { replace: true });
+    }, SIGN_IN_REDIRECT_MS);
+    return () => window.clearTimeout(timer);
+  }, [navigate, submitted]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -55,17 +66,14 @@ export function ResetPassword() {
     <div className="flex min-h-screen items-center justify-center bg-surface p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Reset password</CardTitle>
-          <CardDescription>Enter the 6-digit email code, then choose a new password.</CardDescription>
+          <CardTitle>{submitted ? "Password reset" : "Reset password"}</CardTitle>
+          {submitted ? null : (
+            <CardDescription>Enter the 6-digit email code, then choose a new password.</CardDescription>
+          )}
         </CardHeader>
         <CardContent>
           {submitted ? (
-            <div className="space-y-4">
-              <p className="text-sm text-ink-muted">Your password has been updated. You can sign in with the new password.</p>
-              <Button className="w-full" asChild>
-                <Link to="/login">Sign in</Link>
-              </Button>
-            </div>
+            <p className="text-sm text-ink-muted">Password reset. Taking you back to sign in.</p>
           ) : (
             <form className="space-y-4" onSubmit={onSubmit}>
               <div className="space-y-2">

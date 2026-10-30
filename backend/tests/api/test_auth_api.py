@@ -229,6 +229,31 @@ def test_reset_password_success_and_old_password_fails(
 
 
 @pytest.mark.testid("BE-API-AUTH-012")
+def test_reset_password_rejects_current_password(client: TestClient, admin_user: User) -> None:
+    from unittest.mock import patch
+
+    with patch("app.domains.auth.services.auth_service.send_password_reset_email") as send_mail:
+        forgot = client.post("/auth/forgot-password", json={"email": admin_user.email})
+    assert forgot.status_code == 200
+    otp = send_mail.call_args.kwargs["otp"]
+
+    same = client.post(
+        "/auth/reset-password",
+        json={
+            "email": admin_user.email,
+            "otp": otp,
+            "new_password": "Secret123!",
+            "confirm_password": "Secret123!",
+        },
+    )
+    assert same.status_code == 400
+    assert same.json()["detail"] == "New password must differ from current password"
+
+    still_old = client.post("/auth/login", json={"email": admin_user.email, "password": "Secret123!"})
+    assert still_old.status_code == 200
+
+
+@pytest.mark.testid("BE-API-AUTH-012")
 def test_reset_password_rejects_expired_and_used_tokens(
     client: TestClient, admin_user: User, db_session
 ) -> None:

@@ -109,3 +109,26 @@ def test_reset_password_with_otp_rejects_expired(db_session: Session) -> None:
 
     assert reset_password_with_otp(db_session, user.email, otp, "NewSecret123!") is None
     assert authenticate_user(db_session, user.email, "Secret123!") is not None
+
+
+@pytest.mark.testid("BE-UNIT-AUTH-001")
+def test_reset_password_with_otp_rejects_same_password(db_session: Session) -> None:
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    user = make_user(email="reset-same@example.com", password="Secret123!")
+    db_session.add(user)
+    db_session.flush()
+    otp = "654321"
+    db_session.add(
+        PasswordResetToken(
+            user_id=user.id,
+            token_hash=hash_password_reset_otp(user.id, otp),
+            expires_at=datetime.now(ZoneInfo("UTC")) + timedelta(minutes=10),
+        )
+    )
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="New password must differ from current password"):
+        reset_password_with_otp(db_session, user.email, otp, "Secret123!")
+    assert authenticate_user(db_session, user.email, "Secret123!") is not None
