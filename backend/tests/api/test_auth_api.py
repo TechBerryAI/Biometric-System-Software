@@ -146,13 +146,16 @@ def test_login_wrong_password(client: TestClient, admin_user: User) -> None:
 
 
 @pytest.mark.testid("BE-API-AUTH-011")
-def test_forgot_password_unknown_email_still_ok(client: TestClient, db_session) -> None:
+def test_forgot_password_unknown_email_is_rejected(client: TestClient, db_session) -> None:
     from app.domains.auth.models.password_reset_token import PasswordResetToken
+    from app.domains.auth.models.user import User
 
+    before = db_session.query(User).count()
     response = client.post("/auth/forgot-password", json={"email": "missing@example.com"})
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    assert response.status_code == 404
+    assert response.json()["detail"] == "No account found for this email."
     assert db_session.query(PasswordResetToken).count() == 0
+    assert db_session.query(User).count() == before
 
 
 @pytest.mark.testid("BE-API-AUTH-011")
@@ -187,8 +190,8 @@ def test_forgot_password_skips_env_operator(client: TestClient, monkeypatch: pyt
     try:
         with patch("app.domains.auth.services.auth_service.send_password_reset_email") as send_mail:
             response = client.post("/auth/forgot-password", json={"email": "operator-env@example.com"})
-        assert response.status_code == 200
-        assert response.json()["status"] == "ok"
+        assert response.status_code == 404
+        assert response.json()["detail"] == "No account found for this email."
         assert db_session.query(PasswordResetToken).count() == 0
         send_mail.assert_not_called()
     finally:

@@ -335,8 +335,23 @@ def forgot_password(
     if limiter.is_blocked(email):
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many reset attempts")
 
-    request_password_reset(db, email)
+    issued = request_password_reset(db, email)
     limiter.register_failure(email)
+    if not issued:
+        record_audit_event(
+            db,
+            action="auth.password_reset_request",
+            resource_type="user",
+            resource_id=email,
+            outcome="failure",
+            request=request,
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found for this email.",
+        )
+
     record_audit_event(
         db,
         action="auth.password_reset_request",

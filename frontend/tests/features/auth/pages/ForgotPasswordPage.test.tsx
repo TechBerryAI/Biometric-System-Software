@@ -28,8 +28,30 @@ describe("FE-UNIT-FORGOT-001 Forgot password page", () => {
     await waitFor(() => {
       expect(requestPasswordResetMock).toHaveBeenCalledWith("admin@company.com");
     });
-    expect(screen.getByText(/if an account exists for that email/i)).toBeInTheDocument();
+    expect(screen.getByText(/we sent a reset link to that email/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /back to sign in/i })).toHaveAttribute("href", "/login");
+  });
+
+  it("shows an error when the account is not in the system", async () => {
+    const user = userEvent.setup();
+    const err = new axios.AxiosError("Request failed");
+    err.response = {
+      status: 404,
+      statusText: "Not Found",
+      headers: {},
+      config: { headers: {} } as never,
+      data: { detail: "No account found for this email." },
+    };
+    requestPasswordResetMock.mockRejectedValue(err);
+    renderWithProviders(<ForgotPassword />, { withAuth: false, route: "/forgot-password" });
+
+    await user.type(screen.getByPlaceholderText("admin@company.com"), "unknown@company.com");
+    await user.click(screen.getByRole("button", { name: /send reset link/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("No account found for this email.")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/we sent a reset link/i)).not.toBeInTheDocument();
   });
 
   it("shows an API error when the request fails", async () => {

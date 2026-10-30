@@ -59,12 +59,32 @@ def test_request_password_reset_skips_unknown_and_viewer(db_session: Session) ->
     db_session.commit()
 
     with patch("app.domains.auth.services.auth_service.send_password_reset_email") as send_mail:
-        request_password_reset(db_session, "missing@example.com")
-        request_password_reset(db_session, viewer.email)
+        missing = request_password_reset(db_session, "missing@example.com")
+        viewer_result = request_password_reset(db_session, viewer.email)
         db_session.commit()
 
+    assert missing is False
+    assert viewer_result is False
     send_mail.assert_not_called()
     assert db_session.query(PasswordResetToken).count() == 0
+
+
+@pytest.mark.testid("BE-UNIT-AUTH-001")
+def test_request_password_reset_sends_only_for_existing_account(db_session: Session) -> None:
+    from unittest.mock import patch
+
+    user = make_user(email="reset-exists@example.com", password="Secret123!")
+    db_session.add(user)
+    db_session.commit()
+
+    with patch("app.domains.auth.services.auth_service.send_password_reset_email") as send_mail:
+        issued = request_password_reset(db_session, user.email)
+        db_session.commit()
+
+    assert issued is True
+    send_mail.assert_called_once()
+    assert send_mail.call_args.kwargs["recipient"] == user.email
+    assert db_session.query(PasswordResetToken).count() == 1
 
 
 @pytest.mark.testid("BE-UNIT-AUTH-001")

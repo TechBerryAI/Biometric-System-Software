@@ -251,14 +251,18 @@ def _invalidate_unused_reset_tokens(db: Session, user_id: int) -> None:
         token.used_at = now
 
 
-def request_password_reset(db: Session, email: str) -> None:
+def request_password_reset(db: Session, email: str) -> bool:
+    """Send a reset email only when an existing, eligible login account matches.
+
+    Never creates a user. Returns True only after a token is stored for that account.
+    """
     normalized_email = email.strip().lower()
     if is_env_operator_email(normalized_email):
-        return
+        return False
 
     user = db.execute(select(User).where(User.email == normalized_email)).scalar_one_or_none()
     if user is None or not user.active or user.role not in ALLOWED_APP_ROLES:
-        return
+        return False
 
     settings = get_settings()
     raw_token = generate_refresh_token()
@@ -277,6 +281,7 @@ def request_password_reset(db: Session, email: str) -> None:
         recipient=user.email,
         reset_url=f"{frontend_url}/reset-password?token={raw_token}",
     )
+    return True
 
 
 def reset_password_with_token(db: Session, raw_token: str, new_password: str) -> User | None:

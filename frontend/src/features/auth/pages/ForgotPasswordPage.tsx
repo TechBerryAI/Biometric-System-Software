@@ -6,8 +6,7 @@ import { Input } from "@/components/ui/input";
 import { requestPasswordReset } from "@/features/auth/api";
 import { getApiErrorMessage } from "@/shared/api/client";
 
-const SUCCESS_MESSAGE =
-  "If an account exists for that email, we sent a reset link. Check your inbox.";
+const SUCCESS_MESSAGE = "We sent a reset link to that email. Check your inbox.";
 
 export function ForgotPassword() {
   const [email, setEmail] = useState("");
@@ -34,7 +33,10 @@ export function ForgotPassword() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Forgot password</CardTitle>
-          <CardDescription>Enter your work email and we will send a reset link if an account exists.</CardDescription>
+          <CardDescription>
+            Enter the email of an existing management account. A reset link is sent only if that account is already in
+            the system.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {submitted ? (
