@@ -8,7 +8,8 @@ import { getApiErrorMessage } from "@/shared/api/client";
 
 export function ResetPassword() {
   const [searchParams] = useSearchParams();
-  const token = searchParams.get("token")?.trim() ?? "";
+  const [email, setEmail] = useState(searchParams.get("email")?.trim().toLowerCase() ?? "");
+  const [otp, setOtp] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -18,6 +19,14 @@ export function ResetPassword() {
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!email.trim()) {
+      setError("Enter the email for this account.");
+      return;
+    }
+    if (!/^\d{6}$/.test(otp.trim())) {
+      setError("Enter the 6-digit code from your email.");
+      return;
+    }
     if (newPassword.length < 8) {
       setError("New password must be at least 8 characters.");
       return;
@@ -29,7 +38,8 @@ export function ResetPassword() {
     setSubmitting(true);
     try {
       await confirmPasswordReset({
-        token,
+        email,
+        otp: otp.trim(),
         new_password: newPassword,
         confirm_password: confirmPassword,
       });
@@ -46,17 +56,10 @@ export function ResetPassword() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Reset password</CardTitle>
-          <CardDescription>Choose a new password for your management account.</CardDescription>
+          <CardDescription>Enter the 6-digit email code, then choose a new password.</CardDescription>
         </CardHeader>
         <CardContent>
-          {!token ? (
-            <div className="space-y-4">
-              <p className="text-xs text-destructive">This reset link is missing or invalid. Request a new one.</p>
-              <Button className="w-full" asChild>
-                <Link to="/forgot-password">Request a new link</Link>
-              </Button>
-            </div>
-          ) : submitted ? (
+          {submitted ? (
             <div className="space-y-4">
               <p className="text-sm text-ink-muted">Your password has been updated. You can sign in with the new password.</p>
               <Button className="w-full" asChild>
@@ -65,6 +68,29 @@ export function ResetPassword() {
             </div>
           ) : (
             <form className="space-y-4" onSubmit={onSubmit}>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-ink-muted">Email</label>
+                <Input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  type="email"
+                  autoComplete="email"
+                  required
+                  placeholder="admin@company.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-ink-muted">Verification code</label>
+                <Input
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  required
+                  maxLength={6}
+                  placeholder="6-digit code"
+                />
+              </div>
               <div className="space-y-2">
                 <label className="text-xs font-medium text-ink-muted">New password</label>
                 <Input
@@ -94,8 +120,8 @@ export function ResetPassword() {
                 {submitting ? "Updating..." : "Update password"}
               </Button>
               <div className="text-center">
-                <Link to="/login" className="text-xs font-medium text-ink-muted hover:text-ink">
-                  Back to sign in
+                <Link to="/forgot-password" className="text-xs font-medium text-ink-muted hover:text-ink">
+                  Request a new code
                 </Link>
               </div>
             </form>

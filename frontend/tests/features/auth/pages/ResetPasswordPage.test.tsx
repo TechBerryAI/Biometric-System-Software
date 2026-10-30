@@ -16,28 +16,24 @@ describe("FE-UNIT-RESET-001 Reset password page", () => {
     confirmPasswordResetMock.mockReset();
   });
 
-  it("shows an error when the reset token is missing", () => {
-    renderWithProviders(<ResetPassword />, { withAuth: false, route: "/reset-password" });
-    expect(screen.getByText(/reset link is missing or invalid/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /request a new link/i })).toHaveAttribute("href", "/forgot-password");
-    expect(confirmPasswordResetMock).not.toHaveBeenCalled();
-  });
-
-  it("submits a new password and shows success", async () => {
+  it("submits email, OTP, and a new password", async () => {
     const user = userEvent.setup();
     confirmPasswordResetMock.mockResolvedValue(undefined);
     renderWithProviders(<ResetPassword />, {
       withAuth: false,
-      route: "/reset-password?token=abcdefghijklmnopqrstuvwxyz",
+      route: "/reset-password?email=admin@company.com",
     });
 
+    expect(screen.getByDisplayValue("admin@company.com")).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("6-digit code"), "847291");
     await user.type(screen.getByPlaceholderText("Minimum 8 characters"), "NewSecret123!");
     await user.type(screen.getByPlaceholderText("Re-enter new password"), "NewSecret123!");
     await user.click(screen.getByRole("button", { name: /update password/i }));
 
     await waitFor(() => {
       expect(confirmPasswordResetMock).toHaveBeenCalledWith({
-        token: "abcdefghijklmnopqrstuvwxyz",
+        email: "admin@company.com",
+        otp: "847291",
         new_password: "NewSecret123!",
         confirm_password: "NewSecret123!",
       });
@@ -46,7 +42,7 @@ describe("FE-UNIT-RESET-001 Reset password page", () => {
     expect(screen.getByRole("link", { name: /sign in/i })).toHaveAttribute("href", "/login");
   });
 
-  it("shows an API error for an expired token", async () => {
+  it("shows an API error for an expired OTP", async () => {
     const user = userEvent.setup();
     const err = new axios.AxiosError("Request failed");
     err.response = {
@@ -54,20 +50,21 @@ describe("FE-UNIT-RESET-001 Reset password page", () => {
       statusText: "Bad Request",
       headers: {},
       config: { headers: {} } as never,
-      data: { detail: "Invalid or expired reset token" },
+      data: { detail: "Invalid or expired OTP" },
     };
     confirmPasswordResetMock.mockRejectedValue(err);
     renderWithProviders(<ResetPassword />, {
       withAuth: false,
-      route: "/reset-password?token=abcdefghijklmnopqrstuvwxyz",
+      route: "/reset-password?email=admin@company.com",
     });
 
+    await user.type(screen.getByPlaceholderText("6-digit code"), "847291");
     await user.type(screen.getByPlaceholderText("Minimum 8 characters"), "NewSecret123!");
     await user.type(screen.getByPlaceholderText("Re-enter new password"), "NewSecret123!");
     await user.click(screen.getByRole("button", { name: /update password/i }));
 
     await waitFor(() => {
-      expect(screen.getByText("Invalid or expired reset token")).toBeInTheDocument();
+      expect(screen.getByText("Invalid or expired OTP")).toBeInTheDocument();
     });
   });
 });

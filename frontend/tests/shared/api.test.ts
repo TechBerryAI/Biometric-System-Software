@@ -40,7 +40,8 @@ describe("FE-UNIT-API-001 api helpers", () => {
     await expect(requestPasswordReset("admin@company.com")).resolves.toBeUndefined();
     await expect(
       confirmPasswordReset({
-        token: "abcdefghijklmnopqrstuvwxyz",
+        email: "admin@company.com",
+        otp: "847291",
         new_password: "NewSecret123!",
         confirm_password: "NewSecret123!",
       })

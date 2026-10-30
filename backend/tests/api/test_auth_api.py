@@ -172,8 +172,9 @@ def test_forgot_password_creates_token_and_sends_mail(
     assert response.json()["status"] == "ok"
     assert db_session.query(PasswordResetToken).count() == 1
     send_mail.assert_called_once()
-    reset_url = send_mail.call_args.kwargs["reset_url"]
-    assert "/reset-password?token=" in reset_url
+    otp = send_mail.call_args.kwargs["otp"]
+    assert otp.isdigit() and len(otp) == 6
+    assert "reset_url" not in send_mail.call_args.kwargs
     assert send_mail.call_args.kwargs["recipient"] == admin_user.email
 
 
@@ -207,12 +208,13 @@ def test_reset_password_success_and_old_password_fails(
     with patch("app.domains.auth.services.auth_service.send_password_reset_email") as send_mail:
         forgot = client.post("/auth/forgot-password", json={"email": admin_user.email})
     assert forgot.status_code == 200
-    raw_token = send_mail.call_args.kwargs["reset_url"].split("token=", 1)[1]
+    otp = send_mail.call_args.kwargs["otp"]
 
     reset = client.post(
         "/auth/reset-password",
         json={
-            "token": raw_token,
+            "email": admin_user.email,
+            "otp": otp,
             "new_password": "ResetPass123!",
             "confirm_password": "ResetPass123!",
         },
@@ -238,12 +240,13 @@ def test_reset_password_rejects_expired_and_used_tokens(
 
     with patch("app.domains.auth.services.auth_service.send_password_reset_email") as send_mail:
         client.post("/auth/forgot-password", json={"email": admin_user.email})
-    raw_token = send_mail.call_args.kwargs["reset_url"].split("token=", 1)[1]
+    otp = send_mail.call_args.kwargs["otp"]
 
     first = client.post(
         "/auth/reset-password",
         json={
-            "token": raw_token,
+            "email": admin_user.email,
+            "otp": otp,
             "new_password": "ResetPass123!",
             "confirm_password": "ResetPass123!",
         },
@@ -252,17 +255,18 @@ def test_reset_password_rejects_expired_and_used_tokens(
     reused = client.post(
         "/auth/reset-password",
         json={
-            "token": raw_token,
+            "email": admin_user.email,
+            "otp": otp,
             "new_password": "AnotherPass123!",
             "confirm_password": "AnotherPass123!",
         },
     )
     assert reused.status_code == 400
-    assert reused.json()["detail"] == "Invalid or expired reset token"
+    assert reused.json()["detail"] == "Invalid or expired OTP"
 
     with patch("app.domains.auth.services.auth_service.send_password_reset_email") as send_mail:
         client.post("/auth/forgot-password", json={"email": admin_user.email})
-    expired_token = send_mail.call_args.kwargs["reset_url"].split("token=", 1)[1]
+    expired_otp = send_mail.call_args.kwargs["otp"]
     row = db_session.query(PasswordResetToken).order_by(PasswordResetToken.id.desc()).first()
     assert row is not None
     row.expires_at = datetime.now(ZoneInfo("UTC")) - timedelta(minutes=1)
@@ -271,7 +275,8 @@ def test_reset_password_rejects_expired_and_used_tokens(
     expired = client.post(
         "/auth/reset-password",
         json={
-            "token": expired_token,
+            "email": admin_user.email,
+            "otp": expired_otp,
             "new_password": "FreshPass123!",
             "confirm_password": "FreshPass123!",
         },

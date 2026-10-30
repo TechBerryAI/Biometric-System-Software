@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -251,10 +252,18 @@ def _invalidate_unused_reset_tokens(db: Session, user_id: int) -> None:
         token.used_at = now
 
 
-def request_password_reset(db: Session, email: str) -> bool:
-    """Send a reset email only when an existing, eligible login account matches.
+def generate_password_reset_otp() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
 
-    Never creates a user. Returns True only after a token is stored for that account.
+
+def hash_password_reset_otp(user_id: int, otp: str) -> str:
+    return hash_refresh_token(f"{user_id}:{otp.strip()}")
+
+
+def request_password_reset(db: Session, email: str) -> bool:
+    """Email a one-time OTP only when an existing, eligible login account matches.
+
+    Never creates a user. Returns True only after an OTP is stored for that account.
     """
     normalized_email = email.strip().lower()
     if is_env_operator_email(normalized_email):
@@ -265,39 +274,47 @@ def request_password_reset(db: Session, email: str) -> bool:
         return False
 
     settings = get_settings()
-    raw_token = generate_refresh_token()
+    otp = generate_password_reset_otp()
     _invalidate_unused_reset_tokens(db, user.id)
     db.add(
         PasswordResetToken(
             user_id=user.id,
-            token_hash=hash_refresh_token(raw_token),
+            token_hash=hash_password_reset_otp(user.id, otp),
             expires_at=_utcnow() + timedelta(minutes=settings.password_reset_expire_minutes),
         )
     )
     db.flush()
 
-    frontend_url = (settings.frontend_url or "http://localhost:5173").rstrip("/")
     send_password_reset_email(
         recipient=user.email,
-        reset_url=f"{frontend_url}/reset-password?token={raw_token}",
+        otp=otp,
+        recipient_name=user.full_name,
     )
     return True
 
 
-def reset_password_with_token(db: Session, raw_token: str, new_password: str) -> User | None:
-    token_hash = hash_refresh_token(raw_token.strip())
+def reset_password_with_otp(db: Session, email: str, otp: str, new_password: str) -> User | None:
+    normalized_email = email.strip().lower()
+    digits = otp.strip()
+    if not digits.isdigit() or len(digits) != 6:
+        return None
+    if is_env_operator_email(normalized_email):
+        return None
+
+    user = db.execute(select(User).where(User.email == normalized_email)).scalar_one_or_none()
+    if user is None or not user.active or user.role not in ALLOWED_APP_ROLES:
+        return None
+
+    token_hash = hash_password_reset_otp(user.id, digits)
     reset = db.execute(
-        select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+        select(PasswordResetToken).where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.token_hash == token_hash,
+        )
     ).scalar_one_or_none()
     if reset is None or reset.used_at is not None:
         return None
     if _as_utc(reset.expires_at) <= _as_utc(_utcnow()):
-        return None
-
-    user = db.get(User, reset.user_id)
-    if user is None or not user.active or user.role not in ALLOWED_APP_ROLES:
-        return None
-    if is_env_operator_email(user.email):
         return None
 
     user.password_hash = hash_password(new_password)

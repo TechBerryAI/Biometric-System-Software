@@ -45,11 +45,17 @@ export async function requestPasswordReset(email: string): Promise<void> {
 }
 
 export async function confirmPasswordReset(payload: {
-  token: string;
+  email: string;
+  otp: string;
   new_password: string;
   confirm_password: string;
 }): Promise<void> {
-  await rawApi.post("/auth/reset-password", payload);
+  await rawApi.post("/auth/reset-password", {
+    email: payload.email.trim().toLowerCase(),
+    otp: payload.otp.trim(),
+    new_password: payload.new_password,
+    confirm_password: payload.confirm_password,
+  });
 }
 
 export async function loginWithPassword(

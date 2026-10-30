@@ -44,7 +44,7 @@ from app.domains.auth.services.auth_service import (
     ensure_bootstrap_admin,
     issue_session_tokens,
     request_password_reset,
-    reset_password_with_token,
+    reset_password_with_otp,
     revoke_refresh_token,
     rotate_refresh_token,
 )
@@ -369,7 +369,7 @@ def reset_password(
     request: Request,
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
-    user = reset_password_with_token(db, payload.token, payload.new_password)
+    user = reset_password_with_otp(db, payload.email, payload.otp, payload.new_password)
     if user is None:
         record_audit_event(
             db,
@@ -379,7 +379,7 @@ def reset_password(
             request=request,
         )
         db.commit()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP")
 
     record_audit_event(db, action="auth.password_reset", actor=user, request=request)
     db.commit()
