@@ -38,7 +38,7 @@ class DayAdjustmentPreview(BaseModel):
 class AttendanceAdjustRequest(BaseModel):
     employee_id: int
     local_date: date
-    new_check_in: datetime
+    new_check_in: datetime | None = None
     new_check_out: datetime | None = None
 
 
@@ -148,17 +148,27 @@ def apply_attendance_adjustment(
 ) -> AttendanceAdjustmentRead:
     settings = get_settings()
     tz = ZoneInfo(settings.resolved_timezone())
-    check_in = payload.new_check_in if payload.new_check_in.tzinfo else payload.new_check_in.replace(tzinfo=tz)
+    check_in = None
+    if payload.new_check_in is not None:
+        check_in = (
+            payload.new_check_in
+            if payload.new_check_in.tzinfo
+            else payload.new_check_in.replace(tzinfo=tz)
+        )
     check_out = None
     if payload.new_check_out is not None:
-        check_out = payload.new_check_out if payload.new_check_out.tzinfo else payload.new_check_out.replace(tzinfo=tz)
+        check_out = (
+            payload.new_check_out
+            if payload.new_check_out.tzinfo
+            else payload.new_check_out.replace(tzinfo=tz)
+        )
 
     try:
         result = apply_attendance_correction(
             db,
             employee_id=payload.employee_id,
             local_date=payload.local_date,
-            new_check_in=check_in.astimezone(ZoneInfo("UTC")),
+            new_check_in=check_in.astimezone(ZoneInfo("UTC")) if check_in else None,
             new_check_out=check_out.astimezone(ZoneInfo("UTC")) if check_out else None,
             actor_user_uuid=user.user_uuid,
             correlation_id=getattr(request.state, "request_id", None),

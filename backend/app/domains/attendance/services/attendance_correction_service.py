@@ -65,10 +65,12 @@ class AttendanceAdjustmentResult:
 def _validate_correction_times(
     *,
     local_date: date,
-    new_check_in: datetime,
+    new_check_in: datetime | None,
     new_check_out: datetime | None,
     settings: Settings,
 ) -> None:
+    if new_check_in is None and new_check_out is not None:
+        raise ValueError("check_out requires check_in. Clear both times to mark absent.")
     tz = ZoneInfo(settings.resolved_timezone())
     start_local = datetime.combine(local_date, dt_time.min, tzinfo=tz)
     end_local = start_local + timedelta(days=1)
@@ -78,7 +80,7 @@ def _validate_correction_times(
         local = ts.astimezone(tz)
         if local < start_local or local >= end_local:
             raise ValueError(f"{label} must fall on {local_date.isoformat()} in the configured timezone.")
-    if new_check_out is not None and new_check_out <= new_check_in:
+    if new_check_in is not None and new_check_out is not None and new_check_out <= new_check_in:
         raise ValueError("check_out must be after check_in.")
 
 
@@ -112,7 +114,7 @@ def _build_correct_attendance_payload(
     employee: Employee,
     local_date: date,
     delete_timestamps: list[datetime],
-    new_check_in: datetime,
+    new_check_in: datetime | None,
     new_check_out: datetime | None,
     db_only: bool = False,
 ) -> dict[str, Any]:
@@ -122,7 +124,7 @@ def _build_correct_attendance_payload(
         "user_id": str(employee.device_user_id),
         "uid": employee.device_uid,
         "delete_timestamps": _iso_ts_list(delete_timestamps),
-        "new_check_in": new_check_in.astimezone(ZoneInfo("UTC")).isoformat(),
+        "new_check_in": new_check_in.astimezone(ZoneInfo("UTC")).isoformat() if new_check_in else None,
         "new_check_out": new_check_out.astimezone(ZoneInfo("UTC")).isoformat() if new_check_out else None,
         "db_only": db_only,
         "device_updated": not db_only,
@@ -293,7 +295,7 @@ def _apply_db_replacement(
     *,
     employee: Employee,
     local_date: date,
-    new_check_in: datetime,
+    new_check_in: datetime | None,
     new_check_out: datetime | None,
     settings: Settings,
 ) -> None:
@@ -346,7 +348,9 @@ def finalize_pending_correction_for_command(db: Session, command_uuid: str) -> A
     local_date_raw = payload.get("local_date")
     new_check_in = _parse_payload_datetime(payload.get("new_check_in"))
     new_check_out = _parse_payload_datetime(payload.get("new_check_out"))
-    if employee_id is None or local_date_raw is None or new_check_in is None:
+    if employee_id is None or local_date_raw is None:
+        return None
+    if new_check_in is None and new_check_out is not None:
         return None
 
     employee = db.get(Employee, int(employee_id))
@@ -411,7 +415,7 @@ def apply_attendance_correction(
     *,
     employee_id: int,
     local_date: date,
-    new_check_in: datetime,
+    new_check_in: datetime | None,
     new_check_out: datetime | None,
     actor_user_uuid: str,
     correlation_id: str | None,

@@ -57,6 +57,7 @@ describe("FE-UNIT-ADJ-001 AttendanceAdjustmentPanel", () => {
     );
 
     expect(await screen.findByRole("heading", { name: /update times/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /clear both \/ mark absent/i })).toBeInTheDocument();
   });
 
   it("returns null modal when capability missing", () => {

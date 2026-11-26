@@ -37,7 +37,7 @@ function TimePartsEditor({ label, value, onChange, optional = false }: TimeParts
       <div className="flex flex-col gap-1.5 text-sm">
         <span className="text-xs font-medium text-ink-muted">{label}</span>
         <Button type="button" variant="secondary" size="sm" className="w-fit" onClick={() => onChange({ ...EMPTY_TIME })}>
-          Add check-out
+          {label.toLowerCase().includes("check-in") ? "Add check-in" : "Add check-out"}
         </Button>
       </div>
     );
@@ -122,7 +122,7 @@ export function AttendanceAdjustmentModal({
   const { user } = useAuth();
   const canAdjust = hasCapability(user, "attendance_adjust");
   const date = row?.summary_date ?? "";
-  const [checkInParts, setCheckInParts] = useState<TimeParts>(EMPTY_TIME);
+  const [checkInParts, setCheckInParts] = useState<TimeParts | null>(EMPTY_TIME);
   const [checkOutParts, setCheckOutParts] = useState<TimeParts | null>(null);
   const [preview, setPreview] = useState<AttendanceDayPreview | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -138,7 +138,7 @@ export function AttendanceAdjustmentModal({
     try {
       const data = await fetchAttendanceDayPreview(employeeId, date);
       setPreview(data);
-      setCheckInParts(isoToTimeParts(data.current_check_in) ?? { hour: 9, minute: 0, second: 0 });
+      setCheckInParts(isoToTimeParts(data.current_check_in));
       setCheckOutParts(isoToTimeParts(data.current_check_out));
     } catch (e: unknown) {
       setError(getApiErrorMessage(e) || "Failed to load day preview");
@@ -185,11 +185,15 @@ export function AttendanceAdjustmentModal({
 
   const apply = async () => {
     if (!date) return;
+    if (!checkInParts && checkOutParts) {
+      setError("Check-out requires check-in. Clear both times to mark absent.");
+      return;
+    }
     setApplying(true);
     setError(null);
     setSuccess(null);
     try {
-      const newCheckIn = zonedWallClockToISO(date, checkInParts);
+      const newCheckIn = checkInParts ? zonedWallClockToISO(date, checkInParts) : null;
       const newCheckOut = checkOutParts ? zonedWallClockToISO(date, checkOutParts) : null;
       const result = await applyAttendanceAdjustment({
         employee_id: employeeId,
@@ -206,7 +210,7 @@ export function AttendanceAdjustmentModal({
         setSuccess("Save in progress.");
         return;
       }
-      setSuccess("Saved.");
+      setSuccess(newCheckIn ? "Saved." : "Marked absent.");
       onApplied();
       await loadPreview();
     } catch (e: unknown) {
@@ -216,9 +220,18 @@ export function AttendanceAdjustmentModal({
     }
   };
 
-  const previewCheckIn = date ? fmtDisplayDateTime(zonedWallClockToISO(date, checkInParts)) : "—";
+  const markAbsent = () => {
+    setCheckInParts(null);
+    setCheckOutParts(null);
+    setError(null);
+    setSuccess(null);
+  };
+
+  const previewCheckIn =
+    date && checkInParts ? fmtDisplayDateTime(zonedWallClockToISO(date, checkInParts)) : "—";
   const previewCheckOut =
     date && checkOutParts ? fmtDisplayDateTime(zonedWallClockToISO(date, checkOutParts)) : "—";
+  const markingAbsent = !checkInParts && !checkOutParts;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -226,7 +239,7 @@ export function AttendanceAdjustmentModal({
         <DialogHeader>
           <DialogTitle>Update times — {date ? fmtDisplayDate(date) : ""}</DialogTitle>
           <DialogDescription>
-            Set check-in and check-out to the exact second. Times apply to this calendar day only.
+            Set check-in and check-out to the exact second, or clear both to mark this day absent.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-4">
@@ -243,7 +256,9 @@ export function AttendanceAdjustmentModal({
                   </p>
                   <p className="mt-3 font-medium text-ink">After update</p>
                   <p className="mt-1 text-ink-muted">
-                    In: {previewCheckIn} · Out: {previewCheckOut}
+                    {markingAbsent
+                      ? "Absent — no check-in or check-out"
+                      : `In: ${previewCheckIn} · Out: ${previewCheckOut}`}
                   </p>
                 </div>
               ) : null}
@@ -252,9 +267,10 @@ export function AttendanceAdjustmentModal({
                   label="Check-in time"
                   value={checkInParts}
                   onChange={(next) => {
-                    // Only optional editors emit null (via Clear); check-in is required.
-                    if (next) setCheckInParts(next);
+                    setCheckInParts(next);
+                    if (!next) setCheckOutParts(null);
                   }}
+                  optional
                 />
                 <TimePartsEditor
                   label="Check-out time"
@@ -263,6 +279,16 @@ export function AttendanceAdjustmentModal({
                   optional
                 />
               </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-fit"
+                onClick={markAbsent}
+                disabled={applying || loadingPreview || markingAbsent}
+              >
+                Clear both / mark absent
+              </Button>
             </>
           )}
           {error ? <p className="text-sm text-status-absent">{error}</p> : null}
@@ -279,7 +305,7 @@ export function AttendanceAdjustmentModal({
             {loadingPreview ? "Refreshing…" : "Refresh preview"}
           </Button>
           <Button type="button" onClick={() => void apply()} disabled={applying || loadingPreview}>
-            {applying ? "Applying…" : "Apply"}
+            {applying ? "Applying…" : markingAbsent ? "Mark absent" : "Apply"}
           </Button>
         </DialogFooter>
       </DialogContent>

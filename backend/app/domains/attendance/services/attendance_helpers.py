@@ -368,12 +368,15 @@ def replace_employee_day_logs(
     *,
     employee: Employee,
     local_date: date,
-    new_check_in: datetime,
+    new_check_in: datetime | None,
     new_check_out: datetime | None,
     device_id: str,
     settings: Settings | None = None,
 ) -> None:
-    """Delete all logs for employee+day and insert the corrected IN/OUT punches."""
+    """Delete all logs for employee+day and insert corrected IN/OUT punches (or none if absent)."""
+    if new_check_in is None and new_check_out is not None:
+        raise ValueError("check_out requires check_in. Clear both times to mark absent.")
+
     settings = settings or get_settings()
     start_utc, end_utc = day_bounds_utc(local_date, settings.resolved_timezone())
     employee_code = str(employee.device_user_id)
@@ -390,6 +393,9 @@ def replace_employee_day_logs(
     for row in existing:
         db.delete(row)
     db.flush()
+
+    if new_check_in is None:
+        return
 
     mapping = resolve_mapping_for_punch(
         db,

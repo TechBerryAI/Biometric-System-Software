@@ -541,8 +541,8 @@ def _execute_correct_attendance_command(
     new_out_raw = payload.get("new_check_out")
     new_check_in = _parse_iso_datetime(new_in_raw) if new_in_raw else None
     new_check_out = _parse_iso_datetime(new_out_raw) if new_out_raw else None
-    if new_check_in is None:
-        raise ValueError("new_check_in is required.")
+    if new_check_in is None and new_check_out is not None:
+        raise ValueError("new_check_out requires new_check_in. Clear both times to mark absent.")
     result = device_service.correct_attendance(
         user_id=str(payload["user_id"]),
         uid=payload.get("uid"),

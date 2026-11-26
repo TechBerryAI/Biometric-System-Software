@@ -100,7 +100,7 @@ export async function fetchAttendanceDayPreview(employeeId: number, date: string
 export async function applyAttendanceAdjustment(payload: {
   employee_id: number;
   local_date: string;
-  new_check_in: string;
+  new_check_in?: string | null;
   new_check_out?: string | null;
 }): Promise<AttendanceAdjustmentRead> {
   const { data, status } = await api.post<AttendanceAdjustmentRead>("/attendance/adjust/correct", payload, {

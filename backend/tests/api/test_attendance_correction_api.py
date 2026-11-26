@@ -149,6 +149,48 @@ def test_correct_endpoint(
     assert body["device_updated"] is True
 
 
+@pytest.mark.testid("BE-API-ADJ-004")
+def test_correct_endpoint_mark_absent(
+    client: TestClient, operator_headers: dict[str, str], adjust_employee
+) -> None:
+    emp, day = adjust_employee
+    fake_result = AttendanceAdjustmentResult(
+        employee_id=emp.id,
+        local_date=day,
+        previous_check_in=datetime(day.year, day.month, day.day, 9, 0, tzinfo=UTC),
+        previous_check_out=datetime(day.year, day.month, day.day, 17, 0, tzinfo=UTC),
+        new_check_in=None,
+        new_check_out=None,
+        status=CORRECTION_STATUS_APPLIED,
+        device_updated=False,
+        device_command_uuid="cmd-absent-uuid",
+        device_tier="C",
+        error_message=None,
+        applied_at=datetime.now(UTC),
+    )
+    with patch(
+        "app.domains.attendance.correction_router.apply_attendance_correction",
+        return_value=fake_result,
+    ) as apply_mock:
+        response = client.post(
+            "/attendance/adjust/correct",
+            headers=operator_headers,
+            json={
+                "employee_id": emp.id,
+                "local_date": day.isoformat(),
+                "new_check_in": None,
+                "new_check_out": None,
+            },
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == CORRECTION_STATUS_APPLIED
+    assert body["new_check_in"] is None
+    assert body["new_check_out"] is None
+    assert apply_mock.call_args.kwargs["new_check_in"] is None
+    assert apply_mock.call_args.kwargs["new_check_out"] is None
+
+
 @pytest.mark.testid("BE-API-ADJ-005")
 def test_correct_forbidden_for_non_operator(
     client: TestClient, hr_headers: dict[str, str], adjust_employee
